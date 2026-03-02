@@ -1,0 +1,88 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# Environment variables
+.env
+.env.*
+derad_agent/llm/.env
+.venv
+env/
+venv/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+.coverage
+htmlcov/
+
+# Temporary files
+*.tmp
+*.temp
+
+# derad-agent runtime artifacts (keep placeholders)
+data/*
+!data/.gitkeep
+!data/manifest.json
+!data/checksums.sha256
+!data/samples/
+!data/samples/.gitkeep
+!data/samples/*.tsv
+!data/history/
+!data/history/.gitkeep
+!data/legacy_json/
+!data/legacy_json/.gitkeep
+data/notes-*.tsv
+indexes/*
+# Explicitly ignore moved local subset indexes
+indexes/indexes_1pct/
+!indexes/.gitkeep
+!indexes/README.md
+results/*
+!results/.gitkeep
+logs/*
+!logs/.gitkeep
+!logs/api_usage/
+!logs/api_usage/.gitkeep
+test_data/
+
+# Legacy
+evaluations/*/
