@@ -28,41 +28,40 @@ Output format:
 }}"""
 
 
-LANDSCAPE_OUTPUT_TEMPLATE = """You are generating the final output for a statement-focused Community Notes retrieval pipeline.
-Use ONLY the provided evidence.
+RESPONSE_OUTPUT_TEMPLATE = """You are responding to a claim. Below are independent pieces of evidence: real statements written by people about tweets related to this claim. Read them, weigh the evidence they present, and form your own response.
 
-STATEMENT:
+CLAIM:
 {statement}
 
-LANDSCAPE_STATS_JSON (distribution, frequencies, quantiles, cluster stats):
-{landscape_stats_json}
+EVIDENCE_NOTES_JSON:
+{evidence_notes_json}
 
-SPECTRUM_REPRESENTATIVE_NOTES_JSON (up to 20 notes spanning misleading, mixed, and not-misleading regions):
-{top_points_json}
+Each note has a "note" field (the text), a "note_id", a "tweet_id", and optional "evidence_links".
+
+Based on what these notes say, write a direct response to the claim and list the key reasons supporting your response.
 
 Produce JSON only with this exact schema:
 {{
-  "landscape_summary": "<4-6 sentence plain-language overview of what the retrieved landscape looks like around the statement>",
-  "key_reasons": [
+  "response": "<direct 3-5 sentence response to the claim, written as if explaining to a friend>",
+  "reasons": [
     {{
-      "reason": "<concise reason grounded in retrieved notes>",
-      "bucket": "misleading|not_misleading|mixed_unclear",
-      "note_id": "<note id from TOP_RETRIEVED_NOTES_JSON>",
-      "tweet_id": "<tweet id from TOP_RETRIEVED_NOTES_JSON>",
-      "evidence_links": ["<optional source URL 1>", "<optional source URL 2>"]
+      "reason": "<concise reason drawn from a specific note>",
+      "note_id": "<note_id from EVIDENCE_NOTES_JSON>",
+      "tweet_id": "<tweet_id from EVIDENCE_NOTES_JSON>",
+      "evidence_links": ["<source URL from the note, if available>"]
     }}
   ]
 }}
 
 Rules:
-- Ground every reason in SPECTRUM_REPRESENTATIVE_NOTES_JSON.
-- Do not invent note_id or tweet_id values.
-- Return 3-5 key reasons.
-- Keep language neutral and evidence-driven.
-- If evidence is sparse, explicitly say that in landscape_summary.
-- Use LANDSCAPE_STATS_JSON to describe dominant patterns (frequency/distribution), not just individual notes.
-- Include evidence_links when source URLs are present in SPECTRUM_REPRESENTATIVE_NOTES_JSON.
-- If there are no representative notes, return `"key_reasons": []`.
+- Read the actual content of each note and reason over what it says. Do NOT rely on any metadata or labels — only the note text matters.
+- Respond directly to the claim. Do NOT describe the dataset, the retrieval process, or the distribution of notes.
+- Do NOT cite percentages, counts, ratios, or any statistical language.
+- Ground every reason in a specific note. Do not invent note_id or tweet_id values.
+- Return 3-5 reasons.
+- Include evidence_links only when source URLs appear in the note.
+- If the evidence is mixed or unclear, say so plainly without citing numbers.
+- If there are no evidence notes, return an empty reasons list and say the evidence is insufficient.
 """
 
 
@@ -71,17 +70,17 @@ def get_planner_prompt():
     return PromptTemplate(input_variables=["statement"], template=PLANNER_TEMPLATE)
 
 
-def get_landscape_output_prompt():
-    """Get the final landscape output prompt template."""
+def get_response_output_prompt():
+    """Get the claim-response output prompt template."""
     return PromptTemplate(
-        input_variables=["statement", "landscape_stats_json", "top_points_json"],
-        template=LANDSCAPE_OUTPUT_TEMPLATE,
+        input_variables=["statement", "evidence_notes_json"],
+        template=RESPONSE_OUTPUT_TEMPLATE,
     )
 
 
 __all__ = [
     "PLANNER_TEMPLATE",
     "get_planner_prompt",
-    "LANDSCAPE_OUTPUT_TEMPLATE",
-    "get_landscape_output_prompt",
+    "RESPONSE_OUTPUT_TEMPLATE",
+    "get_response_output_prompt",
 ]

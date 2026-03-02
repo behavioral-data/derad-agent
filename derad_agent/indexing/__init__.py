@@ -1,4 +1,4 @@
-"""Indexing exports for landscape runtime."""
+"""FAISS index construction from Community Notes TSV data: reading, chunking, embedding, and persistence."""
 
 from .index_builder import (
     build_global_index,

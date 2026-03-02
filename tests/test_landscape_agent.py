@@ -45,8 +45,8 @@ def test_run_landscape_agent_single_pass_schema_is_stable(monkeypatch, tmp_path)
         "derad_agent.runtime.landscape_agent.step_4_build_landscape_output",
         lambda **kwargs: {
             "statement": kwargs["statement"],
-            "landscape_summary": "Synthetic summary for tests.",
-            "key_reasons": [],
+            "response": "Synthetic response for tests.",
+            "reasons": [],
         },
     )
 
@@ -57,8 +57,8 @@ def test_run_landscape_agent_single_pass_schema_is_stable(monkeypatch, tmp_path)
     assert first["queries"] == ["query-1"]
     assert "misleadingness_landscape" in first
     assert "statement_landscape" in first
-    assert "landscape_summary" in first["statement_landscape"]
-    assert "key_reasons" in first["statement_landscape"]
+    assert "response" in first["statement_landscape"]
+    assert "reasons" in first["statement_landscape"]
     assert "points" in first["misleadingness_landscape"]
     assert first["misleadingness_landscape"] == second["misleadingness_landscape"]
 
@@ -80,7 +80,7 @@ def test_retrieve_statement_landscape_uses_global_index_dir(monkeypatch, tmp_pat
             "iterations": [],
             "documents": [],
             "bucket_landscape": {},
-            "statement_landscape": {"landscape_summary": "", "key_reasons": []},
+            "statement_landscape": {"response": "", "reasons": []},
         },
     )
 

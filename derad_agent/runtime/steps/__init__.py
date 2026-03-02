@@ -1,4 +1,4 @@
-"""Spectrum runtime steps: planning, retrieval, augmentation, and output synthesis."""
+"""Pipeline steps: query planning, document retrieval, tweet-cluster augmentation, and landscape output synthesis."""
 
 from .planning import (  # noqa: F401
     step_1_generate_queries,

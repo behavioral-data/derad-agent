@@ -1,3 +1,10 @@
+"""Convert normalized Community Notes records into embeddable text chunks.
+
+Each record produces a single chunk containing structured XML-tagged
+fields (tweet ID, note ID, classification, summary) paired with
+metadata suitable for FAISS indexing.
+"""
+
 from __future__ import annotations
 
 from typing import Any, Dict, Generator, Optional, Tuple
@@ -6,6 +13,7 @@ from derad_agent.shared.validation import validate_timestamp as _normalize_times
 
 
 def _note_text(record: Dict[str, Any]) -> str:
+    """Build the embeddable text representation for a single Community Notes record."""
     lines = [
         f"<TWEET_ID> {record.get('tweet_id', 'unknown')} </TWEET_ID>",
         f"<NOTE_ID> {record.get('note_id', 'unknown')} </NOTE_ID>",
@@ -20,6 +28,7 @@ def _note_text(record: Dict[str, Any]) -> str:
 
 
 def _note_meta(record: Dict[str, Any], source_label: str) -> Dict[str, Any]:
+    """Extract FAISS-stored metadata fields from a normalized note record."""
     tweet_id = record.get("tweet_id")
     note_id = record.get("note_id")
     return {

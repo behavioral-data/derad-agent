@@ -1,3 +1,11 @@
+"""Semantic retrieval with tweet-cluster expansion.
+
+Given a search query and a FAISS vector store, retrieves the top-k
+semantically similar seed notes, then expands each seed's tweet cluster
+to capture the full conversation context.  Results are deduplicated,
+similarity-thresholded, and annotated with retrieval metadata.
+"""
+
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from langchain_community.vectorstores.faiss import FAISS
@@ -61,14 +69,28 @@ def retrieve_with_expansion(
     include_classifications: Optional[List[str]] = None,
     similarity_min: float = 0.0,
 ) -> List:
-    """
-    Retrieve documents with expansion, optionally filtering by creation time
-    and excluding specific posts.
+    """Retrieve seed notes via semantic search and expand each tweet cluster.
+
+    Embeds *query*, finds the top-*k_semantic* seed notes in *vdb*,
+    applies similarity thresholding and metadata filters, then pulls in
+    all remaining notes from each seed's tweet cluster (up to
+    *max_per_thread* per cluster).  Results are deduplicated, preferring
+    the copy with the highest retrieval similarity.
 
     Args:
-        filter_before_utc: If provided, only include documents created before this timestamp.
-        exclude_tweet_id: Optional exclusion for a single tweet_id.
-        exclude_tweet_ids: Optional exclusion list for tweet_id values.
+        query: Natural-language search query.
+        vdb: Loaded FAISS vector store.
+        emb: Embedding model used to vectorise the query.
+        k_semantic: Number of seed notes to retrieve per query.
+        max_per_thread: Maximum notes to keep per tweet cluster.
+        filter_before_utc: Only include notes created before this UTC timestamp.
+        exclude_tweet_id: Single tweet ID to exclude.
+        exclude_tweet_ids: List of tweet IDs to exclude.
+        include_classifications: Restrict to these classification labels.
+        similarity_min: Minimum similarity score for seed notes.
+
+    Returns:
+        Deduplicated list of documents with retrieval metadata attached.
     """
     exclusions = build_exclusion_set(exclude_tweet_id, exclude_tweet_ids)
 

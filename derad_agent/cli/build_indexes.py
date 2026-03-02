@@ -1,4 +1,14 @@
 #!/usr/bin/env python
+"""CLI for building FAISS indexes from Community Notes TSV data.
+
+Supports building a single global index over all notes, a per-tweet
+index for a specific tweet ID, or batch per-tweet indexes from a list
+file.
+
+Usage::
+
+    python -m derad_agent.cli.build_indexes --global-index --tsv-root /path/to/notes
+"""
 from __future__ import annotations
 
 import argparse
@@ -20,6 +30,7 @@ except ImportError:
 
 
 def _load_tweet_list(path: pathlib.Path) -> list[str]:
+    """Read tweet IDs from a JSONL or newline-separated text file."""
     tweet_ids: set[str] = set()
     with path.open("r", encoding="utf-8") as f:
         for raw_line in f:

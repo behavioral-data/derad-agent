@@ -1,4 +1,15 @@
 #!/usr/bin/env python
+"""CLI for downloading onboarding artifacts and validating tracked sample data.
+
+Downloads a prebuilt FAISS index and the full Community Notes TSV dataset
+from Google Drive, then optionally validates sample fixture checksums
+against ``data/manifest.json``.
+
+Usage::
+
+    python -m derad_agent.cli.onboard_data          # download everything
+    python -m derad_agent.cli.onboard_data --data-check-only  # validate only
+"""
 from __future__ import annotations
 
 import argparse
@@ -140,12 +151,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Download onboarding artifacts and validate tracked sample data."
     )
-    parser.add_argument("--index-folder-url", default=INDEX_FOLDER_URL_DEFAULT)
-    parser.add_argument("--notes-zip-url", default=NOTES_ZIP_URL_DEFAULT)
-    parser.add_argument("--index-root", type=pathlib.Path, default=root / "indexes")
-    parser.add_argument("--notes-root", type=pathlib.Path, default=root / "data" / "full")
-    parser.add_argument("--skip-index", action="store_true")
-    parser.add_argument("--skip-notes", action="store_true")
+    parser.add_argument("--index-folder-url", default=INDEX_FOLDER_URL_DEFAULT,
+                        help="Google Drive URL for the prebuilt FAISS index folder.")
+    parser.add_argument("--notes-zip-url", default=NOTES_ZIP_URL_DEFAULT,
+                        help="Google Drive URL for the full notes TSV zip archive.")
+    parser.add_argument("--index-root", type=pathlib.Path, default=root / "indexes",
+                        help="Local directory to store the downloaded FAISS index.")
+    parser.add_argument("--notes-root", type=pathlib.Path, default=root / "data" / "full",
+                        help="Local directory to extract the notes TSV files into.")
+    parser.add_argument("--skip-index", action="store_true",
+                        help="Skip downloading the FAISS index.")
+    parser.add_argument("--skip-notes", action="store_true",
+                        help="Skip downloading the notes TSV zip.")
     parser.add_argument("--skip-data-check", action="store_true", help="Skip sample fixture checksum validation.")
     parser.add_argument(
         "--write-checksums",

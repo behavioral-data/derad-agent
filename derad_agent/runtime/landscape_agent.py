@@ -69,7 +69,28 @@ def run_landscape_agent(
     verbose: bool = False,
     logger: Optional[Any] = None,
 ) -> Dict[str, Any]:
-    """Run statement landscape retrieval/scoring in a single pass."""
+    """Run the single-pass landscape retrieval and scoring pipeline.
+
+    Orchestrates query planning, semantic retrieval, tweet-cluster
+    expansion, deduplication, misleadingness scoring, and LLM-based
+    landscape output synthesis.
+
+    Args:
+        statement: The claim or statement to analyse.
+        user_dir: Path to the FAISS index directory (parent of ``faiss_idx/``).
+        filter_docs_before_utc: Only include notes created before this timestamp.
+        exclude_tweet_id: Exclude notes from this tweet.
+        include_classifications: Restrict to these classification labels.
+        similarity_min: Minimum cosine similarity for seed notes.
+        max_points: Cap on the number of landscape points returned.
+        verbose: Enable detailed logging.
+        logger: Optional custom logger (defaults to ``RuntimeLogger``).
+
+    Returns:
+        Dictionary with ``statement``, ``queries``, ``iterations``,
+        ``documents``, ``misleadingness_landscape``, ``bucket_landscape``,
+        and ``statement_landscape``.
+    """
     if logger is None:
         logger = RuntimeLogger(verbose=verbose)
 
@@ -114,7 +135,6 @@ def run_landscape_agent(
     statement_landscape = step_4_build_landscape_output(
         statement=statement,
         misleadingness_landscape=misleadingness_landscape,
-        bucket_landscape=bucket_landscape,
     )
 
     return {

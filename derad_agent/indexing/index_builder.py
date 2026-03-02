@@ -32,11 +32,13 @@ def _sanitize_dir_name(value: str) -> str:
 
 
 def get_global_index_dir(index_root: Optional[pathlib.Path] = None) -> pathlib.Path:
+    """Return the directory path for the global Community Notes FAISS index."""
     index_root = index_root or INDEX_ROOT
     return index_root / GLOBAL_INDEX_DIR_NAME
 
 
 def get_index_dir_for_tweet(tweet_id: str, index_root: Optional[pathlib.Path] = None) -> pathlib.Path:
+    """Return the directory path for a per-tweet FAISS index."""
     index_root = index_root or INDEX_ROOT
     return index_root / f"tweet_{_sanitize_dir_name(tweet_id)}"
 
@@ -217,6 +219,7 @@ def build_tweet_index(
     per_batch_sleep_seconds: Optional[float] = None,
     **_: Any,
 ) -> None:
+    """Build a FAISS index containing only notes for a single *tweet_id*."""
     paths = _resolve_tsv_paths(tsv_root=tsv_root, tsv_files=tsv_files)
     total_expected_chunks = None
     out_dir = get_index_dir_for_tweet(tweet_id, index_root=index_root) / INDEX_NAME
@@ -243,6 +246,7 @@ def build_global_index(
     embedding_batch_size: Optional[int] = None,
     per_batch_sleep_seconds: Optional[float] = None,
 ) -> None:
+    """Build the global FAISS index over all Community Notes in the TSV source."""
     paths = _resolve_tsv_paths(tsv_root=tsv_root, tsv_files=tsv_files)
     total_expected_chunks = _estimate_record_count(paths)
     print(
@@ -269,6 +273,7 @@ def list_available_tweets(
     tsv_root: Optional[pathlib.Path] = None,
     tsv_files: Optional[Sequence[pathlib.Path]] = None,
 ) -> List[str]:
+    """Return a sorted list of all unique tweet IDs present in the TSV source."""
     paths = _resolve_tsv_paths(tsv_root=tsv_root, tsv_files=tsv_files)
     return list_tweet_ids(paths)
 

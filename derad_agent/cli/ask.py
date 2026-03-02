@@ -1,4 +1,14 @@
 #!/usr/bin/env python
+"""CLI for querying the Community Notes landscape around a statement.
+
+Loads a prebuilt FAISS index, runs the single-pass retrieval and
+misleadingness scoring pipeline, and prints a Rich-formatted landscape
+panel.  Full structured output is saved to ``results/ask_runs/``.
+
+Usage::
+
+    python -m derad_agent.cli.ask --statement "Mail-in voting increases fraud."
+"""
 import argparse
 import json
 import pathlib
@@ -63,6 +73,7 @@ def _save_full_output(
     duration_seconds: float,
     result_payload: dict,
 ) -> pathlib.Path:
+    """Persist the complete pipeline result as a timestamped JSON file."""
     out_dir = pathlib.Path("results") / "ask_runs"
     out_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -97,8 +108,10 @@ def main():
                     help=f"Root directory for user indexes (default: {INDEX_ROOT})")
     
     # Filtering options
-    ap.add_argument("--filter-before-utc", type=float)
-    ap.add_argument("--exclude-tweet-id", type=str)
+    ap.add_argument("--filter-before-utc", type=float,
+                    help="Only include notes created before this UTC timestamp (seconds since epoch).")
+    ap.add_argument("--exclude-tweet-id", type=str,
+                    help="Exclude all notes associated with this tweet ID.")
     ap.add_argument("--similarity-min", type=float, default=0.0,
                     help="Minimum retrieval similarity required for seed notes before thread expansion")
     ap.add_argument("--max-points", type=int, default=300,
@@ -153,8 +166,8 @@ def main():
     
     output_file = _save_full_output(args.statement, args, duration, res)
     landscape = res.get("statement_landscape") or {}
-    summary_text = (landscape.get("landscape_summary") or "").strip()
-    reasons = landscape.get("key_reasons") or []
+    response_text = (landscape.get("response") or "").strip()
+    reasons = landscape.get("reasons") or []
     if reasons:
         reason_lines = []
         for idx, reason in enumerate(reasons, start=1):
@@ -167,12 +180,12 @@ def main():
                         if isinstance(link, str) and link.strip():
                             reason_lines.append(f"   - source: {link.strip()}")
         if reason_lines:
-            summary_text = f"{summary_text}\n\nKey reasons:\n" + "\n".join(reason_lines)
+            response_text = f"{response_text}\n\nReasons:\n" + "\n".join(reason_lines)
 
-    if summary_text:
-        console.print(Panel(summary_text, title="Statement Landscape", border_style="yellow"))
+    if response_text:
+        console.print(Panel(response_text, title="Response", border_style="yellow"))
     else:
-        console.print(Panel("No landscape answer generated.", title="Statement Landscape", border_style="yellow"))
+        console.print(Panel("No response generated.", title="Response", border_style="yellow"))
 
     console.print(f"[dim]Full run output saved to: {output_file}[/dim]")
 

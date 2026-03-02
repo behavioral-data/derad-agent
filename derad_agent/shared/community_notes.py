@@ -10,6 +10,7 @@ from .validation import validate_timestamp
 
 
 def normalize_note_id(value: Any) -> Optional[str]:
+    """Return a stripped string ID, or ``None`` if *value* is empty/None."""
     if value is None:
         return None
     token = str(value).strip()
@@ -20,6 +21,7 @@ def build_exclusion_set(
     exclude_tweet_id: Optional[str] = None,
     exclude_tweet_ids: Optional[List[str]] = None,
 ) -> Set[str]:
+    """Merge single and list tweet-ID exclusions into a normalized set."""
     exclusions: Set[str] = set()
     if exclude_tweet_id:
         norm = normalize_note_id(exclude_tweet_id)
@@ -34,6 +36,7 @@ def build_exclusion_set(
 
 
 def passes_time_filter(metadata: Dict[str, Any], filter_before_utc: Optional[float]) -> bool:
+    """Return ``True`` if the document was created before *filter_before_utc* (or if no filter is set)."""
     if filter_before_utc is None:
         return True
     created_utc = validate_timestamp(metadata.get("created_utc"))
@@ -43,6 +46,7 @@ def passes_time_filter(metadata: Dict[str, Any], filter_before_utc: Optional[flo
 
 
 def passes_tweet_filter(metadata: Dict[str, Any], exclusions: Set[str]) -> bool:
+    """Return ``True`` if the document's tweet ID is not in *exclusions*."""
     if not exclusions:
         return True
     tweet_id = normalize_note_id(metadata.get("tweet_id"))
@@ -53,6 +57,7 @@ def passes_classification_filter(
     metadata: Dict[str, Any],
     include_classifications: Optional[Iterable[str]] = None,
 ) -> bool:
+    """Return ``True`` if the document's classification is in the allowed set (or if no filter is set)."""
     if not include_classifications:
         return True
     allowed = {str(v).strip().upper() for v in include_classifications if str(v).strip()}
@@ -68,6 +73,7 @@ def combined_doc_filter(
     exclusions: Optional[Set[str]] = None,
     include_classifications: Optional[Iterable[str]] = None,
 ) -> bool:
+    """Apply all document filters (time, tweet exclusion, classification) in a single pass."""
     return (
         passes_time_filter(metadata, filter_before_utc)
         and passes_tweet_filter(metadata, exclusions or set())

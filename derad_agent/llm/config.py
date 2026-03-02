@@ -1,7 +1,8 @@
-"""
-Centralised config — Azure-aware.
-Loads credentials from .env and exposes helpers:
-    get_embedder()  -> AzureOpenAIEmbeddings
+"""Centralised Azure OpenAI configuration.
+
+Loads credentials from ``derad_agent/llm/.env`` and exposes factory
+helpers for embedding and chat models, plus path constants for
+index and TSV data locations.
 """
 from pathlib import Path
 import os
@@ -78,6 +79,7 @@ def _require_env(var: str) -> str:
 
 
 def get_embedder():
+    """Create an Azure OpenAI embedding model wrapped in :class:`TrackedEmbedder`."""
     deployment = _require_env("AZURE_OPENAI_DEPLOYMENT_EMBED")
     endpoint = _require_env("AZURE_OPENAI_ENDPOINT")
     key = _require_env("AZURE_OPENAI_API_KEY")

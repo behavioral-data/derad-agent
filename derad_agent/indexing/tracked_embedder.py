@@ -1,11 +1,14 @@
-"""
-Tracked Embedder - Wraps the real embedder to track all actual API calls.
-"""
+"""LangChain-compatible embedder wrapper that delegates to the real Azure OpenAI embedder."""
 from typing import List
 from langchain_core.embeddings import Embeddings
 
 class TrackedEmbedder(Embeddings):
-    """Wrapper around the real embedder for API compatibility."""
+    """LangChain ``Embeddings`` wrapper that delegates all calls to an underlying Azure OpenAI embedder.
+
+    Provides a consistent interface for FAISS and other LangChain consumers
+    while allowing attribute forwarding and model-name resolution for both
+    Azure and standard OpenAI backends.
+    """
     
     def __init__(self, real_embedder):
         self.real_embedder = real_embedder

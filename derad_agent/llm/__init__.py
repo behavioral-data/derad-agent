@@ -1,4 +1,4 @@
-"""LLM configuration exports."""
+"""Azure OpenAI model configuration, embedding helpers, and path constants."""
 
 from .config import get_embedder, get_llm, INDEX_NAME, INDEX_ROOT, NOTES_TSV_ROOT
 

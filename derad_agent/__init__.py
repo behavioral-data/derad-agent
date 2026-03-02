@@ -1,4 +1,4 @@
-"""Landscape-first Community Notes retrieval package."""
+"""derad-agent: retrieve Community Notes at scale and respond to any claim with evidence-backed reasoning."""
 
 __version__ = "2.0.0"
 

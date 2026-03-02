@@ -35,6 +35,11 @@ def _extract_label_flags(row: Dict[str, Any]) -> Dict[str, int]:
 
 
 def normalize_note_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Normalize a raw Community Notes TSV row into a canonical record.
+
+    Returns ``None`` if the row is missing required fields (tweet ID,
+    note ID, or summary text).
+    """
     tweet_id = _clean_text(row.get("tweetId"))
     note_id = _clean_text(row.get("noteId"))
     summary = _clean_text(row.get("summary"))
@@ -59,6 +64,7 @@ def normalize_note_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 
 def iter_notes_tsv_rows(tsv_path: Path) -> Generator[Dict[str, Any], None, None]:
+    """Yield normalized note records from a single Community Notes TSV file."""
     with tsv_path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle, delimiter="\t")
         for row in reader:
@@ -68,11 +74,13 @@ def iter_notes_tsv_rows(tsv_path: Path) -> Generator[Dict[str, Any], None, None]
 
 
 def iter_notes_from_paths(tsv_paths: Iterable[Path]) -> Generator[Dict[str, Any], None, None]:
+    """Yield normalized note records from multiple TSV files in order."""
     for tsv_path in tsv_paths:
         yield from iter_notes_tsv_rows(tsv_path)
 
 
 def list_tweet_ids(tsv_paths: Iterable[Path]) -> List[str]:
+    """Return a sorted list of unique tweet IDs found across *tsv_paths*."""
     tweet_ids: Set[str] = set()
     for record in iter_notes_from_paths(tsv_paths):
         tweet_id = record.get("tweet_id")

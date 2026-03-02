@@ -26,7 +26,7 @@ setup(
     include_package_data=True,
     python_requires=">=3.9",
     author="Advait MB",
-    description="Single-pass Community Notes retrieval and misleadingness landscape scoring.",
+    description="Retrieve Community Notes at scale and respond to any claim with evidence-backed reasoning.",
     long_description=(ROOT / "README.md").read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",
     classifiers=[

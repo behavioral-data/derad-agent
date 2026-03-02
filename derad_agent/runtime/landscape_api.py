@@ -20,7 +20,11 @@ def build_landscape_index(
     embedding_batch_size: Optional[int] = None,
     per_batch_sleep_seconds: Optional[float] = None,
 ) -> None:
-    """Build the global FAISS index used by landscape retrieval."""
+    """Build the global FAISS index used by landscape retrieval.
+
+    Reads Community Notes TSV data from *tsv_root* (or explicit *tsv_files*),
+    embeds each record, and persists the FAISS index under *index_root*.
+    """
     build_global_index(
         tsv_root=tsv_root or NOTES_TSV_ROOT,
         tsv_files=tsv_files,
@@ -44,7 +48,17 @@ def retrieve_statement_landscape(
     verbose: bool = False,
     logger: Optional[Any] = None,
 ) -> Dict[str, Any]:
-    """Return the full statement-level landscape analysis payload."""
+    """Run the full landscape pipeline for *statement* and return the result.
+
+    Loads the global FAISS index, generates search queries, retrieves and
+    expands relevant notes, scores misleadingness, and synthesises a
+    landscape summary with key reasons.
+
+    Returns:
+        Dictionary with keys ``statement``, ``queries``, ``documents``,
+        ``misleadingness_landscape``, ``bucket_landscape``, and
+        ``statement_landscape``.
+    """
     from derad_agent.indexing.index_builder import get_global_index_dir
 
     return run_landscape_agent(

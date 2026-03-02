@@ -1,4 +1,4 @@
-"""Shared exports used by landscape runtime."""
+"""Shared utilities: validation, text processing, logging, Community Notes helpers, and pipeline constants."""
 
 from .logging import RuntimeLogger
 from .text import extract_content_between_tags, sanitize_query, parse_queries_from_text, truncate_text, format_timestamp
