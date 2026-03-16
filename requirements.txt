@@ -5,3 +5,5 @@ openai>=1.27.0
 faiss-cpu>=1.7.4
 python-dotenv>=1.0.0
 rich>=13.0.0        # for CLI UI
+numpy>=1.24
+scipy>=1.11
