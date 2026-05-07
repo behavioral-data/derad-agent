@@ -68,6 +68,7 @@ def run_landscape_agent(
     max_points: int = 300,
     verbose: bool = False,
     logger: Optional[Any] = None,
+    style: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run the single-pass landscape retrieval and scoring pipeline.
 
@@ -135,6 +136,7 @@ def run_landscape_agent(
     statement_landscape = step_4_build_landscape_output(
         statement=statement,
         misleadingness_landscape=misleadingness_landscape,
+        style=style,
     )
 
     return {

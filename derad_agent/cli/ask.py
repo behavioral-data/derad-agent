@@ -87,6 +87,7 @@ def _save_full_output(
             "max_points": args.max_points,
             "filter_before_utc": args.filter_before_utc,
             "exclude_tweet_id": args.exclude_tweet_id,
+            "style": args.style,
             "verbose": args.verbose,
         },
         "duration_seconds": round(duration_seconds, 3),
@@ -117,6 +118,14 @@ def main():
     ap.add_argument("--max-points", type=int, default=300,
                     help="Maximum number of 1D points to return")
     
+    # Style options
+    ap.add_argument(
+        "--style",
+        choices=["agreeable", "neutral", "satirical"],
+        default=None,
+        help="Response style: agreeable, neutral, or satirical (default: standard)",
+    )
+
     # Output options
     ap.add_argument("--verbose", action="store_true", help="Show detailed logging")
     
@@ -136,6 +145,8 @@ def main():
         "index_root": args.index_root,
         "verbose": args.verbose,
     }
+    if args.style is not None:
+        agent_kwargs["style"] = args.style
 
     if args.filter_before_utc is not None:
         agent_kwargs["filter_docs_before_utc"] = args.filter_before_utc
@@ -145,8 +156,9 @@ def main():
     agent_kwargs["max_points"] = args.max_points
 
     # Run the landscape API with rich UI
+    style_label = f"  style: [cyan]{args.style}[/cyan]" if args.style else ""
     console.print("\n[bold]Building statement-conditioned misleadingness landscape[/bold]")
-    console.print(f"[dim]Statement: {args.statement}[/dim]\n")
+    console.print(f"[dim]Statement: {args.statement}[/dim]{style_label}\n")
 
     try:
         with create_status("[bold blue]Initializing agent...[/bold blue]") as status:

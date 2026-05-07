@@ -6,6 +6,7 @@ Shared helper functions for pipeline steps.
 - Diagnostic logging for refusals / empty outputs
 """
 
+import ast
 import re
 import json
 from typing import Any, Dict
@@ -61,4 +62,12 @@ def parse_json_response(text: str) -> Dict[str, Any]:
                 return json.loads(text[start:end + 1])
             except json.JSONDecodeError:
                 pass
+        # Last resort: handle Python-dict-style output (single quotes)
+        candidate = text[start:end + 1] if start != -1 and end != -1 else text
+        try:
+            result = ast.literal_eval(candidate)
+            if isinstance(result, dict):
+                return result
+        except Exception:
+            pass
         raise ValueError(f"Could not parse JSON from response: {text[:100]}...")

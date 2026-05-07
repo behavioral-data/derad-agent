@@ -9,7 +9,7 @@ from html import unescape
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from derad_agent.llm.config import get_llm
-from derad_agent.llm.prompts import get_response_output_prompt
+from derad_agent.llm.prompts import get_response_output_prompt, get_style_prompt
 
 from ._helpers import extract_text_from_response, parse_json_response
 
@@ -141,8 +141,9 @@ def _build_key_reasons(points: Sequence[Dict[str, Any]], max_reasons: int = 5) -
 def _llm_response_output(
     statement: str,
     candidate_reasons: Sequence[Dict[str, Any]],
+    style: Optional[str] = None,
 ) -> Dict[str, Any]:
-    prompt = get_response_output_prompt()
+    prompt = get_style_prompt(style) if style else get_response_output_prompt()
     llm = get_llm(
         temperature=None,
         max_tokens=1400,
@@ -180,9 +181,12 @@ def _llm_response_output(
             reasoning_effort="low",
             text_verbosity="low",
         )
-        repair_raw = repair_llm.invoke(repair_prompt)
-        repair_text = extract_text_from_response(repair_raw)
-        parsed = parse_json_response(repair_text)
+        try:
+            repair_raw = repair_llm.invoke(repair_prompt)
+            repair_text = extract_text_from_response(repair_raw)
+            parsed = parse_json_response(repair_text)
+        except Exception:
+            parsed = parse_json_response(text)
 
     if not isinstance(parsed, dict):
         raise ValueError("Response output LLM returned non-object JSON.")
@@ -247,12 +251,14 @@ def _merge_links(preferred_links: Any, fallback_links: Any, max_urls: int = 8) -
 def step_4_build_landscape_output(
     statement: str,
     misleadingness_landscape: Dict[str, Any],
+    style: Optional[str] = None,
 ) -> Dict[str, Any]:
     points = list(misleadingness_landscape.get("points") or [])
     candidate_reasons = _build_key_reasons(points, max_reasons=20)
     parsed = _llm_response_output(
         statement=statement,
         candidate_reasons=candidate_reasons,
+        style=style,
     )
     response_text = str(parsed.get("response") or "").strip()
     if not response_text:

@@ -43,8 +43,12 @@ def step_1_generate_queries(
 
     logger.log_debug(f"Prompt length: {len(prompt.format_prompt(**input_vars).to_string())} chars")
 
-    raw_output_obj = chain.invoke(input_vars)
-    raw_output = extract_text_from_response(raw_output_obj)
+    try:
+        raw_output_obj = chain.invoke(input_vars)
+        raw_output = extract_text_from_response(raw_output_obj)
+    except Exception as e:
+        logger.log_warning(f"Planner LLM call failed (content filter or API error): {e}")
+        return [statement], None, "<planner-error-fallback>"
 
     logger.log_debug(f"Response received: {len(raw_output)} chars")
 

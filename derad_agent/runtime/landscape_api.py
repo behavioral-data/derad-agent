@@ -47,6 +47,7 @@ def retrieve_statement_landscape(
     max_points: int = 300,
     verbose: bool = False,
     logger: Optional[Any] = None,
+    style: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run the full landscape pipeline for *statement* and return the result.
 
@@ -71,6 +72,7 @@ def retrieve_statement_landscape(
         max_points=max_points,
         verbose=verbose,
         logger=logger,
+        style=style,
     )
 
 
