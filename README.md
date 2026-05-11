@@ -5,7 +5,7 @@
 Given a claim, derad-agent plans search queries, retrieves semantically similar tweets from a pre-built notes index, selects the most recent `CURRENTLY_RATED_HELPFUL` notes, and asks an LLM to compose a grounded reply. The LLM reads note text and source links — never labels or scores — and writes a direct social media reply.
 
 ```
-claim → query planning → cosine retrieval → note selection → LLM reply
+claim → query planning → cosine retrieval → note selection → relevance filter → LLM reply
 ```
 
 ## Prerequisites
@@ -60,7 +60,7 @@ Or with explicit style and similarity threshold:
 
 ```bash
 derad-ask --statement "Vaccines cause autism." \
-  --response-style bridging \
+  --style agreeable \
   --similarity-min 0.35
 ```
 
@@ -77,15 +77,16 @@ print(result["reply"]["response"])
 
 | Style | Tone |
 |---|---|
-| `neutral` (default) | Knowledgeable person replying with facts |
-| `bridging` | Acknowledges the concern, then adds context |
-| `agonistic` | Directly challenges the claim |
+| `neutral` (default) | Impartial fact-checker; plain, measured language |
+| `agreeable` | Warm and empathetic; acknowledges the concern before presenting evidence |
+| `satirical` | Political satirist; exposes the claim's folly through irony and deadpan |
 
 ## CLI flags
 
 | Flag | Default | Description |
 |---|---|---|
-| `--response-style` | `neutral` | Reply tone |
+| `--style` | `neutral` | Reply tone: `neutral`, `agreeable`, `satirical` |
+| `--no-filter` | off | Skip LLM relevance filter (keep all retrieved notes) |
 | `--similarity-min` | `0.0` | Minimum cosine similarity for retrieved tweets |
 | `--k-per-query` | `25` | Tweets fetched per search query |
 | `--notes-per-tweet` | `10` | Max helpful notes kept per tweet |
@@ -100,7 +101,7 @@ derad_agent/
 ├── cli/          Entry points: ask.py, embed_notes.py, ui.py
 ├── llm/          Azure OpenAI config and prompt templates
 ├── runtime/      Pipeline orchestration and notes index
-│   └── steps/    Planning and output steps
+│   └── steps/    Planning, relevance filter, and output steps
 └── shared/       Validation, text utils, logging
 data/
 ├── full/         Full Community Notes TSV (local only, gitignored)
