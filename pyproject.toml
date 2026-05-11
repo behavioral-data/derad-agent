@@ -1,3 +1,26 @@
 [build-system]
 requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "derad-agent"
+version = "2.0.0"
+description = "Retrieve Community Notes at scale and respond to any claim with evidence-backed reasoning."
+authors = [{name = "Advait MB"}]
+requires-python = ">=3.9"
+readme = "README.md"
+dependencies = [
+    "langchain>=0.1.16",
+    "langchain-openai>=0.0.5",
+    "openai>=1.27.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.0.0",
+    "numpy>=1.24",
+]
+
+[project.scripts]
+derad-embed-notes = "derad_agent.cli.embed_notes:main"
+derad-ask = "derad_agent.cli.ask:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,16 @@
+- [ ] LLM relevance filter for community notes
+    - [ ] remove unrelated or random community notes
+    - [ ] Write `RELEVANCE_FILTER_TEMPLATE` prompt + `get_relevance_filter_prompt(statement, notes_json)` factory in `llm/prompts.py`
+    - [ ] Implement `step_filter_notes_by_relevance(statement, notes)` in `runtime/steps/relevance_filter.py` — call LLM with `{note_id, summary}` pairs, parse returned JSON list of IDs, filter notes; fallback to original on parse error
+    - [ ] Export new step from `runtime/steps/__init__.py`
+    - [ ] Wire filter into `run_landscape_agent` with a `filter_notes: bool = True` param in `runtime/landscape_agent.py`; log how many notes survived
+    - [ ] Unit tests in `tests/test_relevance_filter.py`: (a) LLM returns subset of IDs, (b) malformed JSON → fallback, (c) empty input → no LLM call
+    - [ ] Smoke test with `indexes_5pct/` data, print notes before/after filter
+- [ ] Find time with Tim next week
+    - [ ] Check calendar for May 11–15, identify free half-days
+    - [ ] Draft message to Tim with 2–3 specific slots (include timezone)
+    - [ ] Send message and await reply
+- [ ] When to meet for DSO meeting
+    - [ ] Identify required attendees and any known constraints
+    - [ ] Check shared availability (calendar or quick poll)
+    - [ ] Propose 1–2 candidate slots, send calendar hold or Doodle link

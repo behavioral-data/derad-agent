@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>derad-agent · System Design</title>
+  <link rel="stylesheet" href="assets/html-design-system.css">
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-name">derad-agent</div>
+      <div class="logo-sub">System Design</div>
+    </div>
+    <nav>
+      <span class="nav-section">Overview</span>
+      <a href="#summary">Summary</a>
+      <a href="#inputs">Inputs required</a>
+      <span class="nav-section">Build phase</span>
+      <a href="#offline">Offline index build</a>
+      <a href="#artifacts">Index artifacts</a>
+      <span class="nav-section">Runtime</span>
+      <a href="#pipeline">Runtime pipeline</a>
+      <a href="#styles">Response styles</a>
+      <span class="nav-section">Reference</span>
+      <a href="#params">Parameters</a>
+      <a href="#data-shapes">Data shapes</a>
+      <a href="#modules">Module map</a>
+      <a href="#decisions">Design decisions</a>
+    </nav>
+    <div class="theme-toggle" onclick="toggleTheme()">
+      <div class="theme-toggle-track"></div>
+      <span class="theme-toggle-label">Theme</span>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <!-- ── Summary ── -->
+    <section id="summary">
+      <div class="page-head">
+        <p class="eyebrow">Canonical design · May 2026</p>
+        <h1>derad-agent</h1>
+        <p>Given a polarizing social media claim, derad-agent plans search queries, retrieves semantically similar tweets from a pre-built Community Notes index, and asks an LLM to compose a grounded reply. The LLM reads note text as private background knowledge — it never cites sources or reveals the retrieval process.</p>
+      </div>
+
+      <div class="diagram-wrap">
+        <svg id="pipe-svg" width="100%" viewBox="0 0 580 200" style="display:block"></svg>
+        <div id="pipe-ann" class="diagram-ann"></div>
+      </div>
+
+      <div class="row-gap mt-12">
+        <span class="chip chip-active">LLM</span> Azure OpenAI chat or embeddings call
+        <span class="chip chip-pending">compute</span> Pure Python / NumPy, no network
+        <span class="chip chip-info">artifact</span> File on disk
+      </div>
+    </section>
+
+    <!-- ── Inputs required ── -->
+    <section id="inputs">
+      <div class="section-head">
+        <p class="eyebrow">Prerequisites</p>
+        <h2>Inputs required</h2>
+        <p>Everything needed to build the index and run the agent.</p>
+      </div>
+
+      <div class="grid-2">
+        <div>
+          <div class="demo-label">To build the index (offline, once)</div>
+          <table class="data-table">
+            <thead><tr><th>Input</th><th>Source</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><code class="inline-code">notes.tsv</code></td>
+                <td>X public Community Notes dataset — note content</td>
+              </tr>
+              <tr>
+                <td><code class="inline-code">noteStatusHistory.tsv</code></td>
+                <td>X public Community Notes dataset — rating outcomes</td>
+              </tr>
+              <tr>
+                <td>Azure OpenAI credentials</td>
+                <td><code class="inline-code">AZURE_OPENAI_API_KEY</code>, <code class="inline-code">AZURE_OPENAI_ENDPOINT</code>, <code class="inline-code">AZURE_OPENAI_DEPLOYMENT_EMBED</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <div class="demo-label">To run the agent (runtime)</div>
+          <table class="data-table">
+            <thead><tr><th>Input</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><code class="inline-code">tweet_ids.npy</code></td>
+                <td rowspan="3">Built by offline step. All note metadata is pre-baked — no TSV files needed at runtime.</td>
+              </tr>
+              <tr><td><code class="inline-code">embeddings.npy</code></td></tr>
+              <tr><td><code class="inline-code">notes_cache.json</code></td></tr>
+              <tr>
+                <td>Azure OpenAI credentials</td>
+                <td><code class="inline-code">AZURE_OPENAI_DEPLOYMENT_EMBED</code> + <code class="inline-code">AZURE_OPENAI_DEPLOYMENT_CHAT</code></td>
+              </tr>
+              <tr>
+                <td>Statement string</td>
+                <td>The claim or post to reply to</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Offline build ── -->
+    <section id="offline">
+      <div class="section-head">
+        <p class="eyebrow">Phase 1 · Run once (or on each dataset update)</p>
+        <h2>Offline index build</h2>
+        <p>Entry point: <code class="inline-code">derad-embed-notes notes.tsv noteStatusHistory.tsv --out indexes/notes_index</code></p>
+      </div>
+
+      <div class="funnel">
+        <div class="funnel-step">
+          <div class="funnel-op"><span class="chip chip-info">artifact</span></div>
+          <div class="funnel-num" style="font-size:16px">notes.tsv</div>
+          <div class="funnel-label">Note content<br>noteId · tweetId<br>summary · classification<br>createdAtMillis</div>
+        </div>
+        <div class="funnel-step">
+          <div class="funnel-op"><span class="chip chip-info">artifact</span></div>
+          <div class="funnel-num" style="font-size:16px">statusHistory.tsv</div>
+          <div class="funnel-label">Rating outcomes<br>noteId → currentStatus</div>
+        </div>
+        <div class="funnel-step">
+          <div class="funnel-op"><span class="chip chip-pending">join + filter</span></div>
+          <div class="funnel-num" style="font-size:16px">Filter</div>
+          <div class="funnel-label">Keep only<br>CURRENTLY_RATED_<br>HELPFUL notes.<br>Drop all others.</div>
+        </div>
+        <div class="funnel-step">
+          <div class="funnel-op"><span class="chip chip-pending">compute</span></div>
+          <div class="funnel-num" style="font-size:16px">Group + sort</div>
+          <div class="funnel-label">Group by tweetId.<br>Sort each tweet's<br>notes by recency<br>(most recent first).</div>
+        </div>
+        <div class="funnel-step">
+          <div class="funnel-op"><span class="chip chip-active">LLM · embed</span></div>
+          <div class="funnel-num" style="font-size:16px">Embed</div>
+          <div class="funnel-label">Concat top-N<br>summaries per tweet.<br>Embed via Azure<br>OpenAI (batch 500).</div>
+        </div>
+        <div class="funnel-step">
+          <div class="funnel-op"><span class="chip chip-info">artifact</span></div>
+          <div class="funnel-num" style="font-size:16px">Save</div>
+          <div class="funnel-label">tweet_ids.npy<br>embeddings.npy<br>notes_cache.json</div>
+        </div>
+      </div>
+
+      <div class="callout mt-12">
+        <strong>Proxy embeddings.</strong> We embed the concatenated note <em>summaries</em> (not tweet text — we have no Twitter API access). The embedding represents what Community Notes contributors said about the tweet, which is a strong topical proxy. Only the top <code class="inline-code">--notes-for-embedding</code> notes (default 15, most recent) are used per tweet to stay within model token limits and ensure consistent embedding quality.
+      </div>
+
+      <div class="callout info mt-12">
+        <strong>Pre-filter and pre-sort at build time.</strong> Only tweets with at least one helpful note are indexed. Non-helpful notes never enter the cache. Notes are sorted by recency before writing so the runtime needs no filtering or sorting — it simply slices.
+      </div>
+    </section>
+
+    <!-- ── Index artifacts ── -->
+    <section id="artifacts">
+      <div class="section-head">
+        <p class="eyebrow">Build output</p>
+        <h2>Index artifacts</h2>
+        <p>Three files under <code class="inline-code">indexes/notes_index/</code>. Everything needed at runtime is baked in — no TSV files required after the build.</p>
+      </div>
+
+      <table class="data-table">
+        <thead>
+          <tr><th>File</th><th>Shape / type</th><th>Contents</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code class="inline-code">tweet_ids.npy</code></td>
+            <td>object [N]</td>
+            <td>Tweet ID strings. Row i corresponds to row i of <code class="inline-code">embeddings.npy</code>.</td>
+          </tr>
+          <tr>
+            <td><code class="inline-code">embeddings.npy</code></td>
+            <td>float32 [N, D]</td>
+            <td>Tweet-level embeddings. L2-normalised at load time so dot product = cosine similarity.</td>
+          </tr>
+          <tr>
+            <td><code class="inline-code">notes_cache.json</code></td>
+            <td>Dict[str, List]</td>
+            <td><code class="inline-code">tweet_id → [note records]</code>, all CURRENTLY_RATED_HELPFUL, sorted most-recent first. Fields: note_id, summary, classification, created_at_millis, current_status.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ── Runtime pipeline ── -->
+    <section id="pipeline">
+      <div class="section-head">
+        <p class="eyebrow">Phase 2 · Every query</p>
+        <h2>Runtime pipeline</h2>
+        <p>Entry points: <code class="inline-code">derad-ask --statement "…"</code> CLI or <code class="inline-code">retrieve_statement_landscape()</code> Python API.</p>
+      </div>
+
+      <div class="timeline">
+
+        <div class="tl-row">
+          <div class="tl-dot tl-dot-gray"></div>
+          <div class="tl-time"><span class="chip chip-pending">compute</span></div>
+          <div class="tl-text">
+            <strong>0 · Load index</strong><br>
+            Read all three artifacts into a <code class="inline-code">NotesIndex</code> dataclass. L2-normalise the embeddings matrix once — from this point, dot products equal cosine similarities.
+            <br><span class="meta">Cost: one-time disk read per process. Memory: ~4 bytes × N × D for the matrix.</span>
+          </div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-dot tl-dot-warn"></div>
+          <div class="tl-time"><span class="chip chip-active">LLM</span></div>
+          <div class="tl-text">
+            <strong>1 · Query planner</strong><br>
+            The claim is passed to the LLM with a prompt asking it to decompose it into 3–4 focused search queries. Falls back to the raw statement if JSON parsing fails.
+            <br><span class="meta">reasoning_effort=low · max_tokens=2000 · output: <code class="inline-code">{"queries": ["q1", …]}</code></span>
+          </div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-dot tl-dot-warn"></div>
+          <div class="tl-time"><span class="chip chip-active">LLM · embed</span></div>
+          <div class="tl-text">
+            <strong>2a · Embed each query</strong><br>
+            Each query string is embedded with the same Azure OpenAI model used at build time. Result is L2-normalised.
+            <br><span class="meta">One API call per query. Output: float32 [D].</span>
+          </div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-dot tl-dot-gray"></div>
+          <div class="tl-time"><span class="chip chip-pending">compute</span></div>
+          <div class="tl-text">
+            <strong>2b · Cosine retrieval</strong><br>
+            <code class="inline-code">embeddings @ query_vec</code> over all N tweets gives a similarity score per row. Partition the top k×4, sort, then walk the list applying the exclude list and <code class="inline-code">similarity_min</code> threshold until k results are collected.
+            <br><span class="meta">k_per_query=25 (default) · similarity_min=0.0 (default) · output: [(tweet_id, sim), …]</span>
+          </div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-dot tl-dot-gray"></div>
+          <div class="tl-time"><span class="chip chip-pending">compute</span></div>
+          <div class="tl-text">
+            <strong>3 · Dedup across queries</strong><br>
+            Results from all queries are merged into a single dict keeping the <em>best</em> similarity score per tweet. Sorted descending by score.
+            <br><span class="meta">Output: unique List[(tweet_id, best_sim)]</span>
+          </div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-dot tl-dot-gray"></div>
+          <div class="tl-time"><span class="chip chip-pending">compute</span></div>
+          <div class="tl-text">
+            <strong>4 · Note slice</strong><br>
+            For each retrieved tweet, take the first <code class="inline-code">notes_per_tweet</code> notes from the cache (already helpful-only and recency-sorted). Attach the tweet's similarity score. Flatten to a single list.
+            <br><span class="meta">notes_per_tweet=10 (default) · no filtering or sorting needed — the index guarantees both.</span>
+          </div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-dot tl-dot-warn"></div>
+          <div class="tl-time"><span class="chip chip-active">LLM</span></div>
+          <div class="tl-text">
+            <strong>5 · Reply composer</strong><br>
+            Note summaries are cleaned and packaged as an evidence JSON payload. The LLM receives a style preamble + the claim + the evidence and writes a direct social-media reply <em>as if it simply knows these facts</em>. It is explicitly instructed not to mention notes, sources, datasets, or any retrieval process.<br><br>
+            If the response JSON fails to parse, a repair LLM call converts the raw text back to valid JSON.
+            <br><span class="meta">reasoning_effort=low · max_tokens=1400 · preamble: neutral | bridging | agonistic</span>
+            <br><span class="meta">output: <code class="inline-code">{"response": "…", "reasons": [{reason, note_id, tweet_id, evidence_links}]}</code></span>
+          </div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-dot tl-dot-ok"></div>
+          <div class="tl-time"><span class="chip chip-info">output</span></div>
+          <div class="tl-text">
+            <strong>Output</strong><br>
+            <strong>response</strong> — the social media reply. Shown to the user.<br>
+            <strong>reasons</strong> — citations keyed to note_ids. Internal tracing only, never shown to the user.<br>
+            <strong>sources</strong> — deduplicated URLs extracted from reasons. Printed below the reply in the CLI.<br>
+            Full JSON saved to <code class="inline-code">results/ask_runs/{timestamp}.json</code>.
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ── Response styles ── -->
+    <section id="styles">
+      <div class="section-head">
+        <p class="eyebrow">Runtime · tone</p>
+        <h2>Response styles</h2>
+        <p>All three styles run identical retrieval. Only the LLM system preamble changes.</p>
+      </div>
+
+      <table class="data-table">
+        <thead><tr><th>Style</th><th>Preamble intent</th><th>When to use</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code class="inline-code">neutral</code> <span class="auto-pill">default</span></td>
+            <td>Knowledgeable bystander replying with facts. No framing.</td>
+            <td>General use. Safe default.</td>
+          </tr>
+          <tr>
+            <td><code class="inline-code">bridging</code></td>
+            <td>Acknowledge what's understandable about the concern, then add context. Calm, inclusive language.</td>
+            <td>When the poster is likely sincere and open to new information.</td>
+          </tr>
+          <tr>
+            <td><code class="inline-code">agonistic</code></td>
+            <td>Direct challenge. Name the error clearly. Respectful but no softening.</td>
+            <td>When the claim is clearly wrong and directness is warranted.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ── Parameters ── -->
+    <section id="params">
+      <div class="section-head">
+        <p class="eyebrow">Reference</p>
+        <h2>Parameters</h2>
+      </div>
+
+      <div class="demo-label">Build-time (derad-embed-notes)</div>
+      <table class="data-table mb-24">
+        <thead><tr><th>Flag</th><th>Default</th><th>Effect</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code class="inline-code">--notes-for-embedding</code></td>
+            <td>15</td>
+            <td>Max helpful notes per tweet used for embedding text, most recent first. Controls token budget and embedding consistency.</td>
+          </tr>
+          <tr>
+            <td><code class="inline-code">--out</code></td>
+            <td><code class="inline-code">indexes/notes_index</code></td>
+            <td>Output directory for the three index artifacts.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="demo-label">Runtime (derad-ask / retrieve_statement_landscape)</div>
+      <table class="data-table">
+        <thead><tr><th>Parameter</th><th>Default</th><th>Step</th><th>Effect</th></tr></thead>
+        <tbody>
+          <tr><td><code class="inline-code">k_per_query</code></td><td>25</td><td>2b</td><td>Tweets fetched per search query before dedup.</td></tr>
+          <tr><td><code class="inline-code">similarity_min</code></td><td>0.0</td><td>2b</td><td>Cosine threshold. Raise to drop loosely related tweets.</td></tr>
+          <tr><td><code class="inline-code">notes_per_tweet</code></td><td>10</td><td>4</td><td>Max notes kept per tweet (already sorted by recency in cache).</td></tr>
+          <tr><td><code class="inline-code">response_style</code></td><td>neutral</td><td>5</td><td>LLM preamble tone: neutral · bridging · agonistic.</td></tr>
+          <tr><td><code class="inline-code">exclude_tweet_id</code></td><td>—</td><td>2b</td><td>Skip a specific tweet ID (e.g. self-exclusion).</td></tr>
+          <tr><td><code class="inline-code">max_sources</code></td><td>5</td><td>CLI</td><td>Max deduplicated URLs printed below the reply.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ── Data shapes ── -->
+    <section id="data-shapes">
+      <div class="section-head">
+        <p class="eyebrow">Reference</p>
+        <h2>Data shapes</h2>
+      </div>
+
+      <div class="grid-2">
+        <div>
+          <div class="demo-label">notes.tsv fields used</div>
+          <table class="data-table">
+            <thead><tr><th>Field</th><th>Used for</th></tr></thead>
+            <tbody>
+              <tr><td><code class="inline-code">noteId</code></td><td>Join key with statusHistory; citation ID in output</td></tr>
+              <tr><td><code class="inline-code">tweetId</code></td><td>Grouping key — all notes for a tweet share one embedding</td></tr>
+              <tr><td><code class="inline-code">summary</code></td><td>Embedding text and LLM evidence payload</td></tr>
+              <tr><td><code class="inline-code">classification</code></td><td>Stored in cache (unused in current pipeline)</td></tr>
+              <tr><td><code class="inline-code">createdAtMillis</code></td><td>Recency sort key</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <div class="demo-label">noteStatusHistory.tsv fields used</div>
+          <table class="data-table">
+            <thead><tr><th>Field</th><th>Used for</th></tr></thead>
+            <tbody>
+              <tr><td><code class="inline-code">noteId</code></td><td>Join key</td></tr>
+              <tr><td><code class="inline-code">currentStatus</code></td><td>Filter gate — only CURRENTLY_RATED_HELPFUL notes enter the index</td></tr>
+            </tbody>
+          </table>
+          <div class="demo-label mt-12">Note record in notes_cache.json</div>
+          <table class="data-table">
+            <thead><tr><th>Field</th><th>Value at runtime</th></tr></thead>
+            <tbody>
+              <tr><td><code class="inline-code">note_id</code></td><td>Citation key for LLM reasons output</td></tr>
+              <tr><td><code class="inline-code">summary</code></td><td>Cleaned text shown to LLM as evidence</td></tr>
+              <tr><td><code class="inline-code">classification</code></td><td>Stored, not yet used in pipeline</td></tr>
+              <tr><td><code class="inline-code">created_at_millis</code></td><td>Already used for sort; available for display</td></tr>
+              <tr><td><code class="inline-code">current_status</code></td><td>Always CURRENTLY_RATED_HELPFUL in built index</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Module map ── -->
+    <section id="modules">
+      <div class="section-head">
+        <p class="eyebrow">Reference</p>
+        <h2>Module map</h2>
+      </div>
+
+      <div class="mod-map">
+        <div class="mod-row cols-2">
+          <div class="mod-cell highlight">
+            <div class="mod-name">cli/embed_notes.py</div>
+            <div class="mod-desc">Offline build. Joins notes + status TSVs, filters to helpful-only, sorts by recency, embeds top-N per tweet, writes 3 artifacts.</div>
+          </div>
+          <div class="mod-cell highlight">
+            <div class="mod-name">cli/ask.py</div>
+            <div class="mod-desc">CLI entry point. Parses args, calls retrieve_statement_landscape(), renders reply + sources in Rich panel, saves full JSON run output.</div>
+          </div>
+        </div>
+        <div class="mod-row cols-2">
+          <div class="mod-cell highlight">
+            <div class="mod-name">runtime/landscape_agent.py</div>
+            <div class="mod-desc">Orchestrates the full runtime pipeline: load → plan → retrieve → slice → compose. Returns structured result dict.</div>
+          </div>
+          <div class="mod-cell highlight">
+            <div class="mod-name">runtime/landscape_api.py</div>
+            <div class="mod-desc">Public Python API. Resolves notes_index_dir from INDEX_ROOT env var, delegates to landscape_agent.</div>
+          </div>
+        </div>
+        <div class="mod-row">
+          <div class="mod-cell">
+            <div class="mod-name">runtime/notes_index.py</div>
+            <div class="mod-desc">load_notes_index · retrieve_tweets · select_recent_helpful_notes (slice only — index is pre-filtered and pre-sorted)</div>
+          </div>
+          <div class="mod-cell">
+            <div class="mod-name">runtime/steps/planning.py</div>
+            <div class="mod-desc">step_1_generate_queries — LLM query planner. Parses JSON; falls back to raw statement on failure.</div>
+          </div>
+          <div class="mod-cell">
+            <div class="mod-name">runtime/steps/output.py</div>
+            <div class="mod-desc">step_compose_reply — builds evidence payload, calls LLM, normalises reasons, handles JSON repair.</div>
+          </div>
+        </div>
+        <div class="mod-row">
+          <div class="mod-cell">
+            <div class="mod-name">llm/config.py</div>
+            <div class="mod-desc">get_embedder() · get_llm() — Azure OpenAI factories. Loads .env. Handles reasoning/verbosity fallback for older SDK versions.</div>
+          </div>
+          <div class="mod-cell">
+            <div class="mod-name">llm/prompts.py</div>
+            <div class="mod-desc">PLANNER_TEMPLATE · get_response_output_prompt(style) — three preambles (neutral, bridging, agonistic) + shared body.</div>
+          </div>
+          <div class="mod-cell">
+            <div class="mod-name">shared/</div>
+            <div class="mod-desc">RuntimeLogger · sanitize_query · validate_agent_inputs · validate_search_queries</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Design decisions ── -->
+    <section id="decisions">
+      <div class="section-head">
+        <p class="eyebrow">Reference</p>
+        <h2>Design decisions</h2>
+        <p>Key choices and the reasoning behind them.</p>
+      </div>
+
+      <details class="collapsible">
+        <summary>Proxy embeddings — embedding note summaries instead of tweet text</summary>
+        <div class="detail-body">
+          We have no access to tweet text (Twitter API v2 is not part of this setup). Instead, we embed the concatenated note summaries for each tweet as a proxy for the tweet's content. This works because note authors describe what the tweet claims — the summaries are topically dense and written specifically to characterise the tweet's assertion. The limitation is that retrieval quality is bounded by how well the summaries represent the original claim space.
+        </div>
+      </details>
+
+      <details class="collapsible">
+        <summary>Pre-filter and pre-sort at build time, not runtime</summary>
+        <div class="detail-body">
+          Only CURRENTLY_RATED_HELPFUL notes enter the index. Non-helpful notes are discarded at build time, not at query time. Similarly, each tweet's notes are sorted by recency before being written to the cache. This means the runtime <code class="inline-code">select_recent_helpful_notes</code> is a pure slice with no conditional logic — faster and simpler. The trade-off is that the index must be rebuilt when note statuses change (Community Notes publishes regular data snapshots, so this fits naturally into a periodic rebuild cadence).
+        </div>
+      </details>
+
+      <details class="collapsible">
+        <summary>Fixed N notes per tweet for embedding (default 15)</summary>
+        <div class="detail-body">
+          Embedding models have token limits (~8k tokens for Azure OpenAI models). A note summary is typically 50–150 words, so uncapped concatenation would hit the limit for popular tweets with many helpful notes and get silently truncated. Using a fixed cap (most recent N) ensures consistent token budget and embedding quality across all tweets. 15 was chosen as a balance between coverage and staying well within limits. The most recent notes are preferred because they are most likely to reflect the current consensus — older notes may be superseded. N is configurable via <code class="inline-code">--notes-for-embedding</code>.
+        </div>
+      </details>
+
+      <details class="collapsible">
+        <summary>Notes as private LLM context — the LLM does not cite them</summary>
+        <div class="detail-body">
+          The evidence payload is passed to the LLM as background knowledge the person being replied to cannot see. The LLM prompt explicitly forbids mentioning notes, evidence, sources, datasets, or any retrieval process. The goal is a reply that reads as a knowledgeable person responding naturally — not as a fact-checker citing a database. The <code class="inline-code">reasons</code> array in the output is internal bookkeeping (note_ids, tweet_ids, URLs) used for tracing and evaluation; it is never surfaced to the end user.
+        </div>
+      </details>
+
+      <details class="collapsible">
+        <summary>Multi-query retrieval with best-score dedup</summary>
+        <div class="detail-body">
+          A single embedding of the claim may not capture all its facets (e.g. "Vaccines cause autism" involves both vaccine safety and autism causation). The LLM planner generates 3–4 queries that decompose the claim. Each query retrieves independently, and results are merged by keeping the best similarity score per tweet. This increases recall without duplicating tweets in the final list.
+        </div>
+      </details>
+
+      <details class="collapsible">
+        <summary>Response styles are preamble-only</summary>
+        <div class="detail-body">
+          All three styles (neutral, bridging, agonistic) run identical retrieval and receive identical evidence. Only the system preamble injected before the claim changes. This keeps retrieval logic simple and makes style a pure presentation choice rather than a data choice. A/B testing different styles on the same claim is trivially cheap — reuse the retrieved notes, swap the preamble.
+        </div>
+      </details>
+
+    </section>
+
+  </main>
+</div>
+<script src="assets/html-design-system.js"></script>
+<script>
+  // ── Pipeline summary diagram — 2-row shoulder layout ────────────
+  (function () {
+    const svg = document.getElementById('pipe-svg');
+    if (!svg) return;
+
+    // 3 nodes per row, L-shaped elbow connecting rows at the right side
+    const NW = 170, NH = 48, GAP = 15;
+    const XS = [20, 20 + NW + GAP, 20 + 2 * (NW + GAP)]; // 20, 205, 390
+    const Y1 = 16, Y2 = 136;
+    const YMID = (Y1 + NH + Y2) / 2; // mid-point of the gap between rows
+
+    const row1 = [
+      { x: XS[0], y: Y1, label: 'Claim',            sub: 'input',      c: 'var(--gray-500)', ann: 'The social media post or claim to reply to.' },
+      { x: XS[1], y: Y1, label: 'Query Planner',    sub: 'LLM',        c: 'var(--clay)',     ann: 'LLM decomposes the claim into 3–4 focused search queries. Falls back to the raw statement on JSON parse failure.' },
+      { x: XS[2], y: Y1, label: 'Cosine Retrieval', sub: '×N queries', c: 'var(--olive)',    ann: 'Each query is embedded and dot-producted against the L2-normalised matrix. Runs once per query; results merged by best similarity score per tweet.' },
+    ];
+    const row2 = [
+      { x: XS[0], y: Y2, label: 'Dedup + Slice',    sub: 'compute',    c: 'var(--olive)',    ann: 'Best similarity score kept per tweet across all queries. Top notes_per_tweet notes sliced from the cache — already helpful-only and recency-sorted at build time.' },
+      { x: XS[1], y: Y2, label: 'Reply Composer',   sub: 'LLM',        c: 'var(--clay)',     ann: 'Notes passed as private background knowledge. LLM writes a natural reply as if it simply knows these facts — never mentions notes, sources, or retrieval.' },
+      { x: XS[2], y: Y2, label: 'Reply + Sources',  sub: 'output',     c: 'var(--olive)',    ann: 'Social media reply shown to the user. Reasons keyed to note_ids for internal tracing. Deduplicated source URLs printed below the reply in the CLI.' },
+    ];
+    const all = [...row1, ...row2];
+
+    let h = `<defs>
+      <marker id="pah" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto">
+        <polygon points="0 0,7 2.5,0 5" fill="var(--gray-500)"/>
+      </marker>
+    </defs>`;
+
+    // Row 1 horizontal arrows
+    for (let i = 0; i < row1.length - 1; i++) {
+      const a = row1[i], b = row1[i + 1], y = Y1 + NH / 2;
+      h += `<line x1="${a.x + NW}" y1="${y}" x2="${b.x - 2}" y2="${y}" stroke="var(--gray-500)" stroke-width="1.5" marker-end="url(#pah)"/>`;
+    }
+
+    // Elbow: bottom-centre of last row-1 node → down → left → top-centre of first row-2 node
+    const last1 = row1[row1.length - 1], first2 = row2[0];
+    const ex1 = last1.x + NW / 2, ex2 = first2.x + NW / 2;
+    h += `<path d="M ${ex1},${Y1 + NH} L ${ex1},${YMID} L ${ex2},${YMID} L ${ex2},${Y2 - 2}"
+            fill="none" stroke="var(--gray-500)" stroke-width="1.5" stroke-linejoin="miter" marker-end="url(#pah)"/>`;
+
+    // Row 2 horizontal arrows
+    for (let i = 0; i < row2.length - 1; i++) {
+      const a = row2[i], b = row2[i + 1], y = Y2 + NH / 2;
+      h += `<line x1="${a.x + NW}" y1="${y}" x2="${b.x - 2}" y2="${y}" stroke="var(--gray-500)" stroke-width="1.5" marker-end="url(#pah)"/>`;
+    }
+
+    // Nodes
+    all.forEach(n => {
+      const esc = n.ann.replace(/'/g, '&#39;');
+      h += `<rect x="${n.x}" y="${n.y}" width="${NW}" height="${NH}" fill="var(--white)" stroke="${n.c}" stroke-width="1.5" style="cursor:pointer" onclick="pipeAnn('${esc}')"/>`;
+      h += `<rect x="${n.x}" y="${n.y}" width="${NW}" height="4" fill="${n.c}"/>`;
+      h += `<text x="${n.x + 10}" y="${n.y + 21}" font-family="var(--sans)" font-size="12" font-weight="600" fill="var(--slate)">${n.label}</text>`;
+      h += `<text x="${n.x + 10}" y="${n.y + 37}" font-family="var(--mono)" font-size="9" fill="var(--gray-500)">${n.sub}</text>`;
+    });
+
+    svg.innerHTML = h;
+  })();
+
+  function pipeAnn(text) {
+    const box = document.getElementById('pipe-ann');
+    if (!text) { box.classList.remove('visible'); return; }
+    box.classList.add('visible');
+    box.innerHTML = text;
+  }
+
+  // ── Scroll spy ───────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', () => {
+    if (typeof scrollSpy === 'function') scrollSpy('.sidebar nav a');
+  });
+</script>
+</body>
+</html>

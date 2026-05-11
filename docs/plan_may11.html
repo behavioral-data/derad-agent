@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Advait — Week of May 11</title>
+  <link rel="stylesheet" href="assets/html-design-system.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <div class="logo-name">Derad Bot</div>
+        <div class="logo-sub">Advait · May 11</div>
+      </div>
+      <div class="theme-toggle" onclick="toggleTheme()">
+        <div class="theme-toggle-track"></div>
+        <span class="theme-toggle-label">Light mode</span>
+      </div>
+      <span class="nav-section">Tasks</span>
+      <a href="#relevance-filter">1 · LLM Filter</a>
+      <a href="#tweets-index">2 · Tweets Index</a>
+      <a href="#azure-deploy">3 · Azure Deploy</a>
+      <a href="#irb">4 · IRB Letter</a>
+      <a href="#scheduling">5 · Scheduling</a>
+      <span class="nav-section">Context</span>
+      <a href="#blockers">Blockers</a>
+      <a href="#arch">Architecture</a>
+    </aside>
+
+    <main class="main">
+      <div class="page-head">
+        <p class="eyebrow">Plan · 2026-05-10</p>
+        <h1>Your tasks, week of May 11</h1>
+        <p>Compiled from Slack and TODO.md. Two engineering tasks, one blocked deployment, one quick admin item, and two scheduling nudges.</p>
+      </div>
+
+      <!-- ── Stat row ── -->
+      <div class="stat-row mb-24">
+        <div class="stat">
+          <div class="num">5</div>
+          <div class="label">open tasks</div>
+        </div>
+        <div class="stat">
+          <div class="num">2</div>
+          <div class="label">engineering</div>
+        </div>
+        <div class="stat">
+          <div class="num">1</div>
+          <div class="label">blocked</div>
+        </div>
+        <div class="stat">
+          <div class="num">2</div>
+          <div class="label">scheduling</div>
+        </div>
+      </div>
+
+      <!-- ══════ TASK 1: LLM RELEVANCE FILTER ══════ -->
+      <section id="relevance-filter">
+        <div class="section-head">
+          <p class="eyebrow">01 · Engineering — this week</p>
+          <h2>LLM relevance filter for community notes</h2>
+          <p>The retrieval step currently passes all top-K notes to the composer. Add an LLM filter that drops notes unrelated to the statement before composition, reducing noise and improving reply quality.</p>
+        </div>
+
+        <div class="callout info">
+          <strong>Why:</strong> Cosine similarity over embeddings retrieves notes that are topically adjacent but not always relevant to the specific claim. A fast LLM pass (Haiku-class) filtering by note ID is cheap and keeps the composer context clean.
+        </div>
+
+        <div class="phase-list mt-24">
+          <div class="phase-card is-active">
+            <div class="panel-head">
+              <h3>Step 1 — Prompt + factory</h3>
+              <span class="chip chip-active">start here</span>
+            </div>
+            <ul class="task-list">
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Write <code class="inline-code">RELEVANCE_FILTER_TEMPLATE</code> prompt in <code class="inline-code">llm/prompts.py</code>. Input: statement + JSON list of <code class="inline-code">{note_id, summary}</code> pairs. Output: JSON array of IDs to keep.</li>
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Add <code class="inline-code">get_relevance_filter_prompt(statement, notes_json)</code> factory next to the template.</li>
+            </ul>
+          </div>
+
+          <div class="phase-card">
+            <div class="panel-head">
+              <h3>Step 2 — Filter step</h3>
+              <span class="chip chip-pending">next</span>
+            </div>
+            <ul class="task-list">
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Create <code class="inline-code">runtime/steps/relevance_filter.py</code> with <code class="inline-code">step_filter_notes_by_relevance(statement, notes)</code>. Call LLM with the prompt, parse returned JSON list of IDs, filter notes list. Fallback to original list on parse error.</li>
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Export new step from <code class="inline-code">runtime/steps/__init__.py</code>.</li>
+            </ul>
+          </div>
+
+          <div class="phase-card">
+            <div class="panel-head">
+              <h3>Step 3 — Wire into agent + tests</h3>
+              <span class="chip chip-pending">next</span>
+            </div>
+            <ul class="task-list">
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Add <code class="inline-code">filter_notes: bool = True</code> param to <code class="inline-code">run_landscape_agent</code> in <code class="inline-code">runtime/landscape_agent.py</code>. Log how many notes survived the filter.</li>
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Unit tests in <code class="inline-code">tests/test_relevance_filter.py</code>: (a) LLM returns subset of IDs, (b) malformed JSON → fallback, (c) empty input → no LLM call.</li>
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Smoke test with <code class="inline-code">indexes_5pct/</code> data — print notes before/after filter on a claim from <code class="inline-code">conditions.md</code>.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════ TASK 2: TWEETS INDEX ══════ -->
+      <section id="tweets-index">
+        <div class="section-head">
+          <p class="eyebrow">02 · Engineering — due May 11</p>
+          <h2>Twitter API backend — tweets index</h2>
+          <p>Build the index for similarity searching using actual tweet text (via Twitter API) rather than community note summaries as a proxy. Your half of the Twitter API backend split.</p>
+        </div>
+
+        <div class="callout warning">
+          <strong>Partially blocked:</strong> The index build (<code class="inline-code">embed_tweets.py</code>) requires Twitter API credentials that Galen hasn't funded yet. You can write the code now; the smoke test waits on creds.
+        </div>
+
+        <div class="phase-list mt-24">
+          <div class="phase-card is-active">
+            <div class="panel-head">
+              <h3>Step 1 — Twitter client + embed pipeline</h3>
+              <span class="chip chip-active">unblocked</span>
+            </div>
+            <ul class="task-list">
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Add <code class="inline-code">fetch_tweet_text(tweet_id: str) -> str</code> utility in <code class="inline-code">derad_agent/shared/twitter_client.py</code>. Reads bearer token from <code class="inline-code">TWITTER_BEARER_TOKEN</code> env var.</li>
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Create <code class="inline-code">derad_agent/cli/embed_tweets.py</code> — same interface as <code class="inline-code">embed_notes.py</code>. Reads notes TSV for tweet IDs, fetches tweet text in batches of 100, embeds tweet text, saves <code class="inline-code">tweet_ids.npy</code> + <code class="inline-code">embeddings.npy</code> + <code class="inline-code">notes_cache.json</code>. Falls back to note-summary embedding for any tweet ID that returns 404/forbidden.</li>
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Wire into <code class="inline-code">derad_agent/__init__.py</code> entry points (check how <code class="inline-code">embed_notes</code> is registered).</li>
+            </ul>
+          </div>
+
+          <div class="phase-card">
+            <div class="panel-head">
+              <h3>Step 2 — Runtime ingest at query time</h3>
+              <span class="chip chip-pending">next</span>
+            </div>
+            <ul class="task-list">
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> In <code class="inline-code">landscape_agent.py</code>, add optional <code class="inline-code">tweet_id: str | None</code> param. When provided, fetch tweet text and use it as the statement (or prepend). Also pass to <code class="inline-code">exclude_tweet_id</code> to avoid self-retrieval.</li>
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Update <code class="inline-code">cli/ask.py</code> to accept <code class="inline-code">--tweet-id</code> for local testing.</li>
+            </ul>
+          </div>
+
+          <div class="phase-card">
+            <div class="panel-head">
+              <h3>Step 3 — Smoke test (needs creds)</h3>
+              <span class="chip chip-blocked">blocked on creds</span>
+            </div>
+            <ul class="task-list">
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-blocked">blocked</span></label> Run <code class="inline-code">python -m derad_agent.cli.embed_tweets data/notes.tsv --out indexes/tweets_index</code> on a sample. Confirm <code class="inline-code">embeddings.npy</code> shape matches <code class="inline-code">tweet_ids.npy</code> length.</li>
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-blocked">blocked</span></label> Spot-check a few tweet IDs: fetch text, compare against note-summary embedding — similarity should be higher for tweet-text embeddings on tweet-content queries.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════ TASK 3: AZURE DEPLOY ══════ -->
+      <section id="azure-deploy">
+        <div class="section-head">
+          <p class="eyebrow">03 · Deployment — prep now, ship on creds</p>
+          <h2>Deploy bot to Azure</h2>
+          <p>Containerise the bot and wire it to Aahan's Twitter posting layer. Fully blocked end-to-end until Galen funds the Twitter API developer account. Do the container prep now so you can ship the moment creds land.</p>
+        </div>
+
+        <div class="callout warning">
+          <strong>Blocked:</strong> Galen is still waiting on funding the Twitter API account. Build the Azure infra scaffolding now; the Twitter wiring is the last mile. Ping Galen if no update by EOD Monday.
+        </div>
+
+        <div class="phase-list mt-24">
+          <div class="phase-card is-active">
+            <div class="panel-head">
+              <h3>Step 1 — Containerise</h3>
+              <span class="chip chip-active">unblocked</span>
+            </div>
+            <ul class="task-list">
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Write <code class="inline-code">Dockerfile</code> at repo root: base on <code class="inline-code">python:3.12-slim</code>, install deps from <code class="inline-code">pyproject.toml</code>, copy source, expose port 8080.</li>
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Add <code class="inline-code">derad_agent/server.py</code> — minimal FastAPI app with <code class="inline-code">POST /reply</code> that accepts <code class="inline-code">{"tweet_id": "..."}</code>, runs <code class="inline-code">run_landscape_agent</code>, returns the reply.</li>
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Test locally: build image, run with <code class="inline-code">-e OPENAI_API_KEY=... -e NOTES_INDEX_DIR=...</code>, curl the endpoint with a hardcoded tweet ID.</li>
+            </ul>
+          </div>
+
+          <div class="phase-card">
+            <div class="panel-head">
+              <h3>Step 2 — Azure Container Instance</h3>
+              <span class="chip chip-pending">prep</span>
+            </div>
+            <ul class="task-list">
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Create an Azure Container Registry: <code class="inline-code">az acr create --resource-group derad --name deradbot --sku Basic</code>.</li>
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Push the image: <code class="inline-code">az acr build --registry deradbot --image derad-agent:latest .</code></li>
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Deploy as ACI: <code class="inline-code">az container create --resource-group derad --name derad-bot --image deradbot.azurecr.io/derad-agent:latest --cpu 1 --memory 2 --ports 80</code>. Store API keys via <code class="inline-code">--environment-variables</code> or Azure Key Vault.</li>
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Mount index artifacts (<code class="inline-code">tweets_index/</code>) via Azure File Share or bake into the image on first build.</li>
+            </ul>
+          </div>
+
+          <div class="phase-card">
+            <div class="panel-head">
+              <h3>Step 3 — Twitter mention polling</h3>
+              <span class="chip chip-blocked">blocked</span>
+            </div>
+            <ul class="task-list">
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-blocked">blocked</span></label> Add a polling loop (or Account Activity API webhook) to watch for @mentions. Coordinate with Aahan on exact interface — he owns the reply-posting side.</li>
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-blocked">blocked</span></label> Wire <code class="inline-code">TWITTER_BEARER_TOKEN</code> + <code class="inline-code">TWITTER_ACCESS_TOKEN</code> into the container environment via Azure Key Vault reference.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════ TASK 4: IRB ══════ -->
+      <section id="irb">
+        <div class="section-head">
+          <p class="eyebrow">04 · Quick admin — today</p>
+          <h2>IRB letter of determination</h2>
+          <p>Galen's IRB account was deactivated. IRB approval came through May 7 — retrieve the letter and share it.</p>
+        </div>
+
+        <ul class="task-list">
+          <li><label class="task-check"><input type="checkbox"><span class="chip chip-active">today</span></label> Log into the UW IRB portal (ARROW / eGC1) with your UW NetID and locate the determination letter under the shared study protocol.</li>
+          <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Download the PDF and share with Galen + Andrew over Slack.</li>
+        </ul>
+      </section>
+
+      <!-- ══════ TASK 5: SCHEDULING ══════ -->
+      <section id="scheduling">
+        <div class="section-head">
+          <p class="eyebrow">05 · Scheduling — this week</p>
+          <h2>Two meetings to book</h2>
+          <p>Tim check-in and DSO end-of-month. Neither is blocked; just needs a message sent.</p>
+        </div>
+
+        <div class="grid-2 mt-24">
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Tim check-in</h3>
+              <span class="chip chip-pending">this week</span>
+            </div>
+            <ul class="task-list">
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Check calendar for May 11–15, identify free half-days.</li>
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Draft message to Tim with 2–3 specific slots (include timezone).</li>
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Send and await reply.</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
+              <h3>DSO check-in</h3>
+              <span class="chip chip-pending">end of month</span>
+            </div>
+            <ul class="task-list">
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Identify required attendees (you, Andrew, DSO contact) and any known constraints.</li>
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Check shared availability for the week of May 25–30, propose 2 slots.</li>
+              <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Send calendar hold or Doodle link.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════ BLOCKERS ══════ -->
+      <section id="blockers">
+        <div class="section-head">
+          <p class="eyebrow">Blockers</p>
+          <h2>Dependencies you don't control</h2>
+        </div>
+
+        <div class="phase-list">
+          <div class="phase-card">
+            <div class="panel-head">
+              <h3>Twitter API access</h3>
+              <span class="chip chip-blocked">blocked</span>
+            </div>
+            <p class="meta">Galen is waiting on funding the developer account. Needed for: (a) running the <code class="inline-code">embed_tweets.py</code> smoke test, (b) end-to-end Azure deployment wiring. Ping Galen if no update by EOD Monday.</p>
+          </div>
+          <div class="phase-card">
+            <div class="panel-head">
+              <h3>Aahan's deployment interface</h3>
+              <span class="chip chip-warning">coordinate</span>
+            </div>
+            <p class="meta">Aahan owns posting replies to Twitter. Agree on HTTP contract for <code class="inline-code">POST /reply</code>, error handling, and who polls for @mentions before the end-to-end wiring step.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════ ARCHITECTURE ══════ -->
+      <section id="arch">
+        <div class="section-head">
+          <p class="eyebrow">Architecture</p>
+          <h2>Current system → target system</h2>
+        </div>
+
+        <div class="grid-2">
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Current</h3>
+              <span class="chip chip-done">built</span>
+            </div>
+            <ul class="task-list">
+              <li><span class="chip">index</span> <code class="inline-code">embed_notes.py</code> — embeds tweet-level community note summaries as a proxy for tweet content</li>
+              <li><span class="chip">index</span> <code class="inline-code">notes_index.py</code> — cosine search over tweet embeddings, returns helpful notes</li>
+              <li><span class="chip">runtime</span> <code class="inline-code">landscape_agent.py</code> — planner → retrieve → compose reply</li>
+              <li><span class="chip">cli</span> <code class="inline-code">ask.py</code> — local CLI for testing</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Target (your additions)</h3>
+              <span class="chip chip-active">in progress</span>
+            </div>
+            <ul class="task-list">
+              <li><span class="chip chip-active">new</span> <code class="inline-code">steps/relevance_filter.py</code> — LLM pass drops off-topic notes before composition</li>
+              <li><span class="chip chip-active">new</span> <code class="inline-code">embed_tweets.py</code> — fetch real tweet text via Twitter API v2, embed it</li>
+              <li><span class="chip chip-active">new</span> <code class="inline-code">shared/twitter_client.py</code> — thin wrapper around Twitter API v2</li>
+              <li><span class="chip chip-active">new</span> <code class="inline-code">server.py</code> — FastAPI endpoint wrapping the agent</li>
+              <li><span class="chip chip-active">new</span> <code class="inline-code">Dockerfile</code> + Azure ACI deployment config</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="assets/html-design-system.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      initScrollSpy();
+      initTaskCheckboxes('plan-may11');
+    });
+  </script>
+</body>
+</html>

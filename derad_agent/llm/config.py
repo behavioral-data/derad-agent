@@ -1,26 +1,20 @@
 """Centralised Azure OpenAI configuration.
 
 Loads credentials from ``derad_agent/llm/.env`` and exposes factory
-helpers for embedding and chat models, plus path constants for
-index and TSV data locations.
+helpers for embedding and chat models, plus path constants for index
+and TSV data locations.
 """
 from pathlib import Path
 import os
 import warnings
 from dotenv import load_dotenv
 
-# ────────────────────────────────────────────────────────────────────────────
-# 0.  .env
-# ────────────────────────────────────────────────────────────────────────────
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-# Package and repository roots for portable defaults
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 _REPO_ROOT = _PACKAGE_ROOT.parent
 
-# ────────────────────────────────────────────────────────────────────────────
-# 1.  Generic tunables
-# ────────────────────────────────────────────────────────────────────────────
+
 def _path_from_env(env_name: str, default: Path) -> Path:
     value = os.getenv(env_name)
     if value:
@@ -35,19 +29,6 @@ NOTES_TSV_ROOT = _path_from_env(
 INDEX_ROOT = _path_from_env(
     "DERAD_AGENT_INDEX_ROOT",
     _REPO_ROOT / "indexes",
-)
-
-INDEX_NAME = "faiss_idx"
-
-# Constants are defined in shared/constants.py; re-exported here.
-from derad_agent.shared.constants import (  # noqa: F401
-    POST_SNIP_TOKENS,
-    CTX_PARENT_TOKENS,
-    CTX_TOP_TOKENS,
-    USER_SPLIT_TOKENS,
-    CHUNK_MAX_TOKENS,
-    K_SEMANTIC,
-    MAX_PER_THREAD,
 )
 
 from langchain_openai import AzureOpenAIEmbeddings as _EmbCls  # type: ignore
@@ -79,57 +60,40 @@ def _require_env(var: str) -> str:
 
 
 def get_embedder():
-    """Create an Azure OpenAI embedding model wrapped in :class:`TrackedEmbedder`."""
-    deployment = _require_env("AZURE_OPENAI_DEPLOYMENT_EMBED")
-    endpoint = _require_env("AZURE_OPENAI_ENDPOINT")
-    key = _require_env("AZURE_OPENAI_API_KEY")
-    real_embedder = _EmbCls(
-        azure_deployment=deployment,
-        azure_endpoint=endpoint,
-        api_key=key,
+    """Return an Azure OpenAI embedding model."""
+    return _EmbCls(
+        azure_deployment=_require_env("AZURE_OPENAI_DEPLOYMENT_EMBED"),
+        azure_endpoint=_require_env("AZURE_OPENAI_ENDPOINT"),
+        api_key=_require_env("AZURE_OPENAI_API_KEY"),
         api_version=_API_VERSION,
     )
-    from derad_agent.indexing.tracked_embedder import TrackedEmbedder
-
-    return TrackedEmbedder(real_embedder)
 
 
 def get_llm(
     temperature: float = None,
     max_tokens: int = 2048,
     reasoning_effort: str = None,
-    text_verbosity: str = None
+    text_verbosity: str = None,
 ):
-    """
-    Get Azure OpenAI LLM instance for chat/completion.
-    
+    """Get Azure OpenAI chat model.
+
     Args:
         temperature: Sampling temperature (0.0-2.0)
         max_tokens: Maximum tokens to generate
-        reasoning_effort: GPT-5 reasoning effort level: "minimal", "low", "medium", "high"
-        text_verbosity: GPT-5 text verbosity level: "low", "medium", "high"
-        
-    Returns:
-        AzureChatOpenAI instance
+        reasoning_effort: GPT-5 reasoning effort: "minimal", "low", "medium", "high"
+        text_verbosity: GPT-5 text verbosity: "low", "medium", "high"
     """
     from langchain_openai import AzureChatOpenAI
-    
-    deployment = _require_env("AZURE_OPENAI_DEPLOYMENT_CHAT")
-    endpoint = _require_env("AZURE_OPENAI_ENDPOINT")
-    key = _require_env("AZURE_OPENAI_API_KEY")
-    
-    # Base configuration
+
     config = {
-        "azure_deployment": deployment,
-        "azure_endpoint": endpoint,
-        "api_key": key,
+        "azure_deployment": _require_env("AZURE_OPENAI_DEPLOYMENT_CHAT"),
+        "azure_endpoint": _require_env("AZURE_OPENAI_ENDPOINT"),
+        "api_key": _require_env("AZURE_OPENAI_API_KEY"),
         "api_version": _API_VERSION,
         "max_tokens": max_tokens,
     }
     if temperature is not None:
         config["temperature"] = temperature
-    
-    # Add GPT-5 specific parameters when supported by installed langchain-openai.
     if reasoning_effort is not None:
         config["reasoning"] = {"effort": reasoning_effort}
     if text_verbosity is not None:
@@ -158,15 +122,6 @@ def get_llm(
 __all__ = [
     "NOTES_TSV_ROOT",
     "INDEX_ROOT",
-    "INDEX_NAME",
-    "POST_SNIP_TOKENS",
-    "CTX_PARENT_TOKENS",
-    "CTX_TOP_TOKENS",
-    "USER_SPLIT_TOKENS",
-    "CHUNK_MAX_TOKENS",
-    "K_SEMANTIC",
-    "MAX_PER_THREAD",
     "get_embedder",
     "get_llm",
 ]
- 

@@ -1,20 +1,35 @@
 # Indexes
 
-This directory stores FAISS indexes built from Community Notes TSV data.
+Built by `derad-embed-notes` (or `python -m derad_agent.cli.embed_notes`).
 
-The prebuilt index currently shipped with the repository covers approximately **1% of the full Community Notes dataset** for faster iteration during development and testing.
+## notes_index format
 
-For production-grade coverage, rebuild the index from the full dataset:
-
-```bash
-python -m derad_agent.cli.build_indexes \
-  --tsv-root /path/to/full/notes \
-  --global-index \
-  --index-root indexes
+```
+indexes/notes_index/
+├── tweet_ids.npy       object array of tweet IDs (row order matches embeddings)
+├── embeddings.npy      float32 [N, D] matrix of L2-normalised tweet embeddings
+└── notes_cache.json    {tweet_id: [{note_id, summary, classification,
+                                     created_at_millis, current_status}]}
 ```
 
-Alternatively, download a prebuilt full index via the onboarding CLI:
+## Building from Community Notes TSVs
+
+Two raw files are required — both from the [public Community Notes dataset](https://communitynotes.x.com/guide/en/under-the-hood/download-data):
 
 ```bash
-python -m derad_agent.cli.onboard_data
+python -m derad_agent.cli.embed_notes \
+  data/full/notes.tsv \
+  data/full/noteStatusHistory.tsv \
+  --out indexes/notes_index
 ```
+
+For faster iteration during development, point at the sample fixtures:
+
+```bash
+python -m derad_agent.cli.embed_notes \
+  data/samples/notes-mini.tsv \
+  data/samples/noteStatusHistory-mini.tsv \
+  --out indexes/notes_index_mini
+```
+
+Then set `DERAD_AGENT_INDEX_ROOT` to the parent directory of whichever index you want to use.

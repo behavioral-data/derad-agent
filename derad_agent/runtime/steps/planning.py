@@ -26,7 +26,7 @@ def step_1_generate_queries(
     if preset_queries:
         logger.log_info(f"Using {len(preset_queries)} preset queries (planner disabled)")
         queries = validate_search_queries(preset_queries, min_queries=1, max_queries=6)
-        return queries, None, "<preset-queries>"
+        return queries, None, ""
 
     # ── Build prompt & input vars ──
     prompt = get_planner_prompt()

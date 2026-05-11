@@ -86,6 +86,10 @@ test_data/
 
 # Legacy
 evaluations/*/
+indexes_5pct/
 
 # Local planning notes
 rating_matrix_plan.md
+
+# Screenshots
+Screenshot*.png

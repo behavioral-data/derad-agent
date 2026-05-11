@@ -1,80 +1,55 @@
-"""Public API for the landscape-first Community Notes workflow."""
+"""Public API for the simplified Community Notes reply workflow."""
 
 from __future__ import annotations
 
 import pathlib
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, Optional
 
-from derad_agent.indexing.index_builder import build_global_index
-from derad_agent.llm.config import INDEX_ROOT, NOTES_TSV_ROOT
+from derad_agent.llm.config import INDEX_ROOT
 from .landscape_agent import run_landscape_agent
+from .notes_index import NOTES_INDEX_DIRNAME
 
 
-def build_landscape_index(
-    *,
-    tsv_root: Optional[pathlib.Path] = None,
-    tsv_files: Optional[Sequence[pathlib.Path]] = None,
-    index_root: Optional[pathlib.Path] = None,
-    max_retries: Optional[int] = None,
-    initial_retry_delay: Optional[int] = None,
-    embedding_batch_size: Optional[int] = None,
-    per_batch_sleep_seconds: Optional[float] = None,
-) -> None:
-    """Build the global FAISS index used by landscape retrieval.
-
-    Reads Community Notes TSV data from *tsv_root* (or explicit *tsv_files*),
-    embeds each record, and persists the FAISS index under *index_root*.
-    """
-    build_global_index(
-        tsv_root=tsv_root or NOTES_TSV_ROOT,
-        tsv_files=tsv_files,
-        index_root=index_root or INDEX_ROOT,
-        max_retries=max_retries,
-        initial_retry_delay=initial_retry_delay,
-        embedding_batch_size=embedding_batch_size,
-        per_batch_sleep_seconds=per_batch_sleep_seconds,
-    )
+def get_notes_index_dir(index_root: pathlib.Path = INDEX_ROOT) -> pathlib.Path:
+    """Resolve the directory containing tweet-level note index artifacts."""
+    return pathlib.Path(index_root) / NOTES_INDEX_DIRNAME
 
 
 def retrieve_statement_landscape(
     statement: str,
     *,
     index_root: pathlib.Path = INDEX_ROOT,
-    filter_docs_before_utc: Optional[float] = None,
-    exclude_tweet_id: Optional[str] = None,
-    include_classifications: Optional[List[str]] = None,
+    notes_index_dir: Optional[pathlib.Path] = None,
+    k_per_query: int = 25,
+    notes_per_tweet: int = 10,
     similarity_min: float = 0.0,
-    max_points: int = 300,
+    exclude_tweet_id: Optional[str] = None,
+    response_style: str = "neutral",
     verbose: bool = False,
     logger: Optional[Any] = None,
     style: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Run the full landscape pipeline for *statement* and return the result.
+    """Run the plan→retrieve→filter→compose pipeline for *statement*.
 
-    Loads the global FAISS index, generates search queries, retrieves and
-    expands relevant notes, scores misleadingness, and synthesises a
-    landscape summary with key reasons.
-
-    Returns:
-        Dictionary with keys ``statement``, ``queries``, ``documents``,
-        ``misleadingness_landscape``, ``bucket_landscape``, and
-        ``statement_landscape``.
+    Returns dict with ``statement``, ``queries``, ``retrieved_tweets``,
+    ``selected_notes``, and ``reply``.
     """
-    from derad_agent.indexing.index_builder import get_global_index_dir
-
+    target_dir = notes_index_dir or get_notes_index_dir(index_root)
     return run_landscape_agent(
         statement=statement,
-        user_dir=get_global_index_dir(index_root),
-        filter_docs_before_utc=filter_docs_before_utc,
-        exclude_tweet_id=exclude_tweet_id,
-        include_classifications=include_classifications,
+        notes_index_dir=target_dir,
+        k_per_query=k_per_query,
+        notes_per_tweet=notes_per_tweet,
         similarity_min=similarity_min,
-        max_points=max_points,
+        exclude_tweet_id=exclude_tweet_id,
+        response_style=response_style,
         verbose=verbose,
         logger=logger,
         style=style,
     )
 
 
-__all__ = ["build_landscape_index", "retrieve_statement_landscape", "run_landscape_agent"]
-
+__all__ = [
+    "get_notes_index_dir",
+    "retrieve_statement_landscape",
+]

@@ -28,41 +28,101 @@ Output format:
 }}"""
 
 
-RESPONSE_OUTPUT_TEMPLATE = """You are responding to a claim. Below are independent pieces of evidence: real statements written by people about tweets related to this claim. Read them, weigh the evidence they present, and form your own response.
+RESPONSE_STYLES = ("neutral", "bridging", "agonistic")
 
-CLAIM:
+_PREAMBLE_NEUTRAL = """\
+You are replying directly to someone's social media post. You have background \
+knowledge (provided below) that informs your response, but the person you are \
+replying to cannot see it. Respond as yourself — a knowledgeable person who \
+happens to know the relevant facts."""
+
+_PREAMBLE_BRIDGING = """\
+You are replying directly to someone's social media post. You have background \
+knowledge (provided below) that informs your response, but the person you are \
+replying to cannot see it.
+
+Your goal is to add helpful context while being respectful of the poster's \
+perspective. Acknowledge what is understandable about their concern before \
+presenting what you know. Use inclusive, calm language. Frame your reply as \
+adding context, not correcting the person. If the reality is genuinely mixed, \
+say so honestly — do not force agreement.
+
+Write as a thoughtful person who considered their point and wants to have a \
+real conversation."""
+
+_PREAMBLE_AGONISTIC = """\
+You are replying directly to someone's social media post. You have background \
+knowledge (provided below) that informs your response, but the person you are \
+replying to cannot see it.
+
+Your goal is to engage with the claim as a serious assertion that deserves a \
+substantive rebuttal. State your disagreement clearly and present the facts as \
+you know them. Be direct and factual — do not soften your point, but maintain \
+respect for the person. Challenge the ideas, not the person making them. Do \
+not validate the claim if you know it to be wrong, but do not be dismissive \
+or hostile either.
+
+Write as someone who takes the disagreement seriously enough to engage with \
+it honestly."""
+
+_PREAMBLES = {
+    "neutral": _PREAMBLE_NEUTRAL,
+    "bridging": _PREAMBLE_BRIDGING,
+    "agonistic": _PREAMBLE_AGONISTIC,
+}
+
+_RESPONSE_OUTPUT_BODY = """
+CLAIM (the post you are replying to):
 {statement}
 
-EVIDENCE_NOTES_JSON:
+BACKGROUND KNOWLEDGE (private — do NOT reference, quote, or allude to these in your reply):
 {evidence_notes_json}
 
-Each note has a "note" field (the text), a "note_id", a "tweet_id", and optional "evidence_links".
+Use the background knowledge to inform what you say, but write your reply as \
+if you simply know these things. Never mention notes, evidence, sources, \
+datasets, reviews, or any retrieval process. Do not say "according to…", \
+"one source states…", "notes show…", or similar. Just reply to the person.
 
-Based on what these notes say, write a direct response to the claim and list the key reasons supporting your response.
+This is a single-turn interaction — you will not get another chance to respond. \
+Say everything that matters in this one reply. Do not offer to "share more", \
+"explain further", or invite follow-up conversation. Make your point completely \
+and leave nothing important unsaid.
 
 Produce JSON only with this exact schema:
 {{
-  "response": "<direct 3-5 sentence response to the claim, written as if explaining to a friend>",
+  "response": "<direct 3-5 sentence reply to the person, as a social media post>",
   "reasons": [
     {{
-      "reason": "<concise reason drawn from a specific note>",
-      "note_id": "<note_id from EVIDENCE_NOTES_JSON>",
-      "tweet_id": "<tweet_id from EVIDENCE_NOTES_JSON>",
-      "evidence_links": ["<source URL from the note, if available>"]
+      "reason": "<concise factual point that informed your reply>",
+      "note_id": "<note_id from the background knowledge>",
+      "tweet_id": "<tweet_id from the background knowledge>",
+      "evidence_links": ["<0 or 1 URL per reason — only if it strongly supports this reason>"]
     }}
   ]
 }}
 
 Rules:
-- Read the actual content of each note and reason over what it says. Do NOT rely on any metadata or labels — only the note text matters.
-- Respond directly to the claim. Do NOT describe the dataset, the retrieval process, or the distribution of notes.
-- Do NOT cite percentages, counts, ratios, or any statistical language.
-- Ground every reason in a specific note. Do not invent note_id or tweet_id values.
+- The "response" must read as a direct, natural reply to the person. No references to notes, evidence, sources, datasets, or any backend process.
+- Do NOT cite percentages, counts, ratios, or statistical language.
+- Do NOT use phrases like "the evidence shows", "according to sources", "one note states", "reviews indicate", or anything that reveals you are reading from a knowledge base.
+- The "reasons" array is internal bookkeeping — it will not be shown to the person. Ground each reason in a specific note_id from the background knowledge. Do not invent note_id or tweet_id values.
 - Return 3-5 reasons.
-- Include evidence_links only when source URLs appear in the note.
-- If the evidence is mixed or unclear, say so plainly without citing numbers.
-- If there are no evidence notes, return an empty reasons list and say the evidence is insufficient.
+- For evidence_links: be selective. Include **at most one URL per reason**, only when it is clearly useful and on-point. Prefer **roughly 2–4 URLs total** across all reasons (fewer is fine). Skip redundant, weak, or duplicate links; prefer authoritative references over noise.
+- If the background knowledge is mixed or unclear, say so plainly in your reply without citing numbers.
+- If there is no background knowledge, return an empty reasons list and say you are not sure about this one.
 """
+
+# Keep the legacy constant for backward compatibility.
+RESPONSE_OUTPUT_TEMPLATE = _PREAMBLE_NEUTRAL + _RESPONSE_OUTPUT_BODY
+
+
+def _build_response_template(response_style: str) -> str:
+    if response_style not in _PREAMBLES:
+        raise ValueError(
+            f"Unknown response_style {response_style!r}; "
+            f"must be one of {RESPONSE_STYLES}"
+        )
+    return _PREAMBLES[response_style] + _RESPONSE_OUTPUT_BODY
 
 
 RESPONSE_OUTPUT_AGREEABLE_TEMPLATE = """You are a warm, empathetic respondent engaging with someone who holds a strong political belief. Your goal is to make the person feel genuinely heard before presenting what the evidence shows. Acknowledge the concern or frustration that likely motivates the claim, not to flatter the person, but because finding common ground is how you open people up to new information. Write as a trusted friend who takes the claim seriously, shares relevant facts without condescension, and frames disagreement as shared concern for the same underlying values. Never mock or dismiss. De-escalate first, inform second.
@@ -206,11 +266,16 @@ def get_planner_prompt():
     return PromptTemplate(input_variables=["statement"], template=PLANNER_TEMPLATE)
 
 
-def get_response_output_prompt():
-    """Get the claim-response output prompt template."""
+def get_response_output_prompt(response_style: str = "neutral"):
+    """Get the claim-response output prompt template.
+
+    Args:
+        response_style: One of ``"neutral"``, ``"bridging"``, or
+            ``"agonistic"``.
+    """
     return PromptTemplate(
         input_variables=["statement", "evidence_notes_json"],
-        template=RESPONSE_OUTPUT_TEMPLATE,
+        template=_build_response_template(response_style),
     )
 
 
@@ -256,8 +321,9 @@ def get_style_prompt(style: str):
 
 __all__ = [
     "PLANNER_TEMPLATE",
-    "get_planner_prompt",
+    "RESPONSE_STYLES",
     "RESPONSE_OUTPUT_TEMPLATE",
+    "get_planner_prompt",
     "get_response_output_prompt",
     "RESPONSE_OUTPUT_AGREEABLE_TEMPLATE",
     "RESPONSE_OUTPUT_NEUTRAL_TEMPLATE",
