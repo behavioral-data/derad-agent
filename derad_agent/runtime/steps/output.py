@@ -160,12 +160,8 @@ def step_compose_reply(
             reasoning_effort="low",
             text_verbosity="low",
         )
-        try:
-            repair_raw = repair_llm.invoke(repair_prompt)
-            repair_text = extract_text_from_response(repair_raw)
-            parsed = parse_json_response(repair_text)
-        except Exception:
-            parsed = parse_json_response(text)
+        repair_raw = repair_llm.invoke(repair_prompt)
+        parsed = parse_json_response(extract_text_from_response(repair_raw))
 
     if not isinstance(parsed, dict):
         raise ValueError("Compose-reply LLM returned non-object JSON.")

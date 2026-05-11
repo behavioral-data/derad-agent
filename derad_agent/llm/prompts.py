@@ -173,44 +173,14 @@ def get_planner_prompt():
     return PromptTemplate(input_variables=["statement"], template=PLANNER_TEMPLATE)
 
 
-def get_agreeable_prompt():
-    """Get the agreeable-style response prompt template."""
-    return PromptTemplate(
-        input_variables=["statement", "evidence_notes_json"],
-        template=RESPONSE_OUTPUT_AGREEABLE_TEMPLATE,
-    )
-
-
-def get_neutral_prompt():
-    """Get the neutral-style response prompt template."""
-    return PromptTemplate(
-        input_variables=["statement", "evidence_notes_json"],
-        template=RESPONSE_OUTPUT_NEUTRAL_TEMPLATE,
-    )
-
-
-def get_satirical_prompt():
-    """Get the satirical-style response prompt template."""
-    return PromptTemplate(
-        input_variables=["statement", "evidence_notes_json"],
-        template=RESPONSE_OUTPUT_SATIRICAL_TEMPLATE,
-    )
-
-
 def get_style_prompt(style: str):
-    """Return the prompt template for a given style condition.
-
-    Args:
-        style: one of 'agreeable', 'neutral', 'satirical'
-    """
-    getters = {
-        "agreeable": get_agreeable_prompt,
-        "neutral": get_neutral_prompt,
-        "satirical": get_satirical_prompt,
-    }
-    if style not in getters:
-        raise ValueError(f"Unknown style '{style}'. Choose from: {list(getters)}")
-    return getters[style]()
+    """Return the prompt template for *style* (one of 'agreeable', 'neutral', 'satirical')."""
+    if style not in STYLE_TEMPLATES:
+        raise ValueError(f"Unknown style {style!r}. Choose from: {list(STYLE_TEMPLATES)}")
+    return PromptTemplate(
+        input_variables=["statement", "evidence_notes_json"],
+        template=STYLE_TEMPLATES[style],
+    )
 
 
 __all__ = [
@@ -221,8 +191,5 @@ __all__ = [
     "RESPONSE_OUTPUT_SATIRICAL_TEMPLATE",
     "STYLE_TEMPLATES",
     "get_planner_prompt",
-    "get_agreeable_prompt",
-    "get_neutral_prompt",
-    "get_satirical_prompt",
     "get_style_prompt",
 ]

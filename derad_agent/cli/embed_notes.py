@@ -109,7 +109,7 @@ def main():
             key=lambda n: (n.get("created_at_millis") or 0),
             reverse=True,
         )
-        note_records[tid] = notes  # store sorted so runtime deosn't need to re-sort
+        note_records[tid] = notes
         embedding_notes = notes[: args.notes_for_embedding]
         texts.append("\n\n".join(n["summary"] for n in embedding_notes))
 
