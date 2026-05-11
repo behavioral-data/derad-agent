@@ -24,10 +24,9 @@ def retrieve_statement_landscape(
     notes_per_tweet: int = 10,
     similarity_min: float = 0.0,
     exclude_tweet_id: Optional[str] = None,
-    response_style: str = "neutral",
+    style: str = "neutral",
     verbose: bool = False,
     logger: Optional[Any] = None,
-    style: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run the plan→retrieve→filter→compose pipeline for *statement*.
 
@@ -42,10 +41,9 @@ def retrieve_statement_landscape(
         notes_per_tweet=notes_per_tweet,
         similarity_min=similarity_min,
         exclude_tweet_id=exclude_tweet_id,
-        response_style=response_style,
+        style=style,
         verbose=verbose,
         logger=logger,
-        style=style,
     )
 
 

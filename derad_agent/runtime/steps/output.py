@@ -13,7 +13,7 @@ from html import unescape
 from typing import Any, Dict, List, Optional, Sequence
 
 from derad_agent.llm.config import get_llm
-from derad_agent.llm.prompts import get_response_output_prompt, get_style_prompt
+from derad_agent.llm.prompts import get_style_prompt
 
 from ._helpers import extract_text_from_response, parse_json_response
 
@@ -124,13 +124,13 @@ def step_compose_reply(
     statement: str,
     notes: Sequence[Dict[str, Any]],
     *,
-    response_style: str = "neutral",
+    style: str = "neutral",
     max_reasons: int = 5,
 ) -> Dict[str, Any]:
     candidates = _evidence_payload(notes)
     candidate_index = {str(c["note_id"]): c for c in candidates if c.get("note_id") is not None}
 
-    prompt = get_response_output_prompt(response_style=response_style)
+    prompt = get_style_prompt(style)
     llm = get_llm(
         temperature=None,
         max_tokens=1400,

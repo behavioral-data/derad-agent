@@ -25,10 +25,9 @@ def run_landscape_agent(
     notes_per_tweet: int = 10,
     similarity_min: float = 0.0,
     exclude_tweet_id: Optional[str] = None,
-    response_style: str = "neutral",
+    style: str = "neutral",
     verbose: bool = False,
     logger: Optional[Any] = None,
-    style: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run the simplified landscape pipeline for *statement*.
 
@@ -40,7 +39,7 @@ def run_landscape_agent(
         notes_per_tweet: Cap on CURRENTLY_RATED_HELPFUL notes kept per tweet (latest first).
         similarity_min: Minimum cosine similarity for retrieved tweets.
         exclude_tweet_id: Optional tweet ID to exclude (e.g. self-exclusion).
-        response_style: Reply tone (``"neutral"``, ``"bridging"``, ``"agonistic"``).
+        style: Reply tone — one of ``"agreeable"``, ``"neutral"``, ``"satirical"``.
         verbose: Enable detailed logging.
         logger: Optional custom logger.
 
@@ -90,7 +89,7 @@ def run_landscape_agent(
     reply = step_compose_reply(
         statement=statement,
         notes=selected_notes,
-        response_style=response_style,
+        style=style,
     )
 
     return {

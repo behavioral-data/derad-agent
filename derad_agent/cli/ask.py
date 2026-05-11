@@ -69,7 +69,7 @@ def _save_full_output(
             "notes_per_tweet": args.notes_per_tweet,
             "similarity_min": args.similarity_min,
             "exclude_tweet_id": args.exclude_tweet_id,
-            "response_style": args.response_style,
+            "style": args.style,
             "max_sources": args.max_sources,
             "verbose": args.verbose,
         },
@@ -100,9 +100,9 @@ def main():
                     help="Number of tweets to fetch per planner query")
     ap.add_argument("--notes-per-tweet", type=int, default=10,
                     help="Cap on CURRENTLY_RATED_HELPFUL notes kept per tweet (latest first)")
-    ap.add_argument("--response-style", type=str, default="neutral",
+    ap.add_argument("--style", type=str, default="neutral",
                     choices=RESPONSE_STYLES,
-                    help="Tone of the final response: neutral, bridging, or agonistic")
+                    help="Response style: agreeable, neutral, or satirical (default: neutral)")
     ap.add_argument("--max-sources", type=int, default=5, metavar="N",
                     help="Max deduplicated source URLs to show below the reply (default: 5).")
     ap.add_argument("--verbose", action="store_true", help="Show detailed logging")
@@ -122,7 +122,7 @@ def main():
         "k_per_query": args.k_per_query,
         "notes_per_tweet": args.notes_per_tweet,
         "similarity_min": args.similarity_min,
-        "response_style": args.response_style,
+        "style": args.style,
         "verbose": args.verbose,
     }
     if args.exclude_tweet_id is not None:

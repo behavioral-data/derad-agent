@@ -126,7 +126,7 @@ def test_run_landscape_agent_end_to_end(monkeypatch, tmp_path):
     def _fake_compose(statement, notes, **kwargs):
         captured["statement"] = statement
         captured["notes"] = list(notes)
-        captured["response_style"] = kwargs.get("response_style")
+        captured["style"] = kwargs.get("style")
         return {
             "statement": statement,
             "response": "synthetic reply",
@@ -143,7 +143,7 @@ def test_run_landscape_agent_end_to_end(monkeypatch, tmp_path):
         notes_index_dir=index_dir,
         k_per_query=5,
         notes_per_tweet=10,
-        response_style="bridging",
+        style="agreeable",
     )
 
     assert result["statement"] == "The policy is effective."
@@ -153,7 +153,7 @@ def test_run_landscape_agent_end_to_end(monkeypatch, tmp_path):
     assert result["reply"]["response"] == "synthetic reply"
 
     assert captured["statement"] == "The policy is effective."
-    assert captured["response_style"] == "bridging"
+    assert captured["style"] == "agreeable"
     assert {n["note_id"] for n in captured["notes"]} == {"n1", "n2", "n4"}
 
 
@@ -180,8 +180,8 @@ def test_retrieve_statement_landscape_resolves_notes_dir(monkeypatch, tmp_path):
         "hello world",
         index_root=index_root,
         notes_per_tweet=7,
-        response_style="agonistic",
+        style="satirical",
     )
     assert captured["notes_index_dir"] == notes_dir
     assert captured["notes_per_tweet"] == 7
-    assert captured["response_style"] == "agonistic"
+    assert captured["style"] == "satirical"
