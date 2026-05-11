@@ -158,6 +158,28 @@ Rules:
 - If there are no evidence notes, return an empty reasons list and say the evidence is insufficient.
 """
 
+RELEVANCE_FILTER_TEMPLATE = """You are a relevance classifier. Decide which of the following community notes are relevant to the given statement.
+
+A note is relevant if it discusses the same topic, event, person, or specific claim as the statement — whether it supports or contradicts it.
+A note is NOT relevant if it is about a clearly different subject that only shares surface-level keywords with the statement.
+
+When in doubt, include the note.
+Do NOT judge whether the notes are true or false — only whether they are about the same subject.
+
+STATEMENT:
+{statement}
+
+NOTES:
+{notes_json}
+
+Each note has a "note_id" and "summary" field.
+
+Return JSON only:
+{{
+  "keep_note_ids": ["<note_id>", ...]
+}}"""
+
+
 STYLE_TEMPLATES = {
     "agreeable": RESPONSE_OUTPUT_AGREEABLE_TEMPLATE,
     "neutral": RESPONSE_OUTPUT_NEUTRAL_TEMPLATE,
@@ -166,6 +188,14 @@ STYLE_TEMPLATES = {
 
 
 RESPONSE_STYLES = tuple(STYLE_TEMPLATES)
+
+
+def get_relevance_filter_prompt():
+    """Return the prompt template for LLM-based note relevance filtering."""
+    return PromptTemplate(
+        input_variables=["statement", "notes_json"],
+        template=RELEVANCE_FILTER_TEMPLATE,
+    )
 
 
 def get_planner_prompt():
@@ -185,11 +215,13 @@ def get_style_prompt(style: str):
 
 __all__ = [
     "PLANNER_TEMPLATE",
+    "RELEVANCE_FILTER_TEMPLATE",
     "RESPONSE_STYLES",
     "RESPONSE_OUTPUT_AGREEABLE_TEMPLATE",
     "RESPONSE_OUTPUT_NEUTRAL_TEMPLATE",
     "RESPONSE_OUTPUT_SATIRICAL_TEMPLATE",
     "STYLE_TEMPLATES",
     "get_planner_prompt",
+    "get_relevance_filter_prompt",
     "get_style_prompt",
 ]

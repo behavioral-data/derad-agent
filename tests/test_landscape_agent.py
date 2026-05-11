@@ -144,6 +144,7 @@ def test_run_landscape_agent_end_to_end(monkeypatch, tmp_path):
         k_per_query=5,
         notes_per_tweet=10,
         style="agreeable",
+        filter_notes=False,
     )
 
     assert result["statement"] == "The policy is effective."

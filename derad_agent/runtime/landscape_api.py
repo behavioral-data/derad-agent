@@ -25,6 +25,7 @@ def retrieve_statement_landscape(
     similarity_min: float = 0.0,
     exclude_tweet_id: Optional[str] = None,
     style: str = "neutral",
+    filter_notes: bool = True,
     verbose: bool = False,
     logger: Optional[Any] = None,
 ) -> Dict[str, Any]:
@@ -42,6 +43,7 @@ def retrieve_statement_landscape(
         similarity_min=similarity_min,
         exclude_tweet_id=exclude_tweet_id,
         style=style,
+        filter_notes=filter_notes,
         verbose=verbose,
         logger=logger,
     )

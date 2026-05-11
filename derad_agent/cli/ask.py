@@ -70,6 +70,7 @@ def _save_full_output(
             "similarity_min": args.similarity_min,
             "exclude_tweet_id": args.exclude_tweet_id,
             "style": args.style,
+            "filter_notes": not args.no_filter,
             "max_sources": args.max_sources,
             "verbose": args.verbose,
         },
@@ -105,6 +106,8 @@ def main():
                     help="Response style: agreeable, neutral, or satirical (default: neutral)")
     ap.add_argument("--max-sources", type=int, default=5, metavar="N",
                     help="Max deduplicated source URLs to show below the reply (default: 5).")
+    ap.add_argument("--no-filter", dest="no_filter", action="store_true",
+                    help="Skip LLM relevance filter (keep all retrieved notes)")
     ap.add_argument("--verbose", action="store_true", help="Show detailed logging")
 
     args = ap.parse_args()
@@ -123,6 +126,7 @@ def main():
         "notes_per_tweet": args.notes_per_tweet,
         "similarity_min": args.similarity_min,
         "style": args.style,
+        "filter_notes": not args.no_filter,
         "verbose": args.verbose,
     }
     if args.exclude_tweet_id is not None:

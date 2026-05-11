@@ -14,7 +14,7 @@ from .notes_index import (
     retrieve_tweets,
     select_recent_helpful_notes,
 )
-from .steps import step_1_generate_queries, step_compose_reply
+from .steps import step_1_generate_queries, step_filter_notes_by_relevance, step_compose_reply
 
 
 def run_landscape_agent(
@@ -26,6 +26,7 @@ def run_landscape_agent(
     similarity_min: float = 0.0,
     exclude_tweet_id: Optional[str] = None,
     style: str = "neutral",
+    filter_notes: bool = True,
     verbose: bool = False,
     logger: Optional[Any] = None,
 ) -> Dict[str, Any]:
@@ -40,6 +41,7 @@ def run_landscape_agent(
         similarity_min: Minimum cosine similarity for retrieved tweets.
         exclude_tweet_id: Optional tweet ID to exclude (e.g. self-exclusion).
         style: Reply tone — one of ``"agreeable"``, ``"neutral"``, ``"satirical"``.
+        filter_notes: Run LLM relevance filter before composing reply (default: True).
         verbose: Enable detailed logging.
         logger: Optional custom logger.
 
@@ -85,6 +87,13 @@ def run_landscape_agent(
         per_tweet=notes_per_tweet,
     )
     logger.log_info(f"Selected {len(selected_notes)} CURRENTLY_RATED_HELPFUL notes (≤{notes_per_tweet} per tweet)")
+
+    if filter_notes:
+        selected_notes = step_filter_notes_by_relevance(
+            statement=statement,
+            notes=selected_notes,
+            logger=logger,
+        )
 
     reply = step_compose_reply(
         statement=statement,
