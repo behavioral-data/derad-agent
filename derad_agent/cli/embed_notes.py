@@ -95,6 +95,7 @@ def main():
     parser.add_argument("--out", type=Path, default=Path("indexes/notes_index"))
     parser.add_argument(
         "--notes-for-embedding", type=int, default=15, metavar="N",
+        # Apr 2026: dataset max is 14 notes/tweet so this cap never fires; kept for future growth
         help="Max helpful notes per tweet used for embedding text, most recent first (default: 15)",
     )
     args = parser.parse_args()

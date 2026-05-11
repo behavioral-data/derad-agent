@@ -122,6 +122,9 @@ def select_recent_helpful_notes(
     Returns a flat list of note dicts with ``note_id``, ``tweet_id``,
     ``summary``, ``classification``, ``created_at_millis``,
     ``current_status``, and the tweet's retrieval ``similarity``.
+
+    Note: as of Apr 2026 the dataset has ≤14 helpful notes per tweet (87% have
+    exactly 1), so per_tweet=10 almost never fires — kept for future growth.
     """
     out: List[Dict[str, Any]] = []
     for tweet_id, similarity in retrieved:
