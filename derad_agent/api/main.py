@@ -4,12 +4,11 @@ import hashlib
 import base64
 
 from derad_agent.api.utils import post_reply
-from derad_agent.utils import get_secret
-
+from derad_agent.llm.config import _require_env
 
 app = Flask(__name__)
 
-CONSUMER_SECRET = get_secret("consumer_secret")
+CONSUMER_SECRET = _require_env("X_API_SECRET")
 
 
 @app.route("/mention", methods=["GET", "POST"])
@@ -48,7 +47,7 @@ def mention():
         reply_id = post_reply(parent_id=mention, reply_text=reply['text'])
 
         # TODO: post sources
-        if reply['sources'] is not None:
+        if reply['sources'] is not None and reply_id > 0:
             sources_text = f"Sources:\n{reply['sources'].join("\n")}"
             post_reply(parent_id=reply_id, reply_text=f"Sources:\n{sources_text}")
 
