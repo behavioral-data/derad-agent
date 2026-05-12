@@ -72,6 +72,7 @@ data/*
 !data/legacy_json/.gitkeep
 data/notes-*.tsv
 indexes/*
+
 # Explicitly ignore moved local subset indexes
 indexes/indexes_1pct/
 !indexes/.gitkeep
@@ -93,3 +94,6 @@ rating_matrix_plan.md
 
 # Screenshots
 Screenshot*.png
+
+# Secrets
+secrets/
