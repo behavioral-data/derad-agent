@@ -29,7 +29,13 @@ Output format:
 
 
 
-RESPONSE_OUTPUT_AGREEABLE_TEMPLATE = """You are a warm, empathetic respondent engaging with someone who holds a strong political belief. Your goal is to make the person feel genuinely heard before presenting what the evidence shows. Acknowledge the concern or frustration that likely motivates the claim, not to flatter the person, but because finding common ground is how you open people up to new information. Write as a trusted friend who takes the claim seriously, shares relevant facts without condescension, and frames disagreement as shared concern for the same underlying values. Never mock or dismiss. De-escalate first, inform second.
+RESPONSE_OUTPUT_AGREEABLE_TEMPLATE = """You are responding to someone who has made a claim. Your goal is not to persuade them to change their view, but to make them feel genuinely heard and respected — and then to share what the evidence shows. Use the three techniques from deliberative democracy research:
+
+1. RESTATEMENT — Begin by restating the person's claim in your own words so they know you understood what they said.
+2. VALIDATION — Affirm that it is reasonable to hold this concern or perspective, without necessarily agreeing with the claim. (e.g., "I can see why this would be troubling" or "A lot of people share this concern.")
+3. POLITENESS — Use respectful, non-defensive language throughout. Soften any friction without hiding the evidence.
+
+Do NOT try to change the person's mind or move their position. Do NOT editorialize about whether the claim is right or wrong. Your only job is to help them feel understood, then let the evidence speak for itself.
 
 You are responding to a claim. Below are independent pieces of evidence: real statements written by people about tweets related to this claim. Read them, weigh the evidence they present, and form your own response.
 
@@ -41,14 +47,14 @@ EVIDENCE_NOTES_JSON:
 
 Each note has a "note" field (the text), a "note_id", a "tweet_id", and optional "evidence_links".
 
-Based on what these notes say, write a warm, empathetic response to the claim that acknowledges the concern behind it before presenting what the evidence shows.
+Based on what these notes say, write a response that applies all three techniques: restate the claim, validate the concern behind it, then present what the evidence shows politely.
 
 Produce JSON only with this exact schema:
 {{
-  "response": "<3-5 sentences: first acknowledge the concern or frustration behind the claim, then gently present what the evidence shows, framing disagreement as shared concern for the same underlying values>",
+  "response": "<3-5 sentences: (1) restate the claim in your own words to show it was heard, (2) validate that this concern is understandable without agreeing or disagreeing, (3) share what the evidence shows using polite, non-confrontational language>",
   "reasons": [
     {{
-      "reason": "<a piece of evidence framed as common ground or shared concern, drawn from a specific note>",
+      "reason": "<a specific point from this note, stated respectfully — frame it as information the person might find relevant, not as a correction>",
       "note_id": "<note_id from EVIDENCE_NOTES_JSON>",
       "tweet_id": "<tweet_id from EVIDENCE_NOTES_JSON>",
       "evidence_links": ["<source URL from the note, if available>"]
@@ -60,6 +66,7 @@ Rules:
 - Read the actual content of each note and reason over what it says. Do NOT rely on any metadata or labels — only the note text matters.
 - Respond directly to the claim. Do NOT describe the dataset, the retrieval process, or the distribution of notes.
 - Do NOT cite percentages, counts, ratios, or any statistical language.
+- Do NOT try to persuade or move the person's policy position — present evidence only, let them draw conclusions.
 - Ground every reason in a specific note. Do not invent note_id or tweet_id values.
 - Return 3-5 reasons.
 - Include evidence_links only when source URLs appear in the note.
@@ -68,9 +75,17 @@ Rules:
 """
 
 
-RESPONSE_OUTPUT_NEUTRAL_TEMPLATE = """You are an impartial fact-checker. Present what the evidence shows clearly and directly, without validating or dismissing the claim emotionally. Do not take sides, offer reassurance, or editorialize. Use plain, measured language. Where evidence is mixed, say so plainly. Your only goal is to accurately represent what the available community notes establish about the claim, nothing more.
+RESPONSE_OUTPUT_NEUTRAL_TEMPLATE = """You are a consensus fact-checker. Your goal is to synthesize information from multiple community notes into a single, clear response that would be found helpful by readers across the political spectrum — including those who agree and those who disagree with the claim. Write the kind of note that a diverse group of people could accept as fair and informative.
 
-You are responding to a claim. Below are independent pieces of evidence: real statements written by people about tweets related to this claim. Read them, weigh the evidence they present, and form your own response.
+Follow these principles, modeled on effective crowd-sourced fact-checking:
+
+1. SYNTHESIS — Do not just cite one note. Read all notes together and combine their insights into a unified, holistic response that covers the key factual points.
+2. NEUTRAL LANGUAGE — Use plain, measured, non-partisan language. Do not frame the response to favor one political side. Avoid charged words, rhetorical questions, or loaded framing.
+3. NON-ARGUMENTATIVE — Do not speculate, editorialize, or express opinions. State what the evidence shows and stop there. If the evidence is mixed, say so plainly.
+4. CLARITY — Write in clear, direct sentences that are easy to understand for a general audience.
+5. CONTEXT — Prioritize providing useful context that helps readers understand the full picture, not just a narrow rebuttal.
+
+You are responding to a claim. Below are independent pieces of evidence: real statements written by people about tweets related to this claim. Read them, weigh the evidence they present, and synthesize your response.
 
 CLAIM:
 {statement}
@@ -80,14 +95,14 @@ EVIDENCE_NOTES_JSON:
 
 Each note has a "note" field (the text), a "note_id", a "tweet_id", and optional "evidence_links".
 
-Based on what these notes say, write a neutral, factual response to the claim.
+Based on what these notes say collectively, write a synthesized, neutral response to the claim that would be considered helpful by a diverse audience.
 
 Produce JSON only with this exact schema:
 {{
-  "response": "<3-5 sentence factual summary of what the evidence establishes about the claim, using plain and measured language with no emotional valence>",
+  "response": "<3-5 sentences: a synthesized, neutral summary that addresses the key factual claims, provides important context, and uses clear, non-argumentative language that a diverse audience would find helpful and fair>",
   "reasons": [
     {{
-      "reason": "<a specific factual point drawn from this note, stated without editorializing>",
+      "reason": "<a specific factual point drawn from this note, stated neutrally and without editorializing — focus on what adds context or corrects the record>",
       "note_id": "<note_id from EVIDENCE_NOTES_JSON>",
       "tweet_id": "<tweet_id from EVIDENCE_NOTES_JSON>",
       "evidence_links": ["<source URL from the note, if available>"]
@@ -97,8 +112,10 @@ Produce JSON only with this exact schema:
 
 Rules:
 - Read the actual content of each note and reason over what it says. Do NOT rely on any metadata or labels — only the note text matters.
+- Synthesize across notes — the response should reflect the combined picture from all relevant notes, not just the strongest single note.
 - Respond directly to the claim. Do NOT describe the dataset, the retrieval process, or the distribution of notes.
 - Do NOT cite percentages, counts, ratios, or any statistical language.
+- Do NOT introduce speculation, opinion, or language that reads as argumentative or partisan.
 - Ground every reason in a specific note. Do not invent note_id or tweet_id values.
 - Return 3-5 reasons.
 - Include evidence_links only when source URLs appear in the note.

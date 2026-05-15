@@ -119,11 +119,11 @@ def get_llm(
             raise exc
 
 
-from xdk import Client
-from xdk.oauth1_auth import OAuth1
-
 def get_x_client():
     """Return X client."""
+    from xdk import Client
+    from xdk.oauth1_auth import OAuth1
+
     oauth1 = OAuth1(
         api_key=_require_env("X_API_KEY"),
         api_secret=_require_env("X_API_SECRET"),
