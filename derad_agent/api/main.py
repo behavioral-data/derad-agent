@@ -3,7 +3,7 @@ import hmac
 import hashlib
 import base64
 
-from derad_agent.api.utils import post_reply
+from derad_agent.api.utils import post_reply, fetch_tweet_text, generate_reply
 from derad_agent.llm.config import _require_env
 
 app = Flask(__name__)
@@ -32,23 +32,36 @@ def mention():
         event = request.get_json()
         print("Received event:", event)
 
-        # TODO: parse webhook payload to extract text of mention's parent post
+        # Parse webhook payload
         # Webhook Payload: https://docs.x.com/x-api/account-activity/introduction#tweet_create_events-@mentions
-        # Tweet Object Structure: https://docs.x.com/x-api/fundamentals/data-dictionary#post-tweet (see referenced_tweets field)
+        tweet_events = event.get("tweet_create_events", [])
+        if not tweet_events:
+            return "", 200
+
+        tweet = tweet_events[0]
+        mention_id = tweet.get("id_str")
+        parent_id = tweet.get("in_reply_to_status_id_str")
+
+        if not parent_id:
+            # Bot was @mentioned directly with no OP post to fact-check
+            return "", 200
+
+        # Fetch text of the parent post (the claim being fact-checked)
+        # Tweet Object Structure: https://docs.x.com/x-api/fundamentals/data-dictionary#post-tweet
         # Get Tweet text from ID: https://docs.x.com/x-api/posts/get-post-by-id
-        mention_id = -1
-        parent_id = -1
-        parent_text = ""
+        parent_text = fetch_tweet_text(parent_id)
+        if not parent_text:
+            return "", 200
 
-        # TODO: generate reply to given statement (create and call function from ask.py)
-        reply = None  # function should return a dict with keys reply_text and sources, where sources is a list of links to community notes
+        # Run Community Notes pipeline to generate a grounded reply
+        reply = generate_reply(statement=parent_text, exclude_tweet_id=parent_id)
 
-        # TODO: post reply
-        reply_id = post_reply(parent_id=mention, reply_text=reply['text'])
+        # Post the reply to the mention
+        reply_id = post_reply(parent_id=mention_id, reply_text=reply["text"])
 
-        # TODO: post sources
-        if reply['sources'] is not None and reply_id > 0:
-            sources_text = f"Sources:\n{reply['sources'].join("\n")}"
-            post_reply(parent_id=reply_id, reply_text=f"Sources:\n{sources_text}")
+        # Post sources as a follow-up thread reply
+        if reply["sources"] is not None and reply_id > 0:
+            sources_text = "Sources:\n" + "\n".join(reply["sources"])
+            post_reply(parent_id=reply_id, reply_text=sources_text)
 
         return "", 200
