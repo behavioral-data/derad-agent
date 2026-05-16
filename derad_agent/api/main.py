@@ -11,8 +11,19 @@ app = Flask(__name__)
 CONSUMER_SECRET = _require_env("X_API_SECRET")
 
 
-@app.route("/mention", methods=["GET", "POST"])
-def mention():
+@app.route("/mention-agreeable", methods=["GET", "POST"])
+def mention_agreeable():
+    return mention("agreeable")
+
+@app.route("/mention-neutral", methods=["GET", "POST"])
+def mention_neutral():
+    return mention("neutral")
+
+@app.route("/mention-satirical", methods=["GET", "POST"])
+def mention_satirical():
+    return mention("satirical")
+
+def mention(tone):
     # Code taken from https://docs.x.com/x-api/webhooks/quickstart
     if request.method == "GET":
         # Handle CRC check
@@ -34,7 +45,7 @@ def mention():
 
         # Parse webhook payload
         # Webhook Payload: https://docs.x.com/x-api/account-activity/introduction#tweet_create_events-@mentions
-        tweet_events = event.get("tweet_create_events", [])
+        tweet_events = event.get("tweet_create_events", None)
         if not tweet_events:
             return "", 200
 
@@ -53,8 +64,15 @@ def mention():
         if not parent_text:
             return "", 200
 
+        # TODO (Aahan): return early if mention_id is in database already (duplicate events)
+        # TODO (Aahan): rate limit if author_id has posted 3<= unique mention_ids in one second
+        # TODO (Aahan): record mention_id, parent_id, author_id, mention_post_time
+
+        # TODO (Trisha): if author_id has posted at least 10 unique mention_ids today, send survey via DMs
+        # TODO (Trisha): record engagement with parent post (likes, reposts, replies)
+
         # Run Community Notes pipeline to generate a grounded reply
-        reply = generate_reply(statement=parent_text, exclude_tweet_id=parent_id)
+        reply = generate_reply(statement=parent_text, exclude_tweet_id=parent_id, tone=tone)
 
         # Post the reply to the mention
         reply_id = post_reply(parent_id=mention_id, reply_text=reply["text"])
@@ -63,5 +81,7 @@ def mention():
         if reply["sources"] is not None and reply_id > 0:
             sources_text = "Sources:\n" + "\n".join(reply["sources"])
             post_reply(parent_id=reply_id, reply_text=sources_text)
+
+        # TODO (Trisha): queue job to measure engagement with bot reply in 3 days
 
         return "", 200

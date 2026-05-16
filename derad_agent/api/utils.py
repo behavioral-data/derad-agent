@@ -30,10 +30,13 @@ def fetch_tweet_text(tweet_id):
         return None
 
 
-def generate_reply(statement, exclude_tweet_id=None, max_sources=5):
+def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5):
     from derad_agent.runtime.landscape_api import retrieve_statement_landscape
 
-    kwargs = {"statement": statement}
+    kwargs = {
+        "statement": statement,
+        "style": tone
+    }
     if exclude_tweet_id is not None:
         kwargs["exclude_tweet_id"] = str(exclude_tweet_id)
 
