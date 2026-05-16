@@ -119,7 +119,7 @@ def get_llm(
             raise exc
 
 
-def get_x_client():
+def get_x_client(tone="satirical"):
     """Return X client."""
     from xdk import Client
     from xdk.oauth1_auth import OAuth1
@@ -127,8 +127,8 @@ def get_x_client():
     oauth1 = OAuth1(
         api_key=_require_env("X_API_KEY"),
         api_secret=_require_env("X_API_SECRET"),
-        access_token=_require_env("X_ACCESS_TOKEN"),
-        access_token_secret=_require_env("X_ACCESS_TOKEN_SECRET")
+        access_token=_require_env(f"X_ACCESS_TOKEN_{tone.upper()}"),
+        access_token_secret=_require_env(f"X_ACCESS_TOKEN_SECRET_{tone.upper()}")
     )
     client = Client(auth=oauth1)
     return client

@@ -75,12 +75,12 @@ def mention(tone):
         reply = generate_reply(statement=parent_text, exclude_tweet_id=parent_id, tone=tone)
 
         # Post the reply to the mention
-        reply_id = post_reply(parent_id=mention_id, reply_text=reply["text"])
+        reply_id = post_reply(parent_id=mention_id, reply_text=reply["text"], tone=tone)
 
         # Post sources as a follow-up thread reply
         if reply["sources"] is not None and reply_id > 0:
             sources_text = "Sources:\n" + "\n".join(reply["sources"])
-            post_reply(parent_id=reply_id, reply_text=sources_text)
+            post_reply(parent_id=reply_id, reply_text=sources_text, tone=tone)
 
         # TODO (Trisha): queue job to measure engagement with bot reply in 3 days
 
