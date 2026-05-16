@@ -1,9 +1,9 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, url_for, render_template
 import hmac
 import hashlib
 import base64
 
-from derad_agent.api.utils import post_reply, fetch_tweet_text, generate_reply
+from derad_agent.app.utils import post_reply, fetch_tweet_text, generate_reply, generate_notes_html
 from derad_agent.llm.config import _require_env
 
 app = Flask(__name__)
@@ -80,8 +80,30 @@ def mention(tone):
         if reply["sources"] is not None and reply_id > 0:
             sources_text = "Sources:\n" + "\n".join(reply["sources"])
             post_reply(parent_id=reply_id, reply_text=sources_text, tone=tone)
+            info_url = url_for(
+                "info",
+                reply_id=reply_id,
+                tweet_id=reply["tweets"],
+                note_id=reply["notes"]
+            )
+            sources_text += f"\nMore Info: {info_url}"
 
         # TODO (Trisha): send survey via DMs
         # TODO (Trisha): queue job to measure engagement with bot reply in 3 days
 
         return "", 200
+
+@app.route("/info", methods=["GET"])
+def info():
+    reply_id = request.args.get("reply_id")
+    tweet_ids = request.args.getlist("tweet_id")
+    note_ids = request.args.getlist("note_id")
+
+    reply_html = f"""
+        <blockquote class="twitter-tweet">
+            <a href="https://twitter.com/username/status/{reply_id}"></a> 
+        </blockquote>
+    """
+    notes_html = generate_notes_html(tweet_ids, note_ids)
+
+    return render_template("info.html", reply=reply_html, notes=notes_html), 200

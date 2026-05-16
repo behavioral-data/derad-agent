@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="stylesheet" href="{{ url_for('static',filename='info.css') }}">
+    <meta charset="UTF-8">
+    <title>Political Conversations Bot - Research Study</title>
+</head>
+<body>
+<main>
+    <h2>About this Bot</h2>
+    <p>This is an informational page about three bots created by University of Washington researchers: @aggie_bot, @nellie_bot, and @eddie_bot. These bots were created as part of a study to investigate how AI bots affect online political conversations. Our bots generate responses by retrieving and synthesizing data from <a href="https://help.x.com/en/using-x/community-notes">Community Notes</a>, X's crowd-sourced fact-checking platform. We source notes from X's publicly available repository of <a href="https://x.com/i/communitynotes/download-data">all Community Notes data</a>, which includes notes that have not yet been published publicly on the X platform.
+    </p>
+
+    <h2>About this Post</h2>
+    {{reply|safe}}
+    <div class="sources">
+        <h3>Sources</h3>
+        <ul>
+            {{notes|safe}}
+        </ul>
+    </div>
+    <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+</main>
+<footer>
+    <p>&copy; 2026 University of Washington</p>
+</footer>
+</body>
+</html>

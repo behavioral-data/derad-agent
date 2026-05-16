@@ -1,0 +1,125 @@
+body {
+    text-align: center;
+    min-width: 300px;
+    max-width: 600px;
+    margin: 0 auto;
+    font-family: sans-serif;
+}
+
+.twitter-tweet {
+    margin: 0 auto;
+}
+
+.sources {
+    margin-top: 40px;
+}
+
+ul {
+    margin: 100px auto;
+    height: 300px;
+    padding: 20px;
+    display:  flex;
+    gap: 4vw;
+
+    overflow-x: scroll;
+    scroll-snap-type: x mandatory;
+
+    anchor-name: --my-carousel;
+}
+
+li {
+    min-width: 250px;
+    max-width: 550px;
+    border-width: 1px;
+    border-radius: 12px;
+    border-style: solid;
+    border-color: rgb(207, 217, 222);
+    overflow:hidden;
+
+    list-style-type: none;
+    flex: 0 0 100%;
+
+    scroll-snap-align: center;
+
+    scroll-marker-group: after;
+}
+
+.note-body {
+    outline-style: none;
+    padding: 12px 16px 4px;
+    background-color: rgb(255, 255, 255);
+    overflow-wrap: break-word;
+}
+
+ul::scroll-button(*) {
+    margin-top: 100px;
+    border: 0;
+    font-size: 2rem;
+    background: none;
+    color: black;
+    opacity: 0.7;
+    cursor: pointer;
+}
+
+ul::scroll-button(*):hover,
+ul::scroll-button(*):focus {
+    opacity: 1;
+}
+
+ul::scroll-button(*):active {
+    translate: 1px 1px;
+}
+
+ul::scroll-button(*):disabled {
+    opacity: 0.2;
+    cursor: unset;
+}
+
+ul::scroll-button(left) {
+    content: "◄" / "Previous";
+}
+
+ul::scroll-button(right) {
+    content: "►" / "Next";
+}
+
+ul::scroll-button(*) {
+    position: absolute;
+    position-anchor: --my-carousel;
+}
+
+ul::scroll-button(left) {
+    right: calc(anchor(left) - 70px);
+    bottom: calc(anchor(top) + 13px);
+}
+
+ul::scroll-button(right) {
+    left: calc(anchor(right) - 70px);
+    bottom: calc(anchor(top) + 13px);
+}
+
+ul::scroll-marker-group {
+    position: absolute;
+    position-anchor: --my-carousel;
+    top: calc(anchor(bottom) - 70px);
+    justify-self: anchor-center;
+
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+}
+
+li::scroll-marker {
+    content: attr(data-accName);
+    width: 16px;
+    height: 16px;
+    background-color: transparent;
+    border: 2px solid black;
+    border-radius: 50%;
+    overflow: hidden;
+    text-indent: 16px;
+}
+
+li::scroll-marker:target-current {
+    background-color: black;
+}

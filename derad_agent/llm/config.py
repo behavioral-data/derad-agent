@@ -119,8 +119,8 @@ def get_llm(
             raise exc
 
 
-def get_x_client(tone="satirical"):
-    """Return X client."""
+def get_x_client(tone="agreeable"):
+    """X client singleton."""
     from xdk import Client
     from xdk.oauth1_auth import OAuth1
 
@@ -132,7 +132,6 @@ def get_x_client(tone="satirical"):
     )
     client = Client(auth=oauth1)
     return client
-
 
 __all__ = [
     "NOTES_TSV_ROOT",

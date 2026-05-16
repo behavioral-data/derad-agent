@@ -155,12 +155,16 @@ def main():
     reply = res.get("reply") or {}
     response_text = (reply.get("response") or "").strip()
 
+    tweets: list = []
+    notes: list = []
     sources: list = []
     seen_urls: set = set()
     max_src = max(0, args.max_sources)
     for reason in (reply.get("reasons") or []):
         if max_src == 0 or len(sources) >= max_src:
             break
+        tweets.append(reason.get("tweet_id"))
+        notes.append(reason.get("note_id"))
         for link in (reason.get("evidence_links") or []):
             if len(sources) >= max_src:
                 break
@@ -168,7 +172,9 @@ def main():
                 sources.append(link.strip())
                 seen_urls.add(link.strip())
     if sources:
-        response_text = response_text + "\n\nSources:\n" + "\n".join(sources)
+        response_text += "\n\nSources:\n" + "\n".join(sources)
+        response_text += "\n\nTweets:\n" + "\n".join(tweets)
+        response_text += "\n\nNotes:\n" + "\n".join(notes)
 
     if response_text:
         console.print(Panel(response_text, title="Response", border_style="yellow"))
