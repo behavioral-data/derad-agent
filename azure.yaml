@@ -1,0 +1,22 @@
+# Azure Developer CLI (azd) config.
+# `azd up` runs: provision (Bicep) → build (Docker) → push to ACR → deploy.
+# See ../docs/azure_deployment_plan.html § Phase 3 for the full runbook.
+
+name: derad-agent
+metadata:
+  template: derad-agent@2.0.0
+
+infra:
+  provider: bicep
+  path: infra
+  module: main
+
+services:
+  derad-agent:
+    project: .
+    language: python
+    host: appservice
+    docker:
+      path: Dockerfile
+      context: .
+      remoteBuild: false

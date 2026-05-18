@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "value": "${AZURE_ENV_NAME}"
+    },
+    "location": {
+      "value": "${AZURE_LOCATION}"
+    },
+    "appServicePlanSku": {
+      "value": "${APP_SERVICE_PLAN_SKU=B2}"
+    },
+    "botHandleAgreeable": {
+      "value": "${BOT_HANDLE_AGREEABLE=aggie_bot}"
+    },
+    "botHandleNeutral": {
+      "value": "${BOT_HANDLE_NEUTRAL=nellie_bot}"
+    },
+    "botHandleSatirical": {
+      "value": "${BOT_HANDLE_SATIRICAL=eddie_bot}"
+    },
+    "restrictToRegistered": {
+      "value": true
+    },
+    "allowedAuthorIds": {
+      "value": "${DERAD_ALLOWED_AUTHOR_IDS=}"
+    }
+  }
+}

@@ -1,0 +1,52 @@
+# Keep build context small. Index dir is intentionally NOT excluded — we bake it in.
+
+# Raw data — only needed to build the index, not to serve it
+data/full/
+data/samples/
+data/legacy_json/
+data/*.tsv
+data/*.json
+data/*.sha256
+
+# Local artifacts
+results/
+logs/
+indexes/indexes_1pct/
+indexes/README.md
+
+# Python
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Envs / virtualenvs
+.venv/
+venv/
+env/
+.env
+.env.*
+derad_agent/llm/.env
+
+# VCS / tooling
+.git/
+.gitignore
+.github/
+
+# Editor noise
+.vscode/
+.idea/
+.DS_Store
+
+# Docs / planning — not needed at runtime
+docs/
+TODO.md
+
+# Tests — keep out of the runtime image
+tests/
+
+# Docker / CI config not needed inside the image
+Dockerfile
+.dockerignore

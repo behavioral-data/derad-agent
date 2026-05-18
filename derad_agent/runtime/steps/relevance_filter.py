@@ -26,8 +26,9 @@ def step_filter_notes_by_relevance(
     if not notes:
         return []
 
+    _SUMMARY_CAP = 300  # chars; enough to judge relevance, keeps input tokens low
     payload = [
-        {"note_id": n.get("note_id"), "summary": n.get("summary", "")}
+        {"note_id": n.get("note_id"), "summary": (n.get("summary") or "")[:_SUMMARY_CAP]}
         for n in notes
         if n.get("note_id") is not None
     ]
@@ -36,8 +37,10 @@ def step_filter_notes_by_relevance(
     if logger:
         logger.log_step("relevance_filter", f"Filtering {len(notes)} notes for relevance")
 
+    # max_tokens must cover the full keep_note_ids list: ~8 tokens per 19-digit ID.
+    # 200 notes × 8 tokens = 1600, plus JSON overhead → 2048 is safe.
     prompt = get_relevance_filter_prompt()
-    llm = get_llm(reasoning_effort="low", text_verbosity="low", max_tokens=800)
+    llm = get_llm(reasoning_effort="low", text_verbosity="low", max_tokens=2048)
     chain = prompt | llm
 
     try:
