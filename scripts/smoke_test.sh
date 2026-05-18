@@ -59,28 +59,26 @@ for i in $(seq 1 60); do
 done
 echo "$HZ" | grep -q '"index_loaded":true' || fail "index never finished loading"
 
-# ── 3. CRC GET on each tone ──────────────────────────────────────────────────
-step "3. CRC GET on each /mention-* endpoint"
-for TONE in agreeable neutral satirical; do
-  TOKEN="smoke-$TONE-$$"
-  RESP=$(curl -fsS "$HOST/mention-$TONE?crc_token=$TOKEN")
-  echo "$RESP" | grep -q '"response_token":"sha256=' || fail "CRC for /mention-$TONE missing response_token"
+# ── 3. CRC GET on /mentions ─────────────────────────────────────────────────
+step "3. CRC GET on /mentions"
+TOKEN="smoke-$$"
+RESP=$(curl -fsS "$HOST/mentions?crc_token=$TOKEN")
+echo "$RESP" | grep -q '"response_token":"sha256=' || fail "CRC for /mentions missing response_token"
 
-  # Recompute the HMAC ourselves so we don't trust a server that's lying.
-  # Pass the secret via env, not argv — argv shows up in `ps auxww`.
-  EXPECTED=$(SMOKE_SECRET="$SECRET" SMOKE_TOKEN="$TOKEN" python3 -c '
+# Recompute the HMAC ourselves so we don't trust a server that's lying.
+# Pass the secret via env, not argv — argv shows up in `ps auxww`.
+EXPECTED=$(SMOKE_SECRET="$SECRET" SMOKE_TOKEN="$TOKEN" python3 -c '
 import base64, hashlib, hmac, os
 k = os.environ["SMOKE_SECRET"].encode()
 t = os.environ["SMOKE_TOKEN"].encode()
 print("sha256=" + base64.b64encode(hmac.new(k, t, hashlib.sha256).digest()).decode())
 ')
-  echo "$RESP" | grep -q "\"$EXPECTED\"" || fail "/mention-$TONE returned wrong HMAC (expected $EXPECTED, got $RESP)"
-  pass "/mention-$TONE CRC OK"
-done
+echo "$RESP" | grep -q "\"$EXPECTED\"" || fail "/mentions returned wrong HMAC (expected $EXPECTED, got $RESP)"
+pass "/mentions CRC OK"
 
 # ── 4. POST without signature → 403 ─────────────────────────────────────────
 step "4. POST without signature must be rejected"
-CODE=$(curl -sS -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -d '{}' "$HOST/mention-neutral")
+CODE=$(curl -sS -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -d '{}' "$HOST/mentions")
 [[ "$CODE" == "403" ]] || fail "expected 403 on unsigned POST, got $CODE"
 pass "unsigned POST → 403"
 

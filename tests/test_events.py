@@ -124,11 +124,15 @@ class TestDropWiring:
             "user": {"id_str": "111"},
         }
         base.update(fields)
-        return {"tweet_create_events": [base]}
+        # for_user_id matches BOT_USER_ID_NEUTRAL set at module load — the
+        # /mentions handler routes by this field. Without it, events drop
+        # as unknown_target_user rather than progressing through the guards
+        # the tests are actually exercising.
+        return {"for_user_id": "999", "tweet_create_events": [base]}
 
     def test_invalid_payload_event_not_dict_logs_drop(self, client):
         body = json.dumps("not-a-dict").encode()
-        client.post("/mention-neutral", data=body,
+        client.post("/mentions", data=body,
                     headers={"X-Twitter-Webhooks-Signature": _sign(body),
                              "Content-Type": "application/json"})
         drops = client._events.drops
@@ -136,8 +140,10 @@ class TestDropWiring:
         assert drops[0].drop_reason == "invalid_payload"
 
     def test_invalid_payload_wrong_events_type_logs_drop(self, client):
-        body = json.dumps({"tweet_create_events": "oops"}).encode()
-        client.post("/mention-neutral", data=body,
+        # Routed to a tone via for_user_id, but the events field is malformed.
+        # The post-routing guard in mention() should catch it.
+        body = json.dumps({"for_user_id": "999", "tweet_create_events": "oops"}).encode()
+        client.post("/mentions", data=body,
                     headers={"X-Twitter-Webhooks-Signature": _sign(body),
                              "Content-Type": "application/json"})
         drops = client._events.drops
@@ -145,11 +151,22 @@ class TestDropWiring:
         assert drops[0].drop_reason == "invalid_payload"
         assert drops[0].extra.get("type") == "str"
 
+    def test_unknown_target_user_logs_drop(self, client):
+        # for_user_id doesn't map to any configured bot.
+        body = json.dumps({"for_user_id": "unmapped", "tweet_create_events": []}).encode()
+        client.post("/mentions", data=body,
+                    headers={"X-Twitter-Webhooks-Signature": _sign(body),
+                             "Content-Type": "application/json"})
+        drops = client._events.drops
+        assert len(drops) == 1
+        assert drops[0].drop_reason == "unknown_target_user"
+        assert drops[0].extra.get("for_user_id") == "unmapped"
+
     def test_no_parent_logs_drop(self, client):
         # mention with no parent reply id
         payload = self._payload()
         payload["tweet_create_events"][0].pop("in_reply_to_status_id_str")
-        _signed_post(client, "/mention-neutral", payload)
+        _signed_post(client, "/mentions", payload)
         drops = client._events.drops
         assert len(drops) == 1
         assert drops[0].drop_reason == "no_parent"
@@ -158,14 +175,14 @@ class TestDropWiring:
         # bot id matches user id_str
         monkeypatch.setitem(app_module.BOT_USER_ID_BY_TONE, "neutral", "999")
         payload = self._payload(user={"id_str": "999"})
-        _signed_post(client, "/mention-neutral", payload)
+        _signed_post(client, "/mentions", payload)
         drops = client._events.drops
         assert any(d.drop_reason == "self_reply" for d in drops)
 
     def test_unregistered_logs_drop(self, client):
         # author 'nope' not in allow list
         payload = self._payload(user={"id_str": "nope"})
-        _signed_post(client, "/mention-neutral", payload)
+        _signed_post(client, "/mentions", payload)
         drops = client._events.drops
         assert any(d.drop_reason == "unregistered" for d in drops)
 
@@ -173,8 +190,8 @@ class TestDropWiring:
         # Pre-claim the mention so the second delivery is the dup.
         app_module.ALLOWED_AUTHOR_IDS.add("111")
         payload = self._payload()
-        _signed_post(client, "/mention-neutral", payload)
-        _signed_post(client, "/mention-neutral", payload)
+        _signed_post(client, "/mentions", payload)
+        _signed_post(client, "/mentions", payload)
         drops = client._events.drops
         assert sum(1 for d in drops if d.drop_reason == "duplicate") == 1
         assert client._started_threads, "first delivery should have started a thread"
@@ -183,7 +200,7 @@ class TestDropWiring:
         app_module.ALLOWED_AUTHOR_IDS.add("111")
         for i in range(5):
             payload = self._payload(id_str=f"m{i}")
-            _signed_post(client, "/mention-neutral", payload)
+            _signed_post(client, "/mentions", payload)
         drops = [d for d in client._events.drops if d.drop_reason == "rate_limit"]
         # Default limit is 3/sec; at least one of the 5 must have been rate-limited.
         assert drops, "expected at least one rate_limit drop"
@@ -219,6 +236,9 @@ class TestEventWiring:
         return fake_events_store.events[-1], ts
 
     def test_replied_outcome_captures_full_pipeline_state(self, monkeypatch, fake_events_store):
+        # Sources tweet defaults to OFF (URL surcharge); turn on for this test
+        # which asserts both reply ids land.
+        monkeypatch.setattr(app_module, "POST_SOURCES_TWEET", True)
         from derad_agent.app.utils import TweetSnapshot
         snap = TweetSnapshot(
             text="Mail-in voting causes fraud.",
@@ -286,6 +306,7 @@ class TestEventWiring:
         """Main reply lands, sources follow-up fails — outcome must be
         distinguishable from a reply that had no sources to begin with.
         """
+        monkeypatch.setattr(app_module, "POST_SOURCES_TWEET", True)
         from derad_agent.app.utils import TweetSnapshot
         snap = TweetSnapshot(text="claim", author_id="999", author_username="u")
         gen = {

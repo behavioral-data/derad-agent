@@ -10,7 +10,7 @@ from datetime import datetime
 from flask import Flask, abort, jsonify, render_template, request, url_for
 from markupsafe import escape
 
-from derad_agent.app import events
+from derad_agent.app import events, metrics
 from derad_agent.app.dedup import get_store
 from derad_agent.app.events import MentionDrop, MentionEvent, log_mention_drop, log_mention_event
 from derad_agent.app.utils import (
@@ -66,6 +66,19 @@ BOT_USER_ID_BY_TONE = {
     "neutral": os.getenv("BOT_USER_ID_NEUTRAL"),
     "satirical": os.getenv("BOT_USER_ID_SATIRICAL"),
 }
+
+# Reverse lookup for /mentions routing. One X dev app under PPU caps webhooks
+# at 1 URL + 3 subscriptions, so all three bots' events land on the same
+# endpoint; we route by event.for_user_id → tone.
+TONE_BY_USER_ID = {
+    user_id: tone
+    for tone, user_id in BOT_USER_ID_BY_TONE.items()
+    if user_id
+}
+
+# Sources follow-up tweet defaults to OFF — URL posts cost $0.200 each on
+# X PPU (13× the $0.015 plain-text rate). Turn on per study arm.
+POST_SOURCES_TWEET = os.getenv("DERAD_POST_SOURCES_TWEET", "false").lower() == "true"
 
 RESTRICT_TO_REGISTERED = os.getenv("DERAD_RESTRICT_TO_REGISTERED", "true").lower() == "true"
 ALLOWED_AUTHOR_IDS = {
@@ -189,6 +202,8 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             ev.error_class = type(exc).__name__
             ev.error_detail = str(exc)[:1000]
         log_mention_event(ev)
+        metrics.replies_posted.add(1, {"tone": tone, "outcome": outcome})
+        metrics.pipeline_latency_ms.record(ev.pipeline_ms, {"tone": tone, "outcome": outcome})
 
     try:
         snap = fetch_tweet(parent_id, tone=tone)
@@ -219,7 +234,7 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         ev.reply_posted_utc = events.utcnow()
 
         sources_outcome = "replied"
-        if reply.get("sources"):
+        if POST_SOURCES_TWEET and reply.get("sources"):
             with app.app_context():
                 info_url = _build_info_url(reply_id, tone, reply["tweets"], reply["notes"])
             sources_text = _fit_sources_text(reply["sources"], info_url)
@@ -236,26 +251,28 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         _finalize("pipeline_error", exc=exc)
 
 
-def mention(tone: str):
-    if request.method == "GET":
-        crc_token = request.args.get("crc_token")
-        if not crc_token:
-            return "Missing crc_token", 400
-        return jsonify(_crc_response(crc_token)), 200
+def _route_tone_from_event(event: dict) -> str | None:
+    """Map an Account Activity event to the bot tone it's destined for.
 
-    raw = request.get_data()
-    if not _verify_signature(raw, request.headers.get("X-Twitter-Webhooks-Signature")):
-        logger.warning("Rejected POST to /mention-%s: invalid signature", tone)
-        abort(403)
+    The v2 webhook payload puts ``for_user_id`` at the top level alongside
+    ``tweet_create_events``; it identifies which subscribed user the event
+    is for. We translate to tone via TONE_BY_USER_ID.
+    """
+    for_user_id = event.get("for_user_id") if isinstance(event, dict) else None
+    if for_user_id is None:
+        return None
+    return TONE_BY_USER_ID.get(str(for_user_id))
 
-    received_at_utc = events.utcnow()
-    event = request.get_json(silent=True) or {}
-    if not isinstance(event, dict):
+
+def mention(tone: str, event: dict, received_at_utc):
+    """Run the guards-then-thread flow for an already-routed event."""
+    metrics.mentions_received.add(1, {"tone": tone})
+
+    def _drop(reason: str, **drop_kwargs):
         log_mention_drop(MentionDrop(
-            drop_reason="invalid_payload", received_at_utc=received_at_utc, tone=tone,
-            extra={"why": "event_not_dict"},
+            drop_reason=reason, received_at_utc=received_at_utc, tone=tone, **drop_kwargs,
         ))
-        return "", 200
+        metrics.mentions_dropped.add(1, {"tone": tone, "reason": reason})
 
     tweet_events = event.get("tweet_create_events")
     if not isinstance(tweet_events, list) or not tweet_events:
@@ -263,18 +280,15 @@ def mention(tone: str):
         # (favorites, follows, etc.) land here. We don't log every one — too
         # noisy — but if the field is the wrong shape (a string, say), log it.
         if tweet_events is not None and not isinstance(tweet_events, list):
-            log_mention_drop(MentionDrop(
-                drop_reason="invalid_payload", received_at_utc=received_at_utc, tone=tone,
-                extra={"why": "tweet_create_events_not_list", "type": type(tweet_events).__name__},
-            ))
+            _drop("invalid_payload", extra={
+                "why": "tweet_create_events_not_list",
+                "type": type(tweet_events).__name__,
+            })
         return "", 200
 
     tweet = tweet_events[0]
     if not isinstance(tweet, dict):
-        log_mention_drop(MentionDrop(
-            drop_reason="invalid_payload", received_at_utc=received_at_utc, tone=tone,
-            extra={"why": "tweet_not_dict", "type": type(tweet).__name__},
-        ))
+        _drop("invalid_payload", extra={"why": "tweet_not_dict", "type": type(tweet).__name__})
         return "", 200
 
     mention_id = tweet.get("id_str")
@@ -282,51 +296,43 @@ def mention(tone: str):
     author_id = (tweet.get("user") or {}).get("id_str")
 
     if not mention_id or not parent_id:
-        log_mention_drop(MentionDrop(
-            drop_reason="no_parent", received_at_utc=received_at_utc, tone=tone,
-            mention_id=mention_id, author_id=author_id,
-            extra={"has_mention_id": bool(mention_id), "has_parent_id": bool(parent_id)},
-        ))
+        _drop("no_parent", mention_id=mention_id, author_id=author_id,
+              extra={"has_mention_id": bool(mention_id), "has_parent_id": bool(parent_id)})
         return "", 200
 
     if _is_self_reply(tweet, tone):
         logger.info("Skipping self-reply %s (tone=%s)", mention_id, tone)
-        log_mention_drop(MentionDrop(
-            drop_reason="self_reply", received_at_utc=received_at_utc, tone=tone,
-            mention_id=mention_id, author_id=author_id,
-        ))
+        _drop("self_reply", mention_id=mention_id, author_id=author_id)
         return "", 200
 
     if RESTRICT_TO_REGISTERED and author_id not in ALLOWED_AUTHOR_IDS:
         logger.info("Skipping mention %s from unregistered author %s", mention_id, author_id)
-        log_mention_drop(MentionDrop(
-            drop_reason="unregistered", received_at_utc=received_at_utc, tone=tone,
-            mention_id=mention_id, author_id=author_id,
-        ))
+        _drop("unregistered", mention_id=mention_id, author_id=author_id)
         return "", 200
 
     store = get_store()
     if not store.claim(mention_id, ttl_seconds=86400):
         logger.info("Duplicate mention %s ignored", mention_id)
-        log_mention_drop(MentionDrop(
-            drop_reason="duplicate", received_at_utc=received_at_utc, tone=tone,
-            mention_id=mention_id, author_id=author_id,
-        ))
+        _drop("duplicate", mention_id=mention_id, author_id=author_id)
         return "", 200
 
     hits = store.hit_and_count(f"author:{author_id}", window_seconds=1)
     if hits > RATE_LIMIT_PER_SEC:
         logger.info("Rate-limited mention %s from author %s (hits=%d)", mention_id, author_id, hits)
-        log_mention_drop(MentionDrop(
-            drop_reason="rate_limit", received_at_utc=received_at_utc, tone=tone,
-            mention_id=mention_id, author_id=author_id, extra={"hits": hits},
-        ))
+        _drop("rate_limit", mention_id=mention_id, author_id=author_id, extra={"hits": hits})
+        return "", 200
+
+    # Daily cap: defense in depth against runaway loops. Counted in-memory
+    # per tone; resets on UTC date rollover. Lose-on-restart is acceptable.
+    if metrics.daily_cap_reached(tone):
+        _drop("daily_cap", mention_id=mention_id, author_id=author_id)
         return "", 200
 
     logger.info(
         "Accepted mention %s (tone=%s, author=%s, parent=%s)",
         mention_id, tone, author_id, parent_id,
     )
+    metrics.mentions_accepted.add(1, {"tone": tone})
     # daemon=False: lets gunicorn's --graceful-timeout drain in-flight pipelines
     # on SIGTERM. We've already claimed mention_id in the dedup store, so X
     # won't redeliver — dropping the thread would silently lose the reply.
@@ -338,19 +344,50 @@ def mention(tone: str):
     return "", 200
 
 
-@app.route("/mention-agreeable", methods=["GET", "POST"])
-def mention_agreeable():
-    return mention("agreeable")
+@app.route("/mentions", methods=["GET", "POST"])
+def mentions_endpoint():
+    """Single Account Activity webhook for all three bots.
 
+    GET serves the CRC handshake. POST verifies the signature, routes by
+    ``for_user_id`` to the right tone, then hands off to ``mention()``.
+    """
+    if request.method == "GET":
+        crc_token = request.args.get("crc_token")
+        if not crc_token:
+            return "Missing crc_token", 400
+        return jsonify(_crc_response(crc_token)), 200
 
-@app.route("/mention-neutral", methods=["GET", "POST"])
-def mention_neutral():
-    return mention("neutral")
+    raw = request.get_data()
+    if not _verify_signature(raw, request.headers.get("X-Twitter-Webhooks-Signature")):
+        logger.warning("Rejected POST to /mentions: invalid signature")
+        abort(403)
 
+    received_at_utc = events.utcnow()
+    event = request.get_json(silent=True) or {}
 
-@app.route("/mention-satirical", methods=["GET", "POST"])
-def mention_satirical():
-    return mention("satirical")
+    if not isinstance(event, dict):
+        log_mention_drop(MentionDrop(
+            drop_reason="invalid_payload", received_at_utc=received_at_utc,
+            extra={"why": "event_not_dict"},
+        ))
+        metrics.mentions_dropped.add(1, {"tone": "unknown", "reason": "invalid_payload"})
+        return "", 200
+
+    tone = _route_tone_from_event(event)
+    if tone is None:
+        # Either no for_user_id, or its value doesn't map to any configured
+        # bot. Could also be a non-mention event type (follow, DM, etc.).
+        # Quiet drop; the event delivery itself already cost us money.
+        for_user_id = event.get("for_user_id")
+        log_mention_drop(MentionDrop(
+            drop_reason="unknown_target_user", received_at_utc=received_at_utc,
+            extra={"for_user_id": str(for_user_id) if for_user_id is not None else None,
+                   "event_keys": sorted(event.keys())},
+        ))
+        metrics.mentions_dropped.add(1, {"tone": "unknown", "reason": "unknown_target_user"})
+        return "", 200
+
+    return mention(tone, event, received_at_utc)
 
 
 @app.route("/info", methods=["GET"])

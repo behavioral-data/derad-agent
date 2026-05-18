@@ -209,6 +209,8 @@ resource appService 'Microsoft.Web/sites@2024-11-01' = {
         { name: 'DERAD_RESTRICT_TO_REGISTERED', value: string(restrictToRegistered) }
         { name: 'DERAD_ALLOWED_AUTHOR_IDS', value: allowedAuthorIds }
         { name: 'DERAD_RATE_LIMIT_PER_SEC', value: '3' }
+        { name: 'DERAD_POST_SOURCES_TWEET', value: 'false' }
+        { name: 'DERAD_MAX_MENTIONS_PER_DAY', value: '500' }
         { name: 'DERAD_STORE_BACKEND', value: 'tables' }
         { name: 'DERAD_EVENTS_BACKEND', value: 'tables' }
         { name: 'DERAD_TABLES_ENDPOINT', value: 'https://${storage.name}.table.core.windows.net' }

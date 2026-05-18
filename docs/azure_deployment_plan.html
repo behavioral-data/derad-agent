@@ -134,12 +134,14 @@
       </div>
 
       <div class="phase-card is-active">
-        <div class="panel-head">0.1 · X API tier &amp; cost</div>
-        <p>The current code uses <code class="inline-code">tweet_create_events</code>, which is the <strong>Account Activity API</strong>. Historically only Enterprise tier; the current Pro tier offers a narrower variant. List pricing at last check was on the order of thousands per month. If the budget is not there, the architecture pivots to <strong>polling</strong> <code class="inline-code">GET /2/users/:id/mentions</code> on a 30-second timer per bot — no public HTTPS endpoint, no CRC, no signature, simpler infra but slower reaction time.</p>
+        <div class="panel-head">0.1 · X API access — Pay-Per-Use model</div>
+        <p>Updated 2026-05-18 after research overturned the earlier "Enterprise/Pro tier" assumption. X launched <strong>Pay-Per-Use (PPU)</strong> in February 2026; <strong>Account Activity API v2 webhooks are available on PPU</strong>, no upfront subscription. Pro ($5K/mo) does NOT include Account Activity. Enterprise is now $42K+/mo and unnecessary at our scale.</p>
+        <p>Costs are per-request: <code class="inline-code">$0.005/read</code>, <code class="inline-code">$0.015/post</code>, <code class="inline-code">$0.001/owned-account read</code>, and crucially <code class="inline-code">$0.200/post-with-URL</code> (13× the plain-text rate). PPU caps each app at <strong>1 webhook + 3 subscriptions</strong> — so we use <strong>one X dev app</strong> with one webhook URL and the three bot accounts each subscribed to it. Three handles, one webhook plumbing. See § Costs for math.</p>
         <ul class="task-list">
-          <li><span class="chip chip-pending">todo</span> Confirm which X API tier the project's account has, or budget will have.</li>
-          <li><span class="chip chip-pending">todo</span> If Enterprise/Pro available → proceed with this plan as written.</li>
-          <li><span class="chip chip-pending">todo</span> If Basic/Free only → swap Phase 1 webhook handler for polling worker, drop CRC/signature work, redesign accordingly.</li>
+          <li><span class="chip chip-pending">todo</span> Create one X dev app on the PPU tier and prepay a starter credit balance.</li>
+          <li><span class="chip chip-pending">todo</span> Authorize the three bot accounts (@aggie_bot, @nellie_bot, @eddie_bot) against that one app to produce three OAuth1 access-token pairs.</li>
+          <li><span class="chip chip-info">decision</span> Ingest path: <strong>webhooks primary</strong>; polling worker built as a documented fallback (Phase 4.6) for cost or rate-limit pivots later.</li>
+          <li><span class="chip chip-info">decision</span> Sources follow-up tweet defaults to <strong>OFF</strong> (<code class="inline-code">DERAD_POST_SOURCES_TWEET=false</code>) because URL posts are 13× the rate. Enabled per study arm when the More-Info link is study-critical.</li>
         </ul>
       </div>
 
@@ -163,7 +165,7 @@
       </div>
 
       <div class="callout info">
-        <strong>Decision needed by end of Phase 0:</strong> webhook (Account Activity) vs. polling. Every subsequent phase is conditional on this.
+        <strong>Decisions locked 2026-05-18:</strong> one X dev app, single <code class="inline-code">/mentions</code> webhook with <code class="inline-code">for_user_id</code> routing; webhooks primary with polling fallback (Phase 4.6); sources-tweet feature-flagged default off; skip Academic Research access for now.
       </div>
     </section>
 
@@ -457,39 +459,34 @@ az webapp restart --name "$APP" --resource-group "$RG"</pre>
       </div>
 
       <div class="phase-card">
-        <div class="panel-head">4.3 · Register the three webhook URLs</div>
-        <p>X immediately issues a CRC GET on each registration call. The App Service must already respond with a valid HMAC (4.1 confirms this). One webhook per tone, each using that tone's OAuth1 credentials.</p>
-        <pre class="code-block">for TONE in agreeable neutral satirical; do
-  derad-webhooks register --tone "$TONE" --url "$HOST/mention-$TONE"
-done
-
-# Capture the assigned webhook IDs for the next step.
-derad-webhooks list --tone neutral     # all three tones share the same X dev environment</pre>
+        <div class="panel-head">4.3 · Register the single webhook URL</div>
+        <p>One X dev app under PPU = one webhook + three subscriptions. Register one URL; subscribe all three bots to it. X issues a CRC GET immediately on registration — the App Service must already respond with a valid HMAC (4.1 confirms this). Use any one bot's OAuth1 creds for the <code class="inline-code">register</code> call — it's an app-level action.</p>
+        <pre class="code-block">derad-webhooks register --tone neutral --url "$HOST/mentions"
+# Save the returned webhook id:
+WEBHOOK_ID=$(derad-webhooks list --tone neutral | python -c "import json,sys; print(json.load(sys.stdin)[0]['id'])")
+echo "Webhook id: $WEBHOOK_ID"</pre>
       </div>
 
       <div class="phase-card">
-        <div class="panel-head">4.4 · Subscribe each bot user</div>
-        <p>Registration alone doesn't deliver events. Each bot user has to subscribe to its webhook before its mentions are routed. The subscribe call uses the bot's own OAuth1 tokens, so <code class="inline-code">--tone</code> selects the principal.</p>
-        <pre class="code-block">AGREEABLE_WEBHOOK_ID=... NEUTRAL_WEBHOOK_ID=... SATIRICAL_WEBHOOK_ID=...
+        <div class="panel-head">4.4 · Subscribe each bot user to that one webhook</div>
+        <p>Each bot account subscribes itself to the single webhook URL using its own OAuth1 tokens. After this step X starts delivering each bot's mention events to <code class="inline-code">/mentions</code> with <code class="inline-code">for_user_id</code> identifying which bot the event is for.</p>
+        <pre class="code-block">for TONE in agreeable neutral satirical; do
+  derad-webhooks subscribe --tone "$TONE" --webhook-id "$WEBHOOK_ID"
+done
 
-derad-webhooks subscribe --tone agreeable --webhook-id "$AGREEABLE_WEBHOOK_ID"
-derad-webhooks subscribe --tone neutral   --webhook-id "$NEUTRAL_WEBHOOK_ID"
-derad-webhooks subscribe --tone satirical --webhook-id "$SATIRICAL_WEBHOOK_ID"
-
-# Sanity: each webhook should have exactly one subscription (the bot itself).
-for TONE in agreeable neutral satirical; do
-  derad-webhooks subscriptions --tone "$TONE" --webhook-id "$(eval echo \$${TONE^^}_WEBHOOK_ID)"
-done</pre>
+# Sanity: the webhook should have exactly three subscriptions.
+derad-webhooks subscriptions --tone neutral --webhook-id "$WEBHOOK_ID"
+# → expect three rows, one per bot user id</pre>
       </div>
 
       <div class="phase-card">
         <div class="panel-head">4.5 · End-to-end mention test</div>
         <ul class="task-list">
           <li><span class="chip chip-pending">todo</span> From a non-bot, allow-listed X account, post a tweet (the "claim"), then reply to it tagging <code class="inline-code">@aggie_bot</code>.</li>
-          <li><span class="chip chip-pending">todo</span> Watch App Service logs: <code class="inline-code">az webapp log tail --name "$APP" --resource-group "$RG"</code>. Expect: signature verified, dedup miss, accepted, pipeline started, reply posted, sources posted, /info URL formed.</li>
-          <li><span class="chip chip-pending">todo</span> Verify the bot reply appears on X with a Sources line and a working "More Info" link to <code class="inline-code">$HOST/info?reply_id=...</code>.</li>
+          <li><span class="chip chip-pending">todo</span> Watch App Service logs: <code class="inline-code">az webapp log tail --name "$APP" --resource-group "$RG"</code>. Expect: signature verified, for_user_id routed to <code class="inline-code">agreeable</code>, dedup miss, accepted, pipeline started, reply posted.</li>
+          <li><span class="chip chip-pending">todo</span> Verify the bot reply appears on X. (No sources tweet by default — <code class="inline-code">DERAD_POST_SOURCES_TWEET=false</code>.)</li>
           <li><span class="chip chip-pending">todo</span> Re-deliver the same mention (X sometimes retries) — confirm dedup drops it (no second reply).</li>
-          <li><span class="chip chip-pending">todo</span> Repeat for <code class="inline-code">@nellie_bot</code> and <code class="inline-code">@eddie_bot</code>.</li>
+          <li><span class="chip chip-pending">todo</span> Repeat for <code class="inline-code">@nellie_bot</code> and <code class="inline-code">@eddie_bot</code> — same webhook, different <code class="inline-code">for_user_id</code> in the payload, different tone applied.</li>
         </ul>
       </div>
     </section>
@@ -660,11 +657,50 @@ extra_json           JSON  — reason-specific extra (hits count, etc.)</pre>
       <div class="section-head">
         <p class="eyebrow">Reference</p>
         <h2>Costs</h2>
-        <p>At research scale, compute is rounding error and Azure OpenAI tokens dominate. Numbers below are list prices for the US regions we'd target; actual bills depend on traffic and on whether UW/lab credits offset them.</p>
+        <p>Updated 2026-05-18. Three big buckets: fixed Azure compute, variable Azure OpenAI tokens, variable X Pay-Per-Use API calls. At 100 mentions/day across three bots, expect roughly <strong>$70/mo Azure compute + infra</strong>, <strong>$30–150/mo Azure OpenAI</strong>, and <strong>$400–600/mo X API</strong> — X is now the dominant cost line.</p>
       </div>
 
       <div class="callout info">
-        <strong>v1 pick:</strong> App Service Linux <code class="inline-code">B2</code> (~$26/mo) + Standard LRS Storage Account + Application Insights basic ingestion. Total fixed compute + infra ≈ <strong>$30–35/mo</strong>. Variable Azure OpenAI usage on top.
+        <strong>Cost-controlling defaults:</strong>
+        <code class="inline-code">DERAD_POST_SOURCES_TWEET=false</code> (URL posts are 13×) and the daily kill-switch (<code class="inline-code">DERAD_MAX_MENTIONS_PER_DAY</code>) are both wired into the code so a runaway loop can't bankrupt the account.
+      </div>
+
+      <div class="section-head mt-24">
+        <h3>X Pay-Per-Use math (the dominant cost)</h3>
+        <p>Per-request prices from <a href="https://docs.x.com/x-api/getting-started/pricing">docs.x.com/x-api/getting-started/pricing</a>, May 2026. Assumes 100 mentions/day × 3 bots = 9,000 mentions/mo and ~5 reads per mention (parent tweet + small thread context).</p>
+      </div>
+
+      <div class="data-table table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th>Line item</th><th>Rate</th><th>Volume/mo</th><th>$/mo</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Webhook event delivery</td><td>$0.005 / event</td><td>9,000</td><td>$45</td></tr>
+            <tr><td>Reads (parent + context)</td><td>$0.005 / call</td><td>~45,000</td><td>~$225</td></tr>
+            <tr><td>Main reply post (no URL)</td><td>$0.015 / post</td><td>9,000</td><td>$135</td></tr>
+            <tr><td>Sources tweet (with URL, flag ON)</td><td><strong>$0.200</strong> / post</td><td>9,000 if enabled</td><td><strong>+$1,800</strong></td></tr>
+          </tbody>
+          <tfoot>
+            <tr><td colspan="3"><strong>Baseline (sources tweet OFF, our default)</strong></td><td><strong>~$405</strong></td></tr>
+            <tr><td colspan="3"><strong>Worst case (sources tweet ON for all mentions)</strong></td><td><strong>~$2,205</strong></td></tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div class="section-head mt-24">
+        <h3>Cheaper variants of the X cost line</h3>
+      </div>
+
+      <ul class="task-list">
+        <li><span class="chip chip-suggest">cheap</span> <strong>Polling instead of webhooks.</strong> <code class="inline-code">users.get_mentions</code> returns up to 100 mentions per call. At 1 call/min/bot = 4,320 calls/mo for ~9,000 mentions; reads alone &asymp; <strong>$45/mo total</strong> in the absolute best case (deduplicated, batched). Trade: up to 30 s ingest delay. Phase 4.6 ships the worker; toggle with <code class="inline-code">DERAD_INGEST_MODE=polling</code>.</li>
+        <li><span class="chip chip-suggest">cheap</span> <strong>Daily cap.</strong> <code class="inline-code">DERAD_MAX_MENTIONS_PER_DAY</code> per tone — defense in depth against a viral surge that would blow the budget.</li>
+        <li><span class="chip chip-info">later</span> <strong>Academic Research access.</strong> If approved, read costs zero out. 2–4 week application; deferred for now per user decision.</li>
+        <li><span class="chip chip-info">later</span> <strong>Per-claim reply cache.</strong> Identical parent posts skip the pipeline AND the X reads. Bigger saver on X than on Azure OpenAI.</li>
+      </ul>
+
+      <div class="callout warning mt-24">
+        <strong>Compute floor:</strong> App Service Linux <code class="inline-code">B2</code> (~$26/mo) + Standard LRS Storage Account + Application Insights basic ingestion + Key Vault Standard ≈ <strong>$30–35/mo fixed</strong>. Variable Azure OpenAI + X usage on top. The Azure compute table below is for reference; the X table above is what dominates the bill.
       </div>
 
       <div class="section-head mt-24">
@@ -731,8 +767,8 @@ extra_json           JSON  — reason-specific extra (hits count, etc.)</pre>
       </div>
 
       <div class="section-head mt-24">
-        <h3>Where the money actually goes</h3>
-        <p>Variable costs that will dominate the bill once traffic exists.</p>
+        <h3>Azure costs (secondary; X dominates)</h3>
+        <p>Once the X bill is in view, Azure is the small line. Still worth tracking.</p>
       </div>
 
       <div class="grid-3">

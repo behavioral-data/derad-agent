@@ -79,7 +79,7 @@ class TestSignatureVerification:
     def test_accepts_valid_signature(self, client):
         body = json.dumps({"tweet_create_events": []}).encode()
         resp = client.post(
-            "/mention-neutral",
+            "/mentions",
             data=body,
             headers={
                 "X-Twitter-Webhooks-Signature": _sign(body),
@@ -89,13 +89,13 @@ class TestSignatureVerification:
         assert resp.status_code == 200
 
     def test_rejects_missing_signature(self, client):
-        resp = client.post("/mention-neutral", data=b"{}",
+        resp = client.post("/mentions", data=b"{}",
                            headers={"Content-Type": "application/json"})
         assert resp.status_code == 403
 
     def test_rejects_wrong_signature(self, client):
         resp = client.post(
-            "/mention-neutral",
+            "/mentions",
             data=b"{}",
             headers={
                 "X-Twitter-Webhooks-Signature": "sha256=AAAAAAAAAAAAAAAAAAAAAAAA",
@@ -109,7 +109,7 @@ class TestSignatureVerification:
         digest = hmac.new(SECRET.encode(), body, hashlib.sha256).digest()
         bad = base64.b64encode(digest).decode()  # no 'sha256=' prefix
         resp = client.post(
-            "/mention-neutral",
+            "/mentions",
             data=body,
             headers={"X-Twitter-Webhooks-Signature": bad,
                      "Content-Type": "application/json"},
@@ -122,7 +122,7 @@ class TestSignatureVerification:
         digest = hmac.new(SECRET.encode(), body, hashlib.sha256).digest()
         bad = "SHA256=" + base64.b64encode(digest).decode()
         resp = client.post(
-            "/mention-neutral",
+            "/mentions",
             data=body,
             headers={"X-Twitter-Webhooks-Signature": bad,
                      "Content-Type": "application/json"},
@@ -136,14 +136,14 @@ class TestSignatureVerification:
 
 class TestCrcGet:
     def test_returns_token(self, client):
-        resp = client.get("/mention-neutral?crc_token=abc123")
+        resp = client.get("/mentions?crc_token=abc123")
         assert resp.status_code == 200
         body = resp.get_json()
         assert "response_token" in body
         assert body["response_token"].startswith("sha256=")
 
     def test_missing_crc_token_returns_400(self, client):
-        resp = client.get("/mention-neutral")
+        resp = client.get("/mentions")
         assert resp.status_code == 400
 
 
@@ -152,6 +152,11 @@ class TestCrcGet:
 # ---------------------------------------------------------------------------
 
 def _signed_post(client, path, payload):
+    # Auto-inject for_user_id so /mentions routes to the neutral tone for tests
+    # that pre-date the single-webhook architecture. Tests that want to exercise
+    # missing/unknown for_user_id paths bypass this helper.
+    if isinstance(payload, dict) and "tweet_create_events" in payload and "for_user_id" not in payload:
+        payload = {"for_user_id": "999", **payload}
     body = json.dumps(payload).encode()
     return client.post(
         path,
@@ -172,7 +177,7 @@ class TestSelfReplyGuard:
                 "user": {"id_str": "999"},
             }]
         }
-        resp = _signed_post(client, "/mention-neutral", payload)
+        resp = _signed_post(client, "/mentions", payload)
         assert resp.status_code == 200
         # No background thread should have been started.
         assert client._started_threads == []  # type: ignore[attr-defined]
@@ -194,7 +199,7 @@ class TestSelfReplyGuard:
                     "user": {"id_str": "anyone"},
                 }]
             }
-            resp = _signed_post(client, "/mention-neutral", payload)
+            resp = _signed_post(client, "/mentions", payload)
             assert resp.status_code == 200
             assert client._started_threads == [], (  # type: ignore[attr-defined]
                 "self-reply guard should fail-closed when BOT_USER_ID is unset"
@@ -211,7 +216,7 @@ class TestSelfReplyGuard:
                 # user missing entirely
             }]
         }
-        resp = _signed_post(client, "/mention-neutral", payload)
+        resp = _signed_post(client, "/mentions", payload)
         assert resp.status_code == 200
 
 
@@ -228,7 +233,7 @@ class TestAllowList:
                 "user": {"id_str": "not-allowed"},
             }]
         }
-        resp = _signed_post(client, "/mention-neutral", payload)
+        resp = _signed_post(client, "/mentions", payload)
         assert resp.status_code == 200
         assert client._started_threads == []  # type: ignore[attr-defined]
 
@@ -241,7 +246,7 @@ class TestAllowList:
                 "user": {"id_str": "111"},
             }]
         }
-        resp = _signed_post(client, "/mention-neutral", payload)
+        resp = _signed_post(client, "/mentions", payload)
         assert resp.status_code == 200
         assert len(client._started_threads) == 1  # type: ignore[attr-defined]
 
@@ -254,7 +259,7 @@ class TestAllowList:
                 "user": {},
             }]
         }
-        resp = _signed_post(client, "/mention-neutral", payload)
+        resp = _signed_post(client, "/mentions", payload)
         assert resp.status_code == 200
         # With restrict_to_registered=true and a None author_id, must be blocked.
         assert client._started_threads == []  # type: ignore[attr-defined]
@@ -266,11 +271,11 @@ class TestAllowList:
 
 class TestMalformedPayloads:
     def test_empty_payload(self, client):
-        resp = _signed_post(client, "/mention-neutral", {})
+        resp = _signed_post(client, "/mentions", {})
         assert resp.status_code == 200
 
     def test_no_tweet_create_events(self, client):
-        resp = _signed_post(client, "/mention-neutral", {"other_event": []})
+        resp = _signed_post(client, "/mentions", {"other_event": []})
         assert resp.status_code == 200
 
     def test_missing_parent_id(self, client):
@@ -281,7 +286,7 @@ class TestMalformedPayloads:
                 # no in_reply_to_status_id_str
             }]
         }
-        resp = _signed_post(client, "/mention-neutral", payload)
+        resp = _signed_post(client, "/mentions", payload)
         assert resp.status_code == 200
         assert client._started_threads == []  # type: ignore[attr-defined]
 
@@ -292,13 +297,13 @@ class TestMalformedPayloads:
                 "user": {"id_str": "111"},
             }]
         }
-        resp = _signed_post(client, "/mention-neutral", payload)
+        resp = _signed_post(client, "/mentions", payload)
         assert resp.status_code == 200
 
     def test_non_json_body_still_safe(self, client):
         body = b"this is not json"
         resp = client.post(
-            "/mention-neutral",
+            "/mentions",
             data=body,
             headers={"X-Twitter-Webhooks-Signature": _sign(body),
                      "Content-Type": "application/json"},
@@ -307,9 +312,9 @@ class TestMalformedPayloads:
 
     def test_tweet_events_with_wrong_type_does_not_crash(self, client):
         # tweet_create_events as a string instead of list — fail safe.
-        body = json.dumps({"tweet_create_events": "oops"}).encode()
+        body = json.dumps({"for_user_id": "999", "tweet_create_events": "oops"}).encode()
         resp = client.post(
-            "/mention-neutral",
+            "/mentions",
             data=body,
             headers={"X-Twitter-Webhooks-Signature": _sign(body),
                      "Content-Type": "application/json"},
@@ -528,8 +533,8 @@ class TestDuplicateDelivery:
                 "user": {"id_str": "111"},
             }]
         }
-        first = _signed_post(client, "/mention-neutral", payload)
-        second = _signed_post(client, "/mention-neutral", payload)
+        first = _signed_post(client, "/mentions", payload)
+        second = _signed_post(client, "/mentions", payload)
         assert first.status_code == 200
         assert second.status_code == 200
         assert len(client._started_threads) == 1, (  # type: ignore[attr-defined]
@@ -553,7 +558,7 @@ class TestRateLimit:
                     "user": {"id_str": "111"},
                 }]
             }
-            resp = _signed_post(client, "/mention-neutral", payload)
+            resp = _signed_post(client, "/mentions", payload)
             assert resp.status_code == 200
         # RATE_LIMIT_PER_SEC defaults to 3; allow some flake.
         accepted = len(client._started_threads)  # type: ignore[attr-defined]
