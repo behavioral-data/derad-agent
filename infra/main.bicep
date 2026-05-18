@@ -141,6 +141,13 @@ resource mentionDropsTable 'Microsoft.Storage/storageAccounts/tableServices/tabl
   name: 'MentionDrops'
 }
 
+// Polling cursors — newest tweet ID seen per bot tone. Only written when
+// DERAD_INGEST_MODE=polling; inert in webhook mode.
+resource cursorsTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2024-01-01' = {
+  parent: tableSvc
+  name: 'Cursors'
+}
+
 // ── Key Vault (RBAC, purge protection ON) ───────────────────────────────────
 resource keyVault 'Microsoft.KeyVault/vaults@2024-11-01' = {
   name: kvName
@@ -214,8 +221,14 @@ resource appService 'Microsoft.Web/sites@2024-11-01' = {
         { name: 'DERAD_RATE_LIMIT_PER_SEC', value: '3' }
         { name: 'DERAD_POST_SOURCES_TWEET', value: 'false' }
         { name: 'DERAD_MAX_MENTIONS_PER_DAY', value: '500' }
+        // Ingest mode: 'webhooks' (default) or 'polling'. XOR — do not set both.
+        // polling activates the background poller thread; the /mentions webhook
+        // still answers CRC + healthz but skips event processing.
+        { name: 'DERAD_INGEST_MODE', value: 'webhooks' }
+        { name: 'DERAD_POLL_INTERVAL_SEC', value: '60' }
         { name: 'DERAD_STORE_BACKEND', value: 'tables' }
         { name: 'DERAD_EVENTS_BACKEND', value: 'tables' }
+        { name: 'DERAD_CURSOR_BACKEND', value: 'tables' }
         { name: 'DERAD_TABLES_ENDPOINT', value: 'https://${storage.name}.table.core.windows.net' }
         { name: 'AZURE_CLIENT_ID', value: uami.properties.clientId }
         { name: 'BOT_HANDLE_AGREEABLE', value: botHandleAgreeable }
