@@ -1,0 +1,20 @@
+// Pipeline end-to-end latency percentiles by tone and outcome.
+// Source: customMetrics, metric name "pipeline_latency_ms".
+// Dimensions: tone, outcome (replied, replied_no_sources, empty_reply,
+//   parent_fetch_failed, x_post_error, pipeline_error).
+//
+// NOTE: OTel histograms are exported as individual samples in customMetrics
+// (valueSum = one observation). percentile() works across samples correctly.
+
+customMetrics
+| where name == "pipeline_latency_ms"
+| where timestamp > ago(7d)
+| extend tone    = tostring(customDimensions["tone"])
+| extend outcome = tostring(customDimensions["outcome"])
+| summarize
+    p50 = percentile(value, 50),
+    p95 = percentile(value, 95),
+    p99 = percentile(value, 99),
+    n   = count()
+  by tone, outcome
+| order by tone asc, outcome asc

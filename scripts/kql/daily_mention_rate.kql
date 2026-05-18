@@ -1,0 +1,13 @@
+// Daily mention rate per tone — how many mentions were accepted per bot per day.
+// Run in Log Analytics / App Insights for the derad-agent workspace.
+// Source: customMetrics (OTel via azure-monitor-opentelemetry). Dimension: tone.
+//
+// Paste into: Azure Portal → Log Analytics workspace → Logs, or Application Insights → Logs.
+
+customMetrics
+| where name == "mentions_accepted"
+| where timestamp > ago(30d)
+| extend tone = tostring(customDimensions["tone"])
+| summarize total = sum(valueSum) by tone, day = bin(timestamp, 1d)
+| project day, tone, total
+| order by day desc, tone asc

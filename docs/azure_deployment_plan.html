@@ -601,27 +601,28 @@ extra_json           JSON  — reason-specific extra (hits count, etc.)</pre>
 
     <section id="phase-6">
       <div class="section-head">
-        <p class="eyebrow">Phase 6 · Ops</p>
+        <p class="eyebrow">Phase 6 · Ops · <span class="chip chip-done">done 2026-05-18</span></p>
         <h2>Observability &amp; cost guardrails</h2>
         <p>Light-touch monitoring — enough to notice a runaway loop, a quota exhaustion, or a webhook outage without building a dashboard farm.</p>
       </div>
 
       <div class="grid-2">
-        <div class="panel">
+        <div class="panel is-done">
           <div class="panel-head">Telemetry</div>
           <ul class="task-list">
-            <li><span class="chip chip-pending">todo</span> App Insights: request count, p50/p95 latency, exception rate.</li>
-            <li><span class="chip chip-pending">todo</span> Custom metrics: <code class="inline-code">mentions_received</code>, <code class="inline-code">mentions_deduped</code>, <code class="inline-code">replies_posted</code>, <code class="inline-code">pipeline_failures</code> — per tone.</li>
-            <li><span class="chip chip-pending">todo</span> Alert: webhook 5xx rate &gt; 1% over 10 min.</li>
-            <li><span class="chip chip-pending">todo</span> Alert: zero mentions received in 24 h (might indicate broken subscription).</li>
+            <li><span class="chip chip-done">done</span> App Insights: request count, p50/p95 latency, exception rate — auto-instrumented via <code class="inline-code">azure-monitor-opentelemetry</code>; wired in <code class="inline-code">app.py</code> on <code class="inline-code">APPLICATIONINSIGHTS_CONNECTION_STRING</code>.</li>
+            <li><span class="chip chip-done">done</span> Custom OTel metrics in <code class="inline-code">derad_agent/app/metrics.py</code>: <code class="inline-code">mentions_received</code>, <code class="inline-code">mentions_accepted</code>, <code class="inline-code">mentions_dropped{reason,tone}</code>, <code class="inline-code">replies_posted{outcome,tone}</code>, <code class="inline-code">pipeline_latency_ms{tone,outcome}</code>.</li>
+            <li><span class="chip chip-done">done</span> Bicep metric alert (<code class="inline-code">Microsoft.Insights/metricAlerts</code>): HTTP 5xx count &gt; 5 in any 10-minute window on the App Service.</li>
+            <li><span class="chip chip-done">done</span> Bicep log alert (<code class="inline-code">Microsoft.Insights/scheduledQueryRules</code>): zero non-4xx requests to <code class="inline-code">/mentions</code> in 24 h — fires when the X subscription goes silent.</li>
+            <li><span class="chip chip-done">done</span> KQL starter pack in <code class="inline-code">scripts/kql/</code>: daily mention rate, drop reason breakdown, pipeline latency percentiles, exception frequency, 5xx rate, zero-mentions check.</li>
           </ul>
         </div>
-        <div class="panel">
+        <div class="panel is-done">
           <div class="panel-head">Cost</div>
           <ul class="task-list">
-            <li><span class="chip chip-pending">todo</span> Azure subscription budget alert at e.g. $200, $400/month.</li>
-            <li><span class="chip chip-pending">todo</span> Daily token-usage check for Azure OpenAI; threshold per persona.</li>
-            <li><span class="chip chip-pending">todo</span> Hard cap on mentions-per-day per bot in Table Storage (kill switch). Mention rate &gt; threshold → start refusing new mentions, log, page.</li>
+            <li><span class="chip chip-done">done</span> Bicep monthly budget (<code class="inline-code">Microsoft.Consumption/budgets</code>): $400 cap, alerts at 50 % ($200 warn) and 100 % ($400 critical). Set <code class="inline-code">alertEmail</code> param at deploy time to enable email notifications.</li>
+            <li><span class="chip chip-info">later</span> Daily token-usage check for Azure OpenAI; threshold per persona.</li>
+            <li><span class="chip chip-done">done</span> In-memory daily mention cap per tone (<code class="inline-code">DERAD_MAX_MENTIONS_PER_DAY</code>) in <code class="inline-code">metrics.py:daily_cap_reached()</code>. Resets on UTC rollover. Drop reason logged as <code class="inline-code">daily_cap</code>. Covered by <code class="inline-code">tests/test_metrics.py</code>.</li>
           </ul>
         </div>
       </div>

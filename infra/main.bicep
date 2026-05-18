@@ -35,6 +35,9 @@ param restrictToRegistered bool = true
 @description('Comma-separated X user ids that are allowed when restricted is true.')
 param allowedAuthorIds string = ''
 
+@description('Email for cost and webhook alert notifications. Empty = rules are created but notify nobody.')
+param alertEmail string = ''
+
 // ── Resource token: deterministic across redeploys ───────────────────────────
 var resourceToken = toLower(uniqueString(subscription().id, resourceGroup().id, location, environmentName))
 
@@ -301,6 +304,132 @@ resource kvSecretsUserAssignment 'Microsoft.Authorization/roleAssignments@2022-0
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', kvSecretsUserRoleId)
     principalId: uami.properties.principalId
     principalType: 'ServicePrincipal'
+  }
+}
+
+// ── Phase 6: Observability — action group, budget, and alert rules ──────────
+
+// One action group shared by all alert rules. Always created; only sends email
+// when alertEmail is non-empty so the resource can be provisioned in dry-run
+// environments without forcing a contact address.
+resource actionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = {
+  name: 'ag${resourceToken}'
+  location: 'global'
+  tags: tags
+  properties: {
+    enabled: true
+    groupShortName: 'derad'
+    emailReceivers: empty(alertEmail) ? [] : [
+      {
+        name: 'ops'
+        emailAddress: alertEmail
+        useCommonAlertSchema: true
+      }
+    ]
+  }
+}
+
+// Monthly cost budget. Alerts at 50 % ($200 warn) and 100 % ($400 critical).
+// startDate must be the first day of a billing month; update when renewing.
+// Skipped (no notifications) when alertEmail is blank — budget is still tracked
+// in the portal for manual review.
+resource budget 'Microsoft.Consumption/budgets@2023-11-01' = {
+  name: 'derad-monthly'
+  properties: {
+    timePeriod: { startDate: '2026-05-01' }
+    timeGrain: 'Monthly'
+    amount: 400
+    category: 'Cost'
+    notifications: empty(alertEmail) ? {} : {
+      warn: {
+        enabled: true
+        operator: 'GreaterThanOrEqualTo'
+        threshold: 50 // 50 % of $400 = $200
+        thresholdType: 'Actual'
+        contactEmails: [alertEmail]
+        contactRoles: []
+        contactGroups: []
+        locale: 'en-us'
+      }
+      critical: {
+        enabled: true
+        operator: 'GreaterThanOrEqualTo'
+        threshold: 100 // 100 % of $400
+        thresholdType: 'Actual'
+        contactEmails: [alertEmail]
+        contactRoles: []
+        contactGroups: []
+        locale: 'en-us'
+      }
+    }
+  }
+}
+
+// Metric alert: HTTP 5xx count > 5 in any 10-minute window.
+// Uses the App Service platform metric `Http5xx` (a raw count, not a rate).
+// Threshold of 5 catches a sustained regression; one or two isolated 5xx from
+// transient X timeouts won't page. Adjust threshold to taste.
+resource alert5xx 'Microsoft.Insights/metricAlerts@2018-03-01' = {
+  name: 'alert-5xx-${appName}'
+  location: 'global'
+  tags: tags
+  properties: {
+    description: 'HTTP 5xx count > 5 in a 10-minute window — likely a deployment regression or unhandled exception.'
+    severity: 2
+    enabled: true
+    scopes: [appService.id]
+    evaluationFrequency: 'PT5M'
+    windowSize: 'PT10M'
+    criteria: {
+      'odata.type': 'Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria'
+      allOf: [
+        {
+          name: 'Http5xxCount'
+          criterionType: 'StaticThresholdCriterion'
+          metricName: 'Http5xx'
+          operator: 'GreaterThan'
+          threshold: 5
+          timeAggregation: 'Total'
+        }
+      ]
+    }
+    actions: [{ actionGroupId: actionGroup.id }]
+  }
+}
+
+// Log alert: zero requests to /mentions in 24 hours.
+// Queries AppRequests in Log Analytics (populated by App Insights auto-instrumentation).
+// Fires when the webhook endpoint goes silent — usually means the X Account
+// Activity subscription was revoked or the bot's access token expired.
+// Scoped to the Log Analytics workspace where workspace-mode App Insights writes.
+resource alertZeroMentions 'Microsoft.Insights/scheduledQueryRules@2022-06-15' = {
+  name: 'alert-zero-mentions-${appName}'
+  location: location
+  tags: tags
+  properties: {
+    description: 'No requests to /mentions in 24 h — X subscription may be broken or access token expired.'
+    severity: 3
+    enabled: true
+    evaluationFrequency: 'PT1H'
+    windowSize: 'P1D'
+    scopes: [logAnalytics.id]
+    criteria: {
+      allOf: [
+        {
+          // Returns one row per matching request. If no rows → 0 rows → Count < 1 → fires.
+          // Exclude 4xx (X CRC handshakes, bad signatures) to avoid false alerts.
+          query: 'AppRequests | where TimeGenerated > ago(24h) | where Url contains "/mentions" | where not(ResultCode startswith "4")'
+          timeAggregation: 'Count'
+          threshold: 1
+          operator: 'LessThan'
+          failingPeriods: {
+            minFailingPeriodsToAlert: 1
+            numberOfEvaluationPeriods: 1
+          }
+        }
+      ]
+    }
+    actions: { actionGroups: [actionGroup.id] }
   }
 }
 
