@@ -1,11 +1,16 @@
 """Tests for derad_agent.app.poller and derad_agent.app.cursors.
 
 Covers:
-  - _v2_to_v1_tweet() normalization (replied_to, no refs, non-reply refs)
+  - _v2_to_v1_tweet() normalization (replied_to, no refs, non-reply refs, username)
   - InMemoryCursorStore get/set
-  - _poll_one() dispatch + cursor update
+  - TablesCursorStore get/set/not-found (mock-based, no real Azure backend)
+  - _poll_one() bootstrap: cursor set, no dispatch
+  - _poll_one() normal: dispatch + cursor update
+  - _poll_one() since_id passed from cursor
   - _poll_one() empty page → no dispatch, no cursor write
   - _poll_one() exception swallowed (loop must not crash)
+  - _poll_one() page cap stops pagination and warns
+  - _poll_one() multi-page cursor taken from first page
 """
 
 from __future__ import annotations
@@ -26,8 +31,9 @@ os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_CHAT", "test-chat")
 os.environ.setdefault("BOT_USER_ID_NEUTRAL", "999")
 os.environ.setdefault("DERAD_ALLOWED_AUTHOR_IDS", "111,222")
 
-from derad_agent.app.cursors import InMemoryCursorStore  # noqa: E402
+from derad_agent.app.cursors import InMemoryCursorStore, TablesCursorStore  # noqa: E402
 from derad_agent.app.poller import _poll_one, _v2_to_v1_tweet  # noqa: E402
+import derad_agent.app.poller as poller_module  # noqa: E402
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -37,10 +43,16 @@ class _FakeMeta:
         self.newest_id = newest_id
 
 
+class _FakeIncludes:
+    def __init__(self, users=None):
+        self.users = users or []
+
+
 class _FakePage:
-    def __init__(self, data=None, newest_id=None):
+    def __init__(self, data=None, newest_id=None, users=None):
         self.data = data or []
         self.meta = _FakeMeta(newest_id) if newest_id else None
+        self.includes = _FakeIncludes(users) if users is not None else None
 
 
 def _make_client(pages: list[_FakePage]):
@@ -50,6 +62,15 @@ def _make_client(pages: list[_FakePage]):
     mock_client = MagicMock()
     mock_client.users = mock_users
     return mock_client
+
+
+def _make_v2_tweet(tweet_id: str, author_id: str, parent_id: str) -> dict:
+    return {
+        "id": tweet_id,
+        "author_id": author_id,
+        "text": f"@bot check this (id={tweet_id})",
+        "referenced_tweets": [{"id": parent_id, "type": "replied_to"}],
+    }
 
 
 # ── _v2_to_v1_tweet ───────────────────────────────────────────────────────
@@ -88,6 +109,16 @@ class TestV2ToV1Tweet:
         result = _v2_to_v1_tweet(v2, user_id="fallback_uid")
         assert result["user"]["id_str"] == "fallback_uid"
 
+    def test_username_resolved_from_users_by_id(self):
+        v2 = {"id": "5005", "author_id": "42", "text": "hi"}
+        result = _v2_to_v1_tweet(v2, user_id="bot_id", users_by_id={"42": "alice"})
+        assert result["user"]["username"] == "alice"
+
+    def test_no_username_key_when_not_in_lookup(self):
+        v2 = {"id": "6006", "author_id": "99", "text": "hi"}
+        result = _v2_to_v1_tweet(v2, user_id="bot_id", users_by_id={"42": "alice"})
+        assert "username" not in result["user"]
+
 
 # ── InMemoryCursorStore ───────────────────────────────────────────────────
 
@@ -115,29 +146,78 @@ class TestInMemoryCursorStore:
         assert store.get("b") == "2"
 
 
+# ── TablesCursorStore (mock-based) ─────────────────────────────────────────
+
+class TestTablesCursorStore:
+    def _make_store(self, mock_table_client):
+        """Bypass __init__ and inject a pre-built mock table client."""
+        from azure.core.exceptions import ResourceNotFoundError
+        store = object.__new__(TablesCursorStore)
+        store._client = mock_table_client
+        store._ResourceNotFoundError = ResourceNotFoundError
+        return store
+
+    def test_get_returns_cursor_value(self):
+        client = MagicMock()
+        client.get_entity.return_value = {"cursor_value": "99999"}
+        store = self._make_store(client)
+        assert store.get("poll_cursor:neutral") == "99999"
+        client.get_entity.assert_called_once_with(
+            partition_key="cursors", row_key="poll_cursor:neutral"
+        )
+
+    def test_get_returns_none_when_not_found(self):
+        from azure.core.exceptions import ResourceNotFoundError
+        client = MagicMock()
+        client.get_entity.side_effect = ResourceNotFoundError()
+        store = self._make_store(client)
+        assert store.get("poll_cursor:neutral") is None
+
+    def test_set_upserts_correct_entity(self):
+        client = MagicMock()
+        store = self._make_store(client)
+        store.set("poll_cursor:neutral", "88888")
+        client.upsert_entity.assert_called_once_with({
+            "PartitionKey": "cursors",
+            "RowKey": "poll_cursor:neutral",
+            "cursor_value": "88888",
+        })
+
+
 # ── _poll_one ─────────────────────────────────────────────────────────────
 
 class TestPollOne:
-    def _make_v2_tweet(self, tweet_id: str, author_id: str, parent_id: str) -> dict:
-        return {
-            "id": tweet_id,
-            "author_id": author_id,
-            "text": f"@bot check this (id={tweet_id})",
-            "referenced_tweets": [{"id": parent_id, "type": "replied_to"}],
-        }
-
-    def test_dispatches_each_tweet_on_page(self):
+    def test_bootstrap_sets_cursor_without_dispatching(self):
+        """First call (no cursor) records watermark but dispatches nothing."""
         cursor_store = InMemoryCursorStore()
         dispatched = []
 
         page = _FakePage(
+            data=[_make_v2_tweet("50", "111", "10")],
+            newest_id="50",
+        )
+        _poll_one(
+            "neutral", "999",
+            lambda tone, tweet, ts: dispatched.append(tweet["id_str"]),
+            cursor_store,
+            x_client_factory=lambda tone: _make_client([page]),
+        )
+
+        assert dispatched == []
+        assert cursor_store.get("poll_cursor:neutral") == "50"
+
+    def test_dispatches_each_tweet_on_page(self):
+        cursor_store = InMemoryCursorStore()
+        cursor_store.set("poll_cursor:neutral", "1")  # skip bootstrap
+        dispatched = []
+
+        page = _FakePage(
             data=[
-                self._make_v2_tweet("10", "111", "1"),
-                self._make_v2_tweet("11", "222", "2"),
+                _make_v2_tweet("10", "111", "1"),
+                _make_v2_tweet("11", "222", "2"),
             ],
             newest_id="11",
         )
-
         _poll_one(
             "neutral", "999",
             lambda tone, tweet, ts: dispatched.append((tone, tweet["id_str"])),
@@ -149,13 +229,34 @@ class TestPollOne:
         assert dispatched[0] == ("neutral", "10")
         assert dispatched[1] == ("neutral", "11")
 
-    def test_cursor_updated_to_newest_id(self):
+    def test_username_populated_from_page_includes(self):
         cursor_store = InMemoryCursorStore()
+        cursor_store.set("poll_cursor:neutral", "1")
+        normalized_tweets = []
+
         page = _FakePage(
-            data=[self._make_v2_tweet("99", "111", "50")],
-            newest_id="99",
+            data=[_make_v2_tweet("20", "111", "5")],
+            newest_id="20",
+            users=[{"id": "111", "username": "alice_test"}],
+        )
+        _poll_one(
+            "neutral", "999",
+            lambda tone, tweet, ts: normalized_tweets.append(tweet),
+            cursor_store,
+            x_client_factory=lambda tone: _make_client([page]),
         )
 
+        assert len(normalized_tweets) == 1
+        assert normalized_tweets[0]["user"]["username"] == "alice_test"
+
+    def test_cursor_updated_to_newest_id(self):
+        cursor_store = InMemoryCursorStore()
+        cursor_store.set("poll_cursor:neutral", "1")  # skip bootstrap
+
+        page = _FakePage(
+            data=[_make_v2_tweet("99", "111", "50")],
+            newest_id="99",
+        )
         _poll_one(
             "neutral", "999",
             lambda *a: None,
@@ -168,8 +269,7 @@ class TestPollOne:
     def test_since_id_passed_from_cursor(self):
         cursor_store = InMemoryCursorStore()
         cursor_store.set("poll_cursor:agreeable", "50")
-
-        captured_kwargs = {}
+        captured_kwargs: dict = {}
 
         def fake_get_mentions(id, **kwargs):
             captured_kwargs.update(kwargs)
@@ -207,7 +307,6 @@ class TestPollOne:
         def bad_factory(tone):
             raise RuntimeError("API down")
 
-        # Should not raise — exception is caught and logged.
         _poll_one(
             "neutral", "999",
             lambda *a: None,
@@ -217,11 +316,12 @@ class TestPollOne:
 
     def test_cursor_not_updated_when_no_newest_id(self):
         cursor_store = InMemoryCursorStore()
+        cursor_store.set("poll_cursor:neutral", "1")  # skip bootstrap
+
         page = _FakePage(
-            data=[self._make_v2_tweet("7", "111", "3")],
+            data=[_make_v2_tweet("7", "111", "3")],
             newest_id=None,
         )
-
         _poll_one(
             "neutral", "999",
             lambda *a: None,
@@ -229,23 +329,39 @@ class TestPollOne:
             x_client_factory=lambda tone: _make_client([page]),
         )
 
-        assert cursor_store.get("poll_cursor:neutral") is None
+        assert cursor_store.get("poll_cursor:neutral") == "1"  # unchanged
+
+    def test_page_cap_stops_pagination_and_warns(self, monkeypatch):
+        """Dispatch stops after _MAX_PAGES_PER_POLL pages and logs a warning."""
+        monkeypatch.setattr(poller_module, "_MAX_PAGES_PER_POLL", 2)
+
+        cursor_store = InMemoryCursorStore()
+        cursor_store.set("poll_cursor:neutral", "1")  # skip bootstrap
+        dispatched = []
+
+        pages = [
+            _FakePage(data=[_make_v2_tweet(str(i + 10), "111", "1")], newest_id=str(i + 10))
+            for i in range(3)
+        ]
+        _poll_one(
+            "neutral", "999",
+            lambda tone, tweet, ts: dispatched.append(tweet["id_str"]),
+            cursor_store,
+            x_client_factory=lambda tone: _make_client(pages),
+        )
+
+        assert len(dispatched) == 2  # capped at 2 pages × 1 tweet
+        assert cursor_store.get("poll_cursor:neutral") == "10"  # newest_id from page 1
 
     def test_multi_page_cursor_from_first_page(self):
         """Cursor should be newest_id of first page (global newest), not last."""
         cursor_store = InMemoryCursorStore()
+        cursor_store.set("poll_cursor:neutral", "1")  # skip bootstrap
 
         pages = [
-            _FakePage(
-                data=[self._make_v2_tweet("20", "111", "10")],
-                newest_id="20",
-            ),
-            _FakePage(
-                data=[self._make_v2_tweet("15", "111", "10")],
-                newest_id="15",
-            ),
+            _FakePage(data=[_make_v2_tweet("20", "111", "10")], newest_id="20"),
+            _FakePage(data=[_make_v2_tweet("15", "111", "10")], newest_id="15"),
         ]
-
         _poll_one(
             "neutral", "999",
             lambda *a: None,

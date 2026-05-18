@@ -151,7 +151,7 @@ def _run_export(args, table_name: str, json_fields: set[str]) -> int:
         )
         return 1
 
-    since: date = args.since or date(2026, 1, 1)
+    since: date = args.since or date.today().replace(month=1, day=1)
     until: date = args.until or date.today()
     if since > until:
         print(f"ERROR: --since {since} is after --until {until}", file=sys.stderr)

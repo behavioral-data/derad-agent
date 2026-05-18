@@ -86,7 +86,7 @@ class TablesCursorStore:
     def get(self, key: str) -> str | None:
         try:
             entity = self._client.get_entity(partition_key=self.PARTITION, row_key=key)
-            return entity.get("Value")
+            return entity.get("cursor_value")
         except self._ResourceNotFoundError:
             return None
 
@@ -94,7 +94,7 @@ class TablesCursorStore:
         self._client.upsert_entity({
             "PartitionKey": self.PARTITION,
             "RowKey": key,
-            "Value": value,
+            "cursor_value": value,
         })
 
 
