@@ -84,11 +84,25 @@ class MentionDrop:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class EngagementSnapshot:
+    """One row per engagement poll on a bot reply tweet."""
+    reply_id: str
+    tone: str
+    polled_at_utc: datetime
+    like_count: int = 0
+    retweet_count: int = 0
+    reply_count: int = 0
+    quote_count: int = 0
+
+
 # ── Store interface ─────────────────────────────────────────────────────────
 
 class EventsStore(Protocol):
     def write_event(self, ev: MentionEvent) -> None: ...
     def write_drop(self, drop: MentionDrop) -> None: ...
+    def write_engagement(self, snap: EngagementSnapshot) -> None: ...
+    def iter_reply_ids(self) -> list[tuple[str, str]]: ...
 
 
 # ── In-memory backend (tests + local dev) ───────────────────────────────────
@@ -99,6 +113,7 @@ class InMemoryEventsStore:
     def __init__(self) -> None:
         self.events: list[MentionEvent] = []
         self.drops: list[MentionDrop] = []
+        self.engagements: list[EngagementSnapshot] = []
         self._lock = threading.Lock()
 
     def write_event(self, ev: MentionEvent) -> None:
@@ -108,6 +123,14 @@ class InMemoryEventsStore:
     def write_drop(self, drop: MentionDrop) -> None:
         with self._lock:
             self.drops.append(drop)
+
+    def write_engagement(self, snap: EngagementSnapshot) -> None:
+        with self._lock:
+            self.engagements.append(snap)
+
+    def iter_reply_ids(self) -> list[tuple[str, str]]:
+        with self._lock:
+            return [(ev.reply_id, ev.tone) for ev in self.events if ev.reply_id]
 
 
 # ── Azure Tables backend ────────────────────────────────────────────────────
@@ -133,6 +156,7 @@ class TablesEventsStore:
         *,
         events_table: str = "MentionEvents",
         drops_table: str = "MentionDrops",
+        engagements_table: str = "EngagementSnapshots",
         credential=None,
     ) -> None:
         from azure.core.exceptions import ResourceExistsError
@@ -141,7 +165,7 @@ class TablesEventsStore:
 
         cred = credential or DefaultAzureCredential()
         self._service = TableServiceClient(endpoint=endpoint, credential=cred)
-        for name in (events_table, drops_table):
+        for name in (events_table, drops_table, engagements_table):
             try:
                 self._service.create_table(name)
                 logger.info("Created events table %s", name)
@@ -149,6 +173,7 @@ class TablesEventsStore:
                 pass
         self._events = self._service.get_table_client(events_table)
         self._drops = self._service.get_table_client(drops_table)
+        self._engagements = self._service.get_table_client(engagements_table)
 
     def write_event(self, ev: MentionEvent) -> None:
         entity = self._event_entity(ev)
@@ -209,6 +234,35 @@ class TablesEventsStore:
             "extra_json": json.dumps(drop.extra, ensure_ascii=False, default=str),
         }
 
+    def write_engagement(self, snap: EngagementSnapshot) -> None:
+        entity = {
+            "PartitionKey": snap.polled_at_utc.strftime("%Y-%m"),
+            "RowKey": f"{snap.polled_at_utc.isoformat()}_{snap.reply_id}",
+            "reply_id": snap.reply_id,
+            "tone": snap.tone,
+            "polled_at_utc": snap.polled_at_utc,
+            "like_count": snap.like_count,
+            "retweet_count": snap.retweet_count,
+            "reply_count": snap.reply_count,
+            "quote_count": snap.quote_count,
+        }
+        try:
+            self._engagements.upsert_entity(entity)
+        except Exception:
+            logger.exception("write_engagement failed for reply %s; continuing", snap.reply_id)
+
+    def iter_reply_ids(self) -> list[tuple[str, str]]:
+        result = []
+        try:
+            for entity in self._events.list_entities(select=["reply_id", "tone"]):
+                rid = entity.get("reply_id")
+                tone = entity.get("tone", "")
+                if rid:
+                    result.append((rid, tone))
+        except Exception:
+            logger.exception("iter_reply_ids failed")
+        return result
+
     def _truncate(self, value: Optional[str], cap: int = _FIELD_CAP) -> Optional[str]:
         if value is None:
             return None
@@ -266,6 +320,14 @@ def log_mention_drop(drop: MentionDrop) -> None:
         get_store().write_drop(drop)
     except Exception:
         logger.exception("log_mention_drop swallowed exception for reason %s", drop.drop_reason)
+
+
+def log_engagement_snapshot(snap: EngagementSnapshot) -> None:
+    """Best-effort write. Never raises."""
+    try:
+        get_store().write_engagement(snap)
+    except Exception:
+        logger.exception("log_engagement_snapshot swallowed exception for reply %s", snap.reply_id)
 
 
 def utcnow() -> datetime:

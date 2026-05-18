@@ -35,6 +35,7 @@ dependencies = [
 derad-embed-notes = "derad_agent.cli.embed_notes:main"
 derad-ask = "derad_agent.cli.ask:main"
 derad-webhooks = "derad_agent.cli.webhooks:main"
+derad-poll-engagement = "derad_agent.cli.poll_engagement:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
