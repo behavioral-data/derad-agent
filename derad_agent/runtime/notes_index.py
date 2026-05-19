@@ -14,6 +14,7 @@ Workflow used by the agent:
 
 from __future__ import annotations
 
+import functools
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,6 +41,7 @@ def _l2_normalize(matrix: np.ndarray) -> np.ndarray:
     return matrix / norms
 
 
+@functools.lru_cache(maxsize=1)
 def load_notes_index(index_dir: Path) -> NotesIndex:
     """Load tweet IDs, embeddings, and the notes sidecar from disk."""
     index_dir = Path(index_dir)

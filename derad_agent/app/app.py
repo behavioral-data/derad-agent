@@ -80,6 +80,7 @@ TONE_BY_USER_ID = {
 # Sources follow-up tweet defaults to OFF — URL posts cost $0.200 each on
 # X PPU (13× the $0.015 plain-text rate). Turn on per study arm.
 POST_SOURCES_TWEET = os.getenv("DERAD_POST_SOURCES_TWEET", "false").lower() == "true"
+DRY_RUN = os.getenv("DERAD_DRY_RUN", "false").lower() == "true"
 
 RESTRICT_TO_REGISTERED = os.getenv("DERAD_RESTRICT_TO_REGISTERED", "true").lower() == "true"
 ALLOWED_AUTHOR_IDS = {
@@ -208,16 +209,26 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         metrics.pipeline_latency_ms.record(ev.pipeline_ms, {"tone": tone, "outcome": outcome})
 
     try:
-        snap = fetch_tweet(parent_id, tone=tone)
-        if snap is None or not snap.text:
-            logger.info("Parent tweet %s unreachable; skipping mention %s", parent_id, mention_id)
-            _finalize("parent_fetch_failed")
-            return
-        ev.parent_text = snap.text
-        ev.parent_author_id = snap.author_id
-        ev.parent_author_username = snap.author_username
+        if DRY_RUN:
+            # Skip X API calls. Use the mention text (minus @handle) as the
+            # statement so the LLM pipeline can run end-to-end without credentials.
+            import re as _re
+            raw_text = tweet.get("text", "")
+            statement = _re.sub(r"@\w+\s*", "", raw_text).strip() or raw_text
+            ev.parent_text = f"[dry-run] {statement}"
+            logger.info("DRY_RUN: using mention text as statement: %r", statement)
+        else:
+            snap = fetch_tweet(parent_id, tone=tone)
+            if snap is None or not snap.text:
+                logger.info("Parent tweet %s unreachable; skipping mention %s", parent_id, mention_id)
+                _finalize("parent_fetch_failed")
+                return
+            ev.parent_text = snap.text
+            ev.parent_author_id = snap.author_id
+            ev.parent_author_username = snap.author_username
+            statement = snap.text
 
-        reply = generate_reply(statement=snap.text, exclude_tweet_id=parent_id, tone=tone)
+        reply = generate_reply(statement=statement, exclude_tweet_id=parent_id, tone=tone)
         ev.queries = reply.get("queries") or []
         ev.cited_tweet_ids = reply.get("all_cited_tweet_ids") or []
         ev.cited_note_ids = reply.get("all_cited_note_ids") or []
@@ -227,6 +238,11 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             _finalize("empty_reply")
             return
         ev.reply_text = reply["text"]
+        logger.info("DRY_RUN reply (tone=%s): %s", tone, reply["text"] if DRY_RUN else "(posting)")
+
+        if DRY_RUN:
+            _finalize("dry_run")
+            return
 
         reply_id = post_reply(parent_id=mention_id, reply_text=reply["text"], tone=tone)
         if reply_id is None:
