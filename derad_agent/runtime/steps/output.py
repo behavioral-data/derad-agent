@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 from html import unescape
 from typing import Any, Dict, List, Optional, Sequence
 
-from derad_agent.llm.config import get_llm
+from derad_agent.llm.config import get_llm, STYLE_LLM_PROVIDERS
 from derad_agent.llm.prompts import get_style_prompt
 
 from ._helpers import extract_text_from_response, parse_json_response
@@ -77,9 +78,12 @@ def _evidence_payload(notes: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "note": _clean_reason(summary, max_chars=400),
                 "note_id": note.get("note_id"),
                 "tweet_id": note.get("tweet_id"),
+                "created_at_millis": note.get("created_at_millis") or 0,
                 "evidence_links": _extract_urls(summary),
             }
         )
+    # Most-recent first so the LLM weights new notes more heavily for accuracy.
+    payload.sort(key=lambda n: n["created_at_millis"], reverse=True)
     return payload
 
 
@@ -130,21 +134,25 @@ def step_compose_reply(
     candidates = _evidence_payload(notes)
     candidate_index = {str(c["note_id"]): c for c in candidates if c.get("note_id") is not None}
 
+    provider = STYLE_LLM_PROVIDERS.get(style, "openai")
     prompt = get_style_prompt(style)
     llm = get_llm(
         temperature=None,
         max_tokens=1400,
         reasoning_effort="low",
         text_verbosity="medium",
+        provider=provider,
     )
     chain = prompt | llm
 
-    raw = chain.invoke(
-        {
-            "statement": statement,
-            "evidence_notes_json": json.dumps(candidates, ensure_ascii=False),
-        }
-    )
+    invoke_vars: Dict[str, str] = {
+        "statement": statement,
+        "evidence_notes_json": json.dumps(candidates, ensure_ascii=False),
+    }
+    if style == "satirical":
+        invoke_vars["current_date"] = datetime.now(timezone.utc).strftime("%B %d, %Y")
+
+    raw = chain.invoke(invoke_vars)
     text = extract_text_from_response(raw)
     try:
         parsed = parse_json_response(text)
@@ -159,6 +167,7 @@ def step_compose_reply(
             max_tokens=1400,
             reasoning_effort="low",
             text_verbosity="low",
+            provider=provider,
         )
         repair_raw = repair_llm.invoke(repair_prompt)
         parsed = parse_json_response(extract_text_from_response(repair_raw))

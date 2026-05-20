@@ -36,6 +36,15 @@ from langchain_openai import AzureOpenAIEmbeddings as _EmbCls  # type: ignore
 # GPT-5 Responses API requires 2025-03-01-preview or later for reasoning controls
 _API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2025-03-01-preview")
 
+# Which LLM provider handles the final reply generation for each tone.
+# "openai" → Azure OpenAI (GPT-5-mini)
+# "grok"   → Azure AI Services (Grok), requires AZURE_AI_ENDPOINT
+STYLE_LLM_PROVIDERS: dict[str, str] = {
+    "agreeable": "openai",
+    "neutral":   "openai",
+    "satirical": "openai",
+}
+
 
 def _validate_env() -> None:
     """Warn early if critical env vars for embedding are missing."""
@@ -74,15 +83,28 @@ def get_llm(
     max_tokens: int = 2048,
     reasoning_effort: str = None,
     text_verbosity: str = None,
+    provider: str = "openai",
 ):
-    """Get Azure OpenAI chat model.
+    """Get a chat model.
 
-    Args:
-        temperature: Sampling temperature (0.0-2.0)
-        max_tokens: Maximum tokens to generate
-        reasoning_effort: GPT-5 reasoning effort: "minimal", "low", "medium", "high"
-        text_verbosity: GPT-5 text verbosity: "low", "medium", "high"
+    provider="grok"  — Azure AI Services (Grok); requires AZURE_AI_ENDPOINT.
+                       reasoning_effort and text_verbosity are silently ignored.
+    provider="openai" — Azure OpenAI (default).
     """
+    if provider == "grok":
+        from langchain_openai import ChatOpenAI
+        ai_endpoint = _require_env("AZURE_AI_ENDPOINT")
+        model_name = os.getenv("AZURE_AI_DEPLOYMENT_CHAT", "grok-4.3")
+        config: dict = {
+            "base_url": f"{ai_endpoint.rstrip('/')}/models",
+            "api_key": _require_env("AZURE_OPENAI_API_KEY"),
+            "model": model_name,
+            "max_tokens": max_tokens,
+        }
+        if temperature is not None:
+            config["temperature"] = temperature
+        return ChatOpenAI(**config)
+
     from langchain_openai import AzureChatOpenAI
 
     config = {
@@ -136,6 +158,7 @@ def get_x_client(tone="agreeable"):
 __all__ = [
     "NOTES_TSV_ROOT",
     "INDEX_ROOT",
+    "STYLE_LLM_PROVIDERS",
     "get_embedder",
     "get_llm",
 ]
