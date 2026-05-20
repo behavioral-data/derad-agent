@@ -149,6 +149,7 @@ def get_x_client(tone="agreeable"):
     oauth1 = OAuth1(
         api_key=_require_env("X_API_KEY"),
         api_secret=_require_env("X_API_SECRET"),
+        callback="oob",
         access_token=_require_env(f"X_ACCESS_TOKEN_{tone.upper()}"),
         access_token_secret=_require_env(f"X_ACCESS_TOKEN_SECRET_{tone.upper()}")
     )
