@@ -106,7 +106,7 @@ class EventsStore(Protocol):
     def write_event(self, ev: MentionEvent) -> None: ...
     def write_drop(self, drop: MentionDrop) -> None: ...
     def write_engagement(self, snap: EngagementSnapshot) -> None: ...
-    def iter_reply_ids(self) -> list[tuple[str, str]]: ...
+    def iter_reply_ids(self) -> list[tuple[str, str, datetime | None]]: ...
 
 
 # ── In-memory backend (tests + local dev) ───────────────────────────────────
@@ -132,9 +132,13 @@ class InMemoryEventsStore:
         with self._lock:
             self.engagements.append(snap)
 
-    def iter_reply_ids(self) -> list[tuple[str, str]]:
+    def iter_reply_ids(self) -> list[tuple[str, str, datetime | None]]:
         with self._lock:
-            return [(ev.reply_id, ev.tone) for ev in self.events if ev.reply_id]
+            return [
+                (ev.reply_id, ev.tone, ev.reply_posted_utc)
+                for ev in self.events
+                if ev.reply_id
+            ]
 
 
 # ── Azure Tables backend ────────────────────────────────────────────────────
@@ -259,14 +263,15 @@ class TablesEventsStore:
         except Exception:
             logger.exception("write_engagement failed for reply %s; continuing", snap.reply_id)
 
-    def iter_reply_ids(self) -> list[tuple[str, str]]:
+    def iter_reply_ids(self) -> list[tuple[str, str, datetime | None]]:
         result = []
         try:
-            for entity in self._events.list_entities(select=["reply_id", "tone"]):
+            for entity in self._events.list_entities(select=["reply_id", "tone", "reply_posted_utc"]):
                 rid = entity.get("reply_id")
                 tone = entity.get("tone", "")
+                posted_at = entity.get("reply_posted_utc")
                 if rid:
-                    result.append((rid, tone))
+                    result.append((rid, tone, posted_at))
         except Exception:
             logger.exception("iter_reply_ids failed")
         return result
