@@ -57,6 +57,10 @@ class MentionEvent:
     parent_text: Optional[str] = None
     parent_author_id: Optional[str] = None
     parent_author_username: Optional[str] = None
+    parent_like_count: Optional[int] = None
+    parent_retweet_count: Optional[int] = None
+    parent_reply_count: Optional[int] = None
+    parent_quote_count: Optional[int] = None
 
     # Pipeline output
     queries: list[str] = field(default_factory=list)
@@ -204,6 +208,10 @@ class TablesEventsStore:
             "parent_text": self._truncate(ev.parent_text),
             "parent_author_id": ev.parent_author_id,
             "parent_author_username": ev.parent_author_username,
+            "parent_like_count": ev.parent_like_count,
+            "parent_retweet_count": ev.parent_retweet_count,
+            "parent_reply_count": ev.parent_reply_count,
+            "parent_quote_count": ev.parent_quote_count,
             "queries_json": json.dumps(ev.queries, ensure_ascii=False),
             "cited_note_ids_json": json.dumps(ev.cited_note_ids),
             "cited_tweet_ids_json": json.dumps(ev.cited_tweet_ids),

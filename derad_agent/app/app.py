@@ -226,6 +226,10 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             ev.parent_text = snap.text
             ev.parent_author_id = snap.author_id
             ev.parent_author_username = snap.author_username
+            ev.parent_like_count = snap.like_count
+            ev.parent_retweet_count = snap.retweet_count
+            ev.parent_reply_count = snap.reply_count
+            ev.parent_quote_count = snap.quote_count
             statement = snap.text
 
         reply = generate_reply(statement=statement, exclude_tweet_id=parent_id, tone=tone)

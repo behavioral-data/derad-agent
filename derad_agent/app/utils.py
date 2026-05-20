@@ -52,6 +52,10 @@ class TweetSnapshot:
     text: str
     author_id: Optional[str] = None
     author_username: Optional[str] = None
+    like_count: Optional[int] = None
+    retweet_count: Optional[int] = None
+    reply_count: Optional[int] = None
+    quote_count: Optional[int] = None
 
 
 def fetch_tweet(tweet_id, *, tone: str = "neutral") -> Optional[TweetSnapshot]:
@@ -66,7 +70,7 @@ def fetch_tweet(tweet_id, *, tone: str = "neutral") -> Optional[TweetSnapshot]:
     try:
         response = get_x_client(tone=tone).posts.get_by_id(
             id=str(tweet_id),
-            tweet_fields=["text", "author_id"],
+            tweet_fields=["text", "author_id", "public_metrics"],
             expansions=["author_id"],
             user_fields=["username"],
         )
@@ -82,6 +86,9 @@ def fetch_tweet(tweet_id, *, tone: str = "neutral") -> Optional[TweetSnapshot]:
         return None
 
     author_id = data.get("author_id") if isinstance(data, dict) else None
+    public_metrics = data.get("public_metrics") if isinstance(data, dict) else {}
+    if not isinstance(public_metrics, dict):
+        public_metrics = {}
     author_username: Optional[str] = None
     includes = getattr(response, "includes", None) or {}
     users = includes.get("users") if isinstance(includes, dict) else None
@@ -95,6 +102,10 @@ def fetch_tweet(tweet_id, *, tone: str = "neutral") -> Optional[TweetSnapshot]:
         text=text,
         author_id=str(author_id) if author_id is not None else None,
         author_username=author_username,
+        like_count=public_metrics.get("like_count"),
+        retweet_count=public_metrics.get("retweet_count"),
+        reply_count=public_metrics.get("reply_count"),
+        quote_count=public_metrics.get("quote_count"),
     )
 
 
