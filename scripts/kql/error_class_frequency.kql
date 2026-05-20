@@ -1,0 +1,14 @@
+// Exception type and message frequency — for pipeline_error outcomes.
+// Source: AppExceptions (auto-instrumented Flask via azure-monitor-opentelemetry).
+//
+// Cross-reference with customMetrics where outcome == "pipeline_error"
+// to correlate error counts with latency spikes.
+
+AppExceptions
+| where TimeGenerated > ago(7d)
+| summarize
+    count     = count(),
+    last_seen = max(TimeGenerated)
+  by ExceptionType, OuterMessage = substring(OuterMessage, 0, 200)
+| order by count desc
+| take 20

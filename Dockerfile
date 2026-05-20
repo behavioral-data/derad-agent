@@ -70,8 +70,8 @@ CMD ["gunicorn", \
      "--workers", "1", \
      "--worker-class", "gthread", \
      "--threads", "8", \
-     "--timeout", "30", \
-     "--graceful-timeout", "20", \
+     "--timeout", "300", \
+     "--graceful-timeout", "60", \
      "--bind", "0.0.0.0:8000", \
      "--access-logfile", "-", \
      "--error-logfile", "-", \

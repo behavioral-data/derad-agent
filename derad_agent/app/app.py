@@ -22,6 +22,7 @@ from derad_agent.app.utils import (
     post_reply,
     preload_index_async,
 )
+from derad_agent.app import poller as _poller
 from derad_agent.llm.config import _require_env
 
 logging.basicConfig(
@@ -79,6 +80,7 @@ TONE_BY_USER_ID = {
 # Sources follow-up tweet defaults to OFF — URL posts cost $0.200 each on
 # X PPU (13× the $0.015 plain-text rate). Turn on per study arm.
 POST_SOURCES_TWEET = os.getenv("DERAD_POST_SOURCES_TWEET", "false").lower() == "true"
+DRY_RUN = os.getenv("DERAD_DRY_RUN", "false").lower() == "true"
 
 RESTRICT_TO_REGISTERED = os.getenv("DERAD_RESTRICT_TO_REGISTERED", "true").lower() == "true"
 ALLOWED_AUTHOR_IDS = {
@@ -86,6 +88,7 @@ ALLOWED_AUTHOR_IDS = {
 }
 RATE_LIMIT_PER_SEC = int(os.getenv("DERAD_RATE_LIMIT_PER_SEC", "3"))
 TWEET_LIMIT = 280
+INGEST_MODE = _poller.INGEST_MODE
 
 
 def _crc_response(crc_token: str) -> dict:
@@ -206,16 +209,26 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         metrics.pipeline_latency_ms.record(ev.pipeline_ms, {"tone": tone, "outcome": outcome})
 
     try:
-        snap = fetch_tweet(parent_id, tone=tone)
-        if snap is None or not snap.text:
-            logger.info("Parent tweet %s unreachable; skipping mention %s", parent_id, mention_id)
-            _finalize("parent_fetch_failed")
-            return
-        ev.parent_text = snap.text
-        ev.parent_author_id = snap.author_id
-        ev.parent_author_username = snap.author_username
+        if DRY_RUN:
+            # Skip X API calls. Use the mention text (minus @handle) as the
+            # statement so the LLM pipeline can run end-to-end without credentials.
+            import re as _re
+            raw_text = tweet.get("text", "")
+            statement = _re.sub(r"@\w+\s*", "", raw_text).strip() or raw_text
+            ev.parent_text = f"[dry-run] {statement}"
+            logger.info("DRY_RUN: using mention text as statement: %r", statement)
+        else:
+            snap = fetch_tweet(parent_id, tone=tone)
+            if snap is None or not snap.text:
+                logger.info("Parent tweet %s unreachable; skipping mention %s", parent_id, mention_id)
+                _finalize("parent_fetch_failed")
+                return
+            ev.parent_text = snap.text
+            ev.parent_author_id = snap.author_id
+            ev.parent_author_username = snap.author_username
+            statement = snap.text
 
-        reply = generate_reply(statement=snap.text, exclude_tweet_id=parent_id, tone=tone)
+        reply = generate_reply(statement=statement, exclude_tweet_id=parent_id, tone=tone)
         ev.queries = reply.get("queries") or []
         ev.cited_tweet_ids = reply.get("all_cited_tweet_ids") or []
         ev.cited_note_ids = reply.get("all_cited_note_ids") or []
@@ -225,6 +238,11 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             _finalize("empty_reply")
             return
         ev.reply_text = reply["text"]
+        logger.info("DRY_RUN reply (tone=%s): %s", tone, reply["text"] if DRY_RUN else "(posting)")
+
+        if DRY_RUN:
+            _finalize("dry_run")
+            return
 
         reply_id = post_reply(parent_id=mention_id, reply_text=reply["text"], tone=tone)
         if reply_id is None:
@@ -264,9 +282,78 @@ def _route_tone_from_event(event: dict) -> str | None:
     return TONE_BY_USER_ID.get(str(for_user_id))
 
 
-def mention(tone: str, event: dict, received_at_utc):
-    """Run the guards-then-thread flow for an already-routed event."""
+def _dispatch_tweet(tone: str, tweet: dict, received_at_utc: datetime) -> bool:
+    """Apply the guard chain and, if accepted, start a pipeline thread.
+
+    Called by the webhook handler (via mention()) and the polling worker.
+    Returns True if the tweet was accepted and a pipeline thread started.
+
+    All guard logic lives here so both code paths share identical filtering —
+    no risk of the poller bypassing a guard that the webhook checks.
+    """
     metrics.mentions_received.add(1, {"tone": tone})
+
+    def _drop(reason: str, **drop_kwargs):
+        log_mention_drop(MentionDrop(
+            drop_reason=reason, received_at_utc=received_at_utc, tone=tone, **drop_kwargs,
+        ))
+        metrics.mentions_dropped.add(1, {"tone": tone, "reason": reason})
+
+    mention_id = tweet.get("id_str")
+    parent_id = tweet.get("in_reply_to_status_id_str")
+    author_id = (tweet.get("user") or {}).get("id_str")
+
+    if not mention_id or not parent_id:
+        _drop("no_parent", mention_id=mention_id, author_id=author_id,
+              extra={"has_mention_id": bool(mention_id), "has_parent_id": bool(parent_id)})
+        return False
+
+    if _is_self_reply(tweet, tone):
+        logger.info("Skipping self-reply %s (tone=%s)", mention_id, tone)
+        _drop("self_reply", mention_id=mention_id, author_id=author_id)
+        return False
+
+    if RESTRICT_TO_REGISTERED and author_id not in ALLOWED_AUTHOR_IDS:
+        logger.info("Skipping mention %s from unregistered author %s", mention_id, author_id)
+        _drop("unregistered", mention_id=mention_id, author_id=author_id)
+        return False
+
+    store = get_store()
+    if not store.claim(mention_id, ttl_seconds=86400):
+        logger.info("Duplicate mention %s ignored", mention_id)
+        _drop("duplicate", mention_id=mention_id, author_id=author_id)
+        return False
+
+    hits = store.hit_and_count(f"author:{author_id}", window_seconds=1)
+    if hits > RATE_LIMIT_PER_SEC:
+        logger.info("Rate-limited mention %s from author %s (hits=%d)", mention_id, author_id, hits)
+        _drop("rate_limit", mention_id=mention_id, author_id=author_id, extra={"hits": hits})
+        return False
+
+    # Daily cap: defense in depth against runaway loops. Counted in-memory
+    # per tone; resets on UTC date rollover. Lose-on-restart is acceptable.
+    if metrics.daily_cap_reached(tone):
+        _drop("daily_cap", mention_id=mention_id, author_id=author_id)
+        return False
+
+    logger.info(
+        "Accepted mention %s (tone=%s, author=%s, parent=%s)",
+        mention_id, tone, author_id, parent_id,
+    )
+    metrics.mentions_accepted.add(1, {"tone": tone})
+    # daemon=False: lets gunicorn's --graceful-timeout drain in-flight pipelines
+    # on SIGTERM. We've already claimed mention_id in the dedup store, so X
+    # won't redeliver — dropping the thread would silently lose the reply.
+    threading.Thread(
+        target=process_mention,
+        args=(tone, tweet, received_at_utc),
+        daemon=False,
+    ).start()
+    return True
+
+
+def mention(tone: str, event: dict, received_at_utc: datetime):
+    """Unwrap a webhook event and hand off to _dispatch_tweet."""
 
     def _drop(reason: str, **drop_kwargs):
         log_mention_drop(MentionDrop(
@@ -291,56 +378,7 @@ def mention(tone: str, event: dict, received_at_utc):
         _drop("invalid_payload", extra={"why": "tweet_not_dict", "type": type(tweet).__name__})
         return "", 200
 
-    mention_id = tweet.get("id_str")
-    parent_id = tweet.get("in_reply_to_status_id_str")
-    author_id = (tweet.get("user") or {}).get("id_str")
-
-    if not mention_id or not parent_id:
-        _drop("no_parent", mention_id=mention_id, author_id=author_id,
-              extra={"has_mention_id": bool(mention_id), "has_parent_id": bool(parent_id)})
-        return "", 200
-
-    if _is_self_reply(tweet, tone):
-        logger.info("Skipping self-reply %s (tone=%s)", mention_id, tone)
-        _drop("self_reply", mention_id=mention_id, author_id=author_id)
-        return "", 200
-
-    if RESTRICT_TO_REGISTERED and author_id not in ALLOWED_AUTHOR_IDS:
-        logger.info("Skipping mention %s from unregistered author %s", mention_id, author_id)
-        _drop("unregistered", mention_id=mention_id, author_id=author_id)
-        return "", 200
-
-    store = get_store()
-    if not store.claim(mention_id, ttl_seconds=86400):
-        logger.info("Duplicate mention %s ignored", mention_id)
-        _drop("duplicate", mention_id=mention_id, author_id=author_id)
-        return "", 200
-
-    hits = store.hit_and_count(f"author:{author_id}", window_seconds=1)
-    if hits > RATE_LIMIT_PER_SEC:
-        logger.info("Rate-limited mention %s from author %s (hits=%d)", mention_id, author_id, hits)
-        _drop("rate_limit", mention_id=mention_id, author_id=author_id, extra={"hits": hits})
-        return "", 200
-
-    # Daily cap: defense in depth against runaway loops. Counted in-memory
-    # per tone; resets on UTC date rollover. Lose-on-restart is acceptable.
-    if metrics.daily_cap_reached(tone):
-        _drop("daily_cap", mention_id=mention_id, author_id=author_id)
-        return "", 200
-
-    logger.info(
-        "Accepted mention %s (tone=%s, author=%s, parent=%s)",
-        mention_id, tone, author_id, parent_id,
-    )
-    metrics.mentions_accepted.add(1, {"tone": tone})
-    # daemon=False: lets gunicorn's --graceful-timeout drain in-flight pipelines
-    # on SIGTERM. We've already claimed mention_id in the dedup store, so X
-    # won't redeliver — dropping the thread would silently lose the reply.
-    threading.Thread(
-        target=process_mention,
-        args=(tone, tweet, received_at_utc),
-        daemon=False,
-    ).start()
+    _dispatch_tweet(tone, tweet, received_at_utc)
     return "", 200
 
 
@@ -361,6 +399,11 @@ def mentions_endpoint():
     if not _verify_signature(raw, request.headers.get("X-Twitter-Webhooks-Signature")):
         logger.warning("Rejected POST to /mentions: invalid signature")
         abort(403)
+
+    if INGEST_MODE != "webhooks":
+        # Polling mode: accept the delivery so X doesn't mark the URL as
+        # unhealthy, but don't process it — the poller handles ingestion.
+        return "", 200
 
     received_at_utc = events.utcnow()
     event = request.get_json(silent=True) or {}
@@ -422,3 +465,4 @@ def healthz():
 
 
 preload_index_async()
+_poller.start_poller(_dispatch_tweet)

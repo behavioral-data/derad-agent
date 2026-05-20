@@ -1,0 +1,17 @@
+// HTTP 5xx count and rate on /mentions over time.
+// Source: AppRequests (auto-instrumented via azure-monitor-opentelemetry).
+//
+// Useful for correlating error spikes with deployments. The Bicep metric alert
+// fires when Http5xx count > 5 in 10 minutes; this query gives you the full
+// time-series to investigate what caused the spike.
+
+AppRequests
+| where TimeGenerated > ago(7d)
+| where Url contains "/mentions"
+| summarize
+    total      = count(),
+    errors_5xx = countif(ResultCode startswith "5")
+  by bin(TimeGenerated, 15m)
+| extend error_rate_pct = round(100.0 * errors_5xx / total, 1)
+| project TimeGenerated, total, errors_5xx, error_rate_pct
+| order by TimeGenerated desc

@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>derad-agent · Data Dictionary</title>
+  <link rel="stylesheet" href="assets/html-design-system.css">
+</head>
+<body data-theme="light">
+<div class="layout">
+
+  <!-- ── Sidebar ── -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">derad-agent</div>
+    <nav class="sidebar-nav">
+      <a href="#overview" class="nav-link">Overview</a>
+      <a href="#mention-events" class="nav-link">MentionEvents</a>
+      <a href="#mention-drops" class="nav-link">MentionDrops</a>
+      <a href="#dedup" class="nav-link">Mentions (dedup)</a>
+      <a href="#rate-limits" class="nav-link">RateLimits</a>
+      <a href="#cursors" class="nav-link">Cursors</a>
+      <a href="#export" class="nav-link">Export</a>
+    </nav>
+    <div class="theme-toggle" onclick="toggleTheme()">Toggle theme</div>
+  </aside>
+
+  <!-- ── Main ── -->
+  <main class="main">
+
+    <!-- Overview -->
+    <section id="overview">
+      <div class="section-head">
+        <p class="eyebrow">derad-agent · Data Dictionary · 2026-05-18</p>
+        <h2>Data Dictionary</h2>
+        <p>
+          Schema reference for all Azure Table Storage tables written by
+          derad-agent. Produced for IRB review and collaborator onboarding.
+          All tables are in the same Storage Account; the endpoint is
+          <code class="inline-code">DERAD_TABLES_ENDPOINT</code>.
+        </p>
+      </div>
+
+      <div class="grid-3 grid-tight">
+        <div class="panel">
+          <div class="panel-head"><span class="panel-title">Storage</span></div>
+          <p>Azure Table Storage (Standard LRS). Key access disabled; all SDK
+          auth uses <code class="inline-code">DefaultAzureCredential</code>
+          (UAMI in prod, az-cli locally).</p>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="panel-title">Retention</span></div>
+          <p>No automatic TTL or deletion policy is enforced today. Rows
+          accumulate indefinitely. The dedup table (<em>Mentions</em>) stores
+          <code class="inline-code">ExpiresAtUtc</code> for a future cleanup
+          pass; other tables are append-only.</p>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="panel-title">PII note</span></div>
+          <p>X user IDs and handles are considered pseudonymous identifiers.
+          Fields marked <span class="chip chip-warning">PII</span> should be
+          handled per study protocol. No IP addresses, device IDs, or
+          passwords are stored.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- MentionEvents -->
+    <section id="mention-events">
+      <div class="section-head">
+        <p class="eyebrow">01 · Research log</p>
+        <h2>MentionEvents</h2>
+        <p>
+          One row per mention that passed all guards and entered the pipeline.
+          Written at the terminal point of <code class="inline-code">process_mention()</code>
+          regardless of outcome — the row is always written, even for errors.
+          PartitionKey = <code class="inline-code">YYYY-MM</code> (month of
+          <code class="inline-code">received_at_utc</code>);
+          RowKey = <code class="inline-code">received_at_utc ISO + "_" + mention_id</code>.
+        </p>
+      </div>
+
+      <div class="panel">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Column</th>
+              <th>Type</th>
+              <th>PII</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code class="inline-code">mention_id</code></td>
+              <td>string</td>
+              <td><span class="chip chip-pending">public</span></td>
+              <td>X post ID of the @-mention tweet sent by the participant.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">parent_id</code></td>
+              <td>string</td>
+              <td><span class="chip chip-pending">public</span></td>
+              <td>X post ID of the tweet the participant wants fact-checked (the reply target).</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">author_id</code></td>
+              <td>string</td>
+              <td><span class="chip chip-warning">PII</span></td>
+              <td>X numeric user ID of the participant who sent the mention.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">author_username</code></td>
+              <td>string | null</td>
+              <td><span class="chip chip-warning">PII</span></td>
+              <td>X handle (screen name) of the participant. Null when ingested via polling (v2 API does not return screen_name without an expansion call).</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">tone</code></td>
+              <td>string</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>Bot personality the participant used: <code class="inline-code">agreeable</code> | <code class="inline-code">neutral</code> | <code class="inline-code">satirical</code>.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">parent_text</code></td>
+              <td>string | null</td>
+              <td><span class="chip chip-pending">public</span></td>
+              <td>Full text of the tweet being fact-checked. Truncated to 32 000 chars if longer. Null if parent could not be fetched.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">parent_author_id</code></td>
+              <td>string | null</td>
+              <td><span class="chip chip-warning">PII</span></td>
+              <td>X user ID of the author of the tweet being fact-checked.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">parent_author_username</code></td>
+              <td>string | null</td>
+              <td><span class="chip chip-warning">PII</span></td>
+              <td>X handle of the author of the tweet being fact-checked.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">received_at_utc</code></td>
+              <td>datetime (UTC)</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>Timestamp when the webhook or polling worker received the mention.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">pipeline_start_utc</code></td>
+              <td>datetime (UTC)</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>Timestamp when the background pipeline thread started executing.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">reply_posted_utc</code></td>
+              <td>datetime (UTC) | null</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>Timestamp when the reply tweet was successfully posted. Null on non-reply outcomes.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">pipeline_ms</code></td>
+              <td>int | null</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>End-to-end pipeline latency in milliseconds (monotonic clock, webhook receipt → terminal point).</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">queries</code></td>
+              <td>json list[string]</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>Search queries the LLM generated to retrieve Community Notes. Stored as JSON string in Tables; decoded on export.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">cited_note_ids</code></td>
+              <td>json list[string]</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>Community Note IDs cited in the reply text. Empty list if no notes were found or the reply was empty.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">cited_tweet_ids</code></td>
+              <td>json list[string]</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>X tweet IDs cited as sources in the reply.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">reply_text</code></td>
+              <td>string | null</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>Text of the bot's reply tweet. Truncated to 32 000 chars. Null if no reply was generated.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">reply_id</code></td>
+              <td>string | null</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>X post ID of the reply tweet. Null on non-reply outcomes.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">sources_reply_id</code></td>
+              <td>string | null</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>X post ID of the sources follow-up tweet (second tweet in the thread). Null unless <code class="inline-code">DERAD_POST_SOURCES_TWEET=true</code>.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">outcome</code></td>
+              <td>string</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>Terminal pipeline state. One of:
+                <code class="inline-code">replied</code>,
+                <code class="inline-code">replied_no_sources</code>,
+                <code class="inline-code">empty_reply</code>,
+                <code class="inline-code">parent_fetch_failed</code>,
+                <code class="inline-code">x_post_error</code>,
+                <code class="inline-code">pipeline_error</code>.
+              </td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">error_class</code></td>
+              <td>string | null</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>Python exception class name. Null unless <code class="inline-code">outcome == "pipeline_error"</code>.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">error_detail</code></td>
+              <td>string | null</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>Exception message, truncated to 1 000 chars. Null unless <code class="inline-code">outcome == "pipeline_error"</code>.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- MentionDrops -->
+    <section id="mention-drops">
+      <div class="section-head">
+        <p class="eyebrow">02 · Filtered traffic log</p>
+        <h2>MentionDrops</h2>
+        <p>
+          One row per mention that was rejected before entering the pipeline.
+          Captures the guard that fired and any structured context.
+          PartitionKey = <code class="inline-code">YYYY-MM</code>;
+          RowKey = <code class="inline-code">received_at_utc ISO + "_" + mention_id</code>
+          (or a timestamp fingerprint when <code class="inline-code">mention_id</code> is absent).
+        </p>
+      </div>
+
+      <div class="panel">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Column</th>
+              <th>Type</th>
+              <th>PII</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code class="inline-code">mention_id</code></td>
+              <td>string | null</td>
+              <td><span class="chip chip-pending">public</span></td>
+              <td>X post ID. Null for <code class="inline-code">invalid_payload</code> and <code class="inline-code">unknown_target_user</code> drops where the payload could not be parsed.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">author_id</code></td>
+              <td>string | null</td>
+              <td><span class="chip chip-warning">PII</span></td>
+              <td>X numeric user ID of the sender. Null when the payload was malformed.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">tone</code></td>
+              <td>string | null</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>Bot tone that received the mention. Null for <code class="inline-code">unknown_target_user</code> (routing failed before tone was resolved).</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">drop_reason</code></td>
+              <td>string</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>
+                Guard that fired. One of:<br>
+                <code class="inline-code">duplicate</code> — already claimed in dedup store;<br>
+                <code class="inline-code">rate_limit</code> — author exceeded DERAD_RATE_LIMIT_PER_SEC;<br>
+                <code class="inline-code">daily_cap</code> — DERAD_MAX_MENTIONS_PER_DAY reached for this tone;<br>
+                <code class="inline-code">self_reply</code> — mention is from the bot itself;<br>
+                <code class="inline-code">unregistered</code> — author not in DERAD_ALLOWED_AUTHOR_IDS;<br>
+                <code class="inline-code">no_parent</code> — tweet is not a reply (no in_reply_to);<br>
+                <code class="inline-code">invalid_payload</code> — malformed webhook body;<br>
+                <code class="inline-code">unknown_target_user</code> — for_user_id not in TONE_BY_USER_ID.
+              </td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">received_at_utc</code></td>
+              <td>datetime (UTC)</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>Timestamp when the mention arrived.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">extra</code></td>
+              <td>json dict</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>Structured context for the specific drop reason. For <code class="inline-code">rate_limit</code>: <code class="inline-code">{"hits": N}</code>. For <code class="inline-code">invalid_payload</code>: <code class="inline-code">{"why": "...", "type": "..."}</code>. Empty dict otherwise.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Mentions (dedup) -->
+    <section id="dedup">
+      <div class="section-head">
+        <p class="eyebrow">03 · Dedup lock store</p>
+        <h2>Mentions</h2>
+        <p>
+          Deduplication lock table. One row per accepted mention ID; the row
+          prevents the same mention from being processed twice (e.g., X
+          webhook redelivery, or poller + webhook race). Written by
+          <code class="inline-code">TablesStore.claim()</code>.
+          PartitionKey is fixed (<code class="inline-code">"mentions"</code>);
+          RowKey = <code class="inline-code">mention_id</code>.
+        </p>
+      </div>
+
+      <div class="panel">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Column</th>
+              <th>Type</th>
+              <th>PII</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code class="inline-code">PartitionKey</code></td>
+              <td>string</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>Always <code class="inline-code">"mentions"</code>. Fixed partition keeps all dedup lookups as single PK+RK point reads.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">RowKey</code></td>
+              <td>string</td>
+              <td><span class="chip chip-pending">public</span></td>
+              <td>X post ID of the mention. Unique per claim.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">ClaimedAtUtc</code></td>
+              <td>datetime (UTC)</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>When the lock was acquired.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">ExpiresAtUtc</code></td>
+              <td>datetime (UTC)</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>When the lock expires (ClaimedAtUtc + 24 h). Used by a future cleanup job; not enforced by the SDK today.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- RateLimits -->
+    <section id="rate-limits">
+      <div class="section-head">
+        <p class="eyebrow">04 · Rate-limit hit log</p>
+        <h2>RateLimits</h2>
+        <p>
+          Per-author hit log for the sliding-window rate limiter. One row per
+          mention that passed the dedup check; rows are queried with an OData
+          <code class="inline-code">AtUtc ge datetime'...'</code> filter to
+          count hits within the window.
+          PartitionKey = <code class="inline-code">"author:{author_id}"</code>;
+          RowKey = <code class="inline-code">"{timestamp}-{uuid8}"</code>.
+        </p>
+      </div>
+
+      <div class="panel">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Column</th>
+              <th>Type</th>
+              <th>PII</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code class="inline-code">PartitionKey</code></td>
+              <td>string</td>
+              <td><span class="chip chip-warning">PII</span></td>
+              <td><code class="inline-code">author:{author_id}</code>. Embeds the X user ID; each author has their own partition for fast per-author windowed queries.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">RowKey</code></td>
+              <td>string</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td><code class="inline-code">{unix_timestamp_20dec}-{uuid_8hex}</code>. Monotonic-ish for range scans; uuid suffix prevents collisions on simultaneous inserts.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">AtUtc</code></td>
+              <td>datetime (UTC)</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>Timestamp of this hit. Written as <code class="inline-code">Edm.DateTime</code> so OData chronological comparisons are safe.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Cursors -->
+    <section id="cursors">
+      <div class="section-head">
+        <p class="eyebrow">05 · Polling cursor store</p>
+        <h2>Cursors</h2>
+        <p>
+          Stores the newest tweet ID seen per bot tone. Only written when
+          <code class="inline-code">DERAD_INGEST_MODE=polling</code>.
+          Inert in webhook mode.
+          PartitionKey is fixed (<code class="inline-code">"cursors"</code>);
+          RowKey = <code class="inline-code">"poll_cursor:{tone}"</code>
+          (one row per bot).
+        </p>
+      </div>
+
+      <div class="panel">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Column</th>
+              <th>Type</th>
+              <th>PII</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code class="inline-code">PartitionKey</code></td>
+              <td>string</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>Always <code class="inline-code">"cursors"</code>.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">RowKey</code></td>
+              <td>string</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td><code class="inline-code">poll_cursor:{tone}</code>, e.g. <code class="inline-code">poll_cursor:neutral</code>.</td>
+            </tr>
+            <tr>
+              <td><code class="inline-code">Value</code></td>
+              <td>string</td>
+              <td><span class="chip chip-done">no</span></td>
+              <td>X post ID of the most recently seen mention for this tone. Passed as <code class="inline-code">since_id</code> on the next poll cycle so only newer mentions are fetched.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Export -->
+    <section id="export">
+      <div class="section-head">
+        <p class="eyebrow">06 · Export</p>
+        <h2>Exporting data</h2>
+        <p>
+          Use the <code class="inline-code">derad-export</code> CLI to pull
+          tables from Azure Table Storage. Requires
+          <code class="inline-code">az login</code> (or a UAMI environment)
+          and <code class="inline-code">DERAD_TABLES_ENDPOINT</code>.
+        </p>
+      </div>
+
+      <div class="grid-2 grid-tight">
+        <div class="panel">
+          <div class="panel-head"><span class="panel-title">JSONL (default)</span></div>
+          <pre class="code-block"># All accepted mentions from May 2026 onward
+derad-export events \
+  --since 2026-05-01 \
+  --output events.jsonl
+
+# Drops for a date range
+derad-export drops \
+  --since 2026-01-01 \
+  --until 2026-05-31 \
+  --output drops.jsonl
+
+# Stream to jq for ad-hoc filtering
+derad-export events \
+  --since 2026-05-01 | \
+  jq 'select(.outcome == "pipeline_error")'</pre>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="panel-title">Parquet (pandas + pyarrow)</span></div>
+          <pre class="code-block"># Columnar export for analysis
+derad-export events \
+  --since 2026-01-01 \
+  --format parquet \
+  --output events.parquet
+
+derad-export drops \
+  --since 2026-01-01 \
+  --format parquet \
+  --output drops.parquet
+
+# Load in Python
+import pandas as pd
+df = pd.read_parquet("events.parquet")
+df.groupby("tone")["outcome"].value_counts()</pre>
+        </div>
+      </div>
+
+      <div class="callout callout-info" style="margin-top: var(--grid-2)">
+        <strong>JSON list fields.</strong> The
+        <code class="inline-code">queries</code>,
+        <code class="inline-code">cited_note_ids</code>,
+        <code class="inline-code">cited_tweet_ids</code> (MentionEvents) and
+        <code class="inline-code">extra</code> (MentionDrops) fields are stored
+        as JSON strings in Table Storage and decoded automatically on export.
+        In the raw Azure portal view they appear as
+        <code class="inline-code">queries_json</code> etc. — the
+        <code class="inline-code">_json</code> suffix is stripped by the
+        exporter.
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script src="assets/html-design-system.js"></script>
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    initScrollSpy(".sidebar-nav .nav-link");
+  });
+</script>
+</body>
+</html>

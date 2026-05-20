@@ -1,0 +1,13 @@
+// Drop reason breakdown — what fraction of incoming mentions hit each guard.
+// Source: customMetrics, metric name "mentions_dropped". Dimensions: tone, reason.
+//
+// Possible reasons: invalid_payload, no_parent, self_reply, unregistered,
+//   duplicate, rate_limit, daily_cap, unknown_target_user.
+
+customMetrics
+| where name == "mentions_dropped"
+| where timestamp > ago(7d)
+| extend tone   = tostring(customDimensions["tone"])
+| extend reason = tostring(customDimensions["reason"])
+| summarize total = sum(valueSum) by reason, tone
+| order by total desc

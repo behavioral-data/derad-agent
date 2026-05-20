@@ -1,0 +1,15 @@
+// Zero-mentions check — same query used by the Bicep alert-zero-mentions rule.
+// Fires (returns 0 rows) when /mentions received no non-4xx requests in 24 h.
+// A fully silent /mentions endpoint usually means the X Account Activity
+// subscription was revoked or the bot's OAuth access token expired.
+//
+// Run manually to investigate after receiving the alert:
+//   - If this returns rows, the alert was a false positive (webhook is alive).
+//   - If no rows, check X dev portal → webhook subscriptions and token validity.
+
+AppRequests
+| where TimeGenerated > ago(24h)
+| where Url contains "/mentions"
+| where not(ResultCode startswith "4")
+| project TimeGenerated, ResultCode, DurationMs, Url
+| order by TimeGenerated desc

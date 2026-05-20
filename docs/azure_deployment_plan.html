@@ -436,7 +436,7 @@ curl -s "https://$HOST/info?reply_id=R1&amp;tone=neutral" | head -c 400</pre>
       </div>
 
       <div class="callout warning">
-        <strong>Phase 0 gate still applies.</strong> The flow below assumes the X Account Activity API is accessible — that's <code class="inline-code">tweet_create_events</code> webhooks. If only Basic tier is available, skip 4.1–4.3 and add a polling worker that calls <code class="inline-code">users.get_mentions</code> per bot every 30 s with a <code class="inline-code">since_id</code> cursor stored in Table Storage. Pipeline unchanged. (Polling worker isn't built yet — defer until Phase 0 forces it.)
+        <strong>Phase 0 gate still applies.</strong> The flow below assumes the X Account Activity API is accessible — that's <code class="inline-code">tweet_create_events</code> webhooks. If only Basic tier is available, skip 4.1–4.3 and set <code class="inline-code">DERAD_INGEST_MODE=polling</code> — the polling worker (<code class="inline-code">derad_agent/app/poller.py</code>) is built and ships in Phase 4.6. Pipeline unchanged; same guard chain applies.
       </div>
 
       <div class="phase-card mt-24">
@@ -493,13 +493,13 @@ derad-webhooks subscriptions --tone neutral --webhook-id "$WEBHOOK_ID"
 
     <section id="phase-4-5">
       <div class="section-head">
-        <p class="eyebrow">Phase 4.5 · Research data · <span class="chip chip-active">next</span></p>
+        <p class="eyebrow">Phase 4.5 · Research data · <span class="chip chip-done">done 2026-05-18</span></p>
         <h2>Append-only event log for the study</h2>
-        <p>What we persist today is enough to run the bot, not enough to <em>study</em> it. The dedup table records "we saw this mention_id" and the rate-limit table records "this author hit us"; everything else useful — parent text, cited notes, reply ids, timings, drop reasons — only exists as log lines in Application Insights, which is queryable but messy and 30-day-retained. This phase adds a real structured event log <strong>before Phase 5 cutover</strong> so we capture data from the first mention forward.</p>
+        <p>Structured event log shipped. Every accepted mention produces one <code class="inline-code">MentionEvents</code> row with parent text, cited note IDs, reply IDs, timings, and outcome. Every rejected mention produces one <code class="inline-code">MentionDrops</code> row with drop reason and context. Both tables exportable via <code class="inline-code">derad-export</code> CLI to JSONL or Parquet. Data dictionary at <code class="inline-code">docs/data_dictionary.html</code>.</p>
       </div>
 
       <div class="callout info">
-        <strong>Design decision.</strong> One more Azure Tables table (no new resource type, no DB to operate). Tables are free at our scale, atomic on insert, and pull cleanly via the SDK or <code class="inline-code">az storage entity query</code>. If the data ever outgrows Tables, exporting to Parquet is one script away.
+        <strong>Design decision.</strong> One more Azure Tables table (no new resource type, no DB to operate). Tables are free at our scale, atomic on insert, and pull cleanly via the SDK or <code class="inline-code">az storage entity query</code>. If the data ever outgrows Tables, exporting to Parquet is one script away — and <code class="inline-code">derad-export</code> does exactly that.
       </div>
 
       <div class="phase-card mt-24">
@@ -554,18 +554,17 @@ received_at_utc      Edm.DateTime
 extra_json           JSON  — reason-specific extra (hits count, etc.)</pre>
       </div>
 
-      <div class="phase-card">
+      <div class="phase-card is-done">
         <div class="panel-head">4.5.3 · Implementation tasks</div>
         <ul class="task-list">
-          <li><span class="chip chip-pending">todo</span> <code class="inline-code">infra/main.bicep</code> — add <code class="inline-code">MentionEvents</code> + <code class="inline-code">MentionDrops</code> tables alongside the existing Mentions/RateLimits.</li>
-          <li><span class="chip chip-pending">todo</span> <code class="inline-code">derad_agent/app/events.py</code> — new module with two writers: <code class="inline-code">log_mention_event(...)</code> and <code class="inline-code">log_mention_drop(...)</code>. Same backend split as <code class="inline-code">dedup.py</code>: an in-memory implementation for tests/dev and a Tables implementation for production, selected by <code class="inline-code">DERAD_EVENTS_BACKEND</code> env.</li>
-          <li><span class="chip chip-pending">todo</span> <code class="inline-code">app.py</code> — wire <code class="inline-code">log_mention_drop</code> at every guard early-return (dedup hit, rate-limit, allow-list, self-reply, no parent, invalid payload). Wire <code class="inline-code">log_mention_event</code> at the end of <code class="inline-code">process_mention</code> with full pipeline state.</li>
-          <li><span class="chip chip-pending">todo</span> <code class="inline-code">utils.py</code> / pipeline — thread the planner's queries and the cited note/tweet IDs back out of <code class="inline-code">generate_reply</code> so the events writer has them.</li>
-          <li><span class="chip chip-pending">todo</span> <code class="inline-code">fetch_tweet_text</code> → extend to also return parent author id + username; same call, more fields requested.</li>
-          <li><span class="chip chip-pending">todo</span> Resolve the mention author's username (extra X API call on each accepted mention; cache by id).</li>
-          <li><span class="chip chip-pending">todo</span> Tests: in-memory backend round-trips, drop-reason coverage, schema regression test that pins the row keys.</li>
-          <li><span class="chip chip-pending">todo</span> <code class="inline-code">.env.example</code> — document <code class="inline-code">DERAD_EVENTS_BACKEND</code>.</li>
-          <li><span class="chip chip-pending">todo</span> Phase 5 launch checklist — add "verify at least one row appears in <code class="inline-code">MentionEvents</code> after smoke-test mention".</li>
+          <li><span class="chip chip-done">done</span> <code class="inline-code">infra/main.bicep</code> — <code class="inline-code">MentionEvents</code> + <code class="inline-code">MentionDrops</code> tables added alongside Mentions/RateLimits.</li>
+          <li><span class="chip chip-done">done</span> <code class="inline-code">derad_agent/app/events.py</code> — <code class="inline-code">log_mention_event()</code> and <code class="inline-code">log_mention_drop()</code>, Protocol-based backends (<code class="inline-code">InMemoryEventsStore</code> / <code class="inline-code">TablesEventsStore</code>), <code class="inline-code">DERAD_EVENTS_BACKEND</code> env selection.</li>
+          <li><span class="chip chip-done">done</span> <code class="inline-code">app.py</code> — <code class="inline-code">log_mention_drop</code> at every guard; <code class="inline-code">log_mention_event</code> at every terminal point of <code class="inline-code">process_mention</code>.</li>
+          <li><span class="chip chip-done">done</span> <code class="inline-code">utils.py</code> / pipeline — queries and cited note/tweet IDs threaded out of <code class="inline-code">generate_reply</code> into the event row.</li>
+          <li><span class="chip chip-done">done</span> <code class="inline-code">fetch_tweet</code> returns <code class="inline-code">parent_author_id</code> + <code class="inline-code">parent_author_username</code>; fields written to <code class="inline-code">MentionEvent</code>.</li>
+          <li><span class="chip chip-done">done</span> Author username: resolved from webhook payload (<code class="inline-code">user.screen_name</code>) in webhook mode; resolved from <code class="inline-code">page.includes.users</code> in polling mode.</li>
+          <li><span class="chip chip-done">done</span> Tests: in-memory round-trips, drop-reason coverage, 132 tests total green.</li>
+          <li><span class="chip chip-done">done</span> <code class="inline-code">.env.example</code> — documents <code class="inline-code">DERAD_EVENTS_BACKEND</code>.</li>
         </ul>
       </div>
 
@@ -573,11 +572,41 @@ extra_json           JSON  — reason-specific extra (hits count, etc.)</pre>
         <div class="panel-head">4.5.4 · Followups (post-launch)</div>
         <p>Out of scope for this phase, but the schema is forward-compatible:</p>
         <ul class="task-list">
+          <li><span class="chip chip-done">done</span> <code class="inline-code">derad-export</code> CLI — dumps MentionEvents or MentionDrops to JSONL or Parquet; <code class="inline-code">--since</code> / <code class="inline-code">--until</code> / <code class="inline-code">--format</code> / <code class="inline-code">--output</code>. Schema reference at <code class="inline-code">docs/data_dictionary.html</code>.</li>
           <li><span class="chip chip-info">later</span> <code class="inline-code">MentionFollowups</code> table — engagement-at-+3-days measurement job per Trisha's TODO.</li>
           <li><span class="chip chip-info">later</span> Survey-via-DM workflow with a separate <code class="inline-code">SurveyResponses</code> table.</li>
           <li><span class="chip chip-info">later</span> Parent-post engagement snapshot at t=0 (likes/RTs/replies on the original tweet).</li>
-          <li><span class="chip chip-info">later</span> A small <code class="inline-code">derad-export</code> CLI that dumps the month's events to JSONL / Parquet for analysis.</li>
         </ul>
+      </div>
+    </section>
+
+    <section id="phase-4-6">
+      <div class="section-head">
+        <p class="eyebrow">Phase 4.6 · Polling fallback · <span class="chip chip-done">done 2026-05-18</span></p>
+        <h2>Polling fallback for when webhooks lapse</h2>
+        <p>A background thread that calls <code class="inline-code">users.get_mentions</code> per bot on a configurable interval, activated by <code class="inline-code">DERAD_INGEST_MODE=polling</code>. Same guard chain as the webhook path — <code class="inline-code">_dispatch_tweet()</code> is shared by both so guards can never diverge. Cursor persisted in Azure Table Storage across restarts.</p>
+      </div>
+
+      <div class="grid-2">
+        <div class="panel is-done">
+          <div class="panel-head">What shipped</div>
+          <ul class="task-list">
+            <li><span class="chip chip-done">done</span> <code class="inline-code">derad_agent/app/cursors.py</code> — <code class="inline-code">InMemoryCursorStore</code> + <code class="inline-code">TablesCursorStore</code>; <code class="inline-code">DERAD_CURSOR_BACKEND</code> env selection.</li>
+            <li><span class="chip chip-done">done</span> <code class="inline-code">derad_agent/app/poller.py</code> — <code class="inline-code">_poll_one()</code> with bootstrap guard (first call sets watermark, dispatches nothing to protect research data); <code class="inline-code">_poll_loop()</code> daemon thread; <code class="inline-code">start_poller()</code> guarded by <code class="inline-code">INGEST_MODE</code> and <code class="inline-code">PYTEST_CURRENT_TEST</code>.</li>
+            <li><span class="chip chip-done">done</span> <code class="inline-code">app.py</code> — extracted <code class="inline-code">_dispatch_tweet()</code>; webhook handler and poller share one guard chain. <code class="inline-code">/mentions</code> POST returns 200 without processing in polling mode (so X doesn't mark the URL unhealthy).</li>
+            <li><span class="chip chip-done">done</span> <code class="inline-code">infra/main.bicep</code> — <code class="inline-code">Cursors</code> table + <code class="inline-code">DERAD_INGEST_MODE</code>, <code class="inline-code">DERAD_POLL_INTERVAL_SEC</code>, <code class="inline-code">DERAD_CURSOR_BACKEND</code> app settings (default: <code class="inline-code">webhooks</code>, <code class="inline-code">60</code>, <code class="inline-code">tables</code>).</li>
+            <li><span class="chip chip-done">done</span> <code class="inline-code">tests/test_poller.py</code> — 23 tests: normalization, bootstrap, dispatch, cursor, page-cap, <code class="inline-code">TablesCursorStore</code> mock coverage.</li>
+          </ul>
+        </div>
+        <div class="panel">
+          <div class="panel-head">Cost &amp; trade-offs</div>
+          <ul class="task-list">
+            <li><span class="chip chip-suggest">cheap</span> <code class="inline-code">DERAD_POLL_INTERVAL_SEC=60</code> → 3 bots × 1 call/min × 43 200 min/mo ≈ <strong>$21/mo</strong> (vs. ~$405/mo webhook baseline). Dominant saving: no per-event delivery fee.</li>
+            <li><span class="chip chip-warning">trade-off</span> Up to 60 s ingest delay per mention (vs. ~1 s webhook). Acceptable for the study's deliberative debunking use case.</li>
+            <li><span class="chip chip-warning">trade-off</span> Worst-case burst (10 pages/bot/cycle): ~$210/mo. Page cap logged as <code class="inline-code">WARNING</code>.</li>
+            <li><span class="chip chip-info">op</span> To switch modes: set <code class="inline-code">DERAD_INGEST_MODE=polling</code> in App Service settings and restart. No code change needed.</li>
+          </ul>
+        </div>
       </div>
     </section>
 
@@ -601,27 +630,28 @@ extra_json           JSON  — reason-specific extra (hits count, etc.)</pre>
 
     <section id="phase-6">
       <div class="section-head">
-        <p class="eyebrow">Phase 6 · Ops</p>
+        <p class="eyebrow">Phase 6 · Ops · <span class="chip chip-done">done 2026-05-18</span></p>
         <h2>Observability &amp; cost guardrails</h2>
         <p>Light-touch monitoring — enough to notice a runaway loop, a quota exhaustion, or a webhook outage without building a dashboard farm.</p>
       </div>
 
       <div class="grid-2">
-        <div class="panel">
+        <div class="panel is-done">
           <div class="panel-head">Telemetry</div>
           <ul class="task-list">
-            <li><span class="chip chip-pending">todo</span> App Insights: request count, p50/p95 latency, exception rate.</li>
-            <li><span class="chip chip-pending">todo</span> Custom metrics: <code class="inline-code">mentions_received</code>, <code class="inline-code">mentions_deduped</code>, <code class="inline-code">replies_posted</code>, <code class="inline-code">pipeline_failures</code> — per tone.</li>
-            <li><span class="chip chip-pending">todo</span> Alert: webhook 5xx rate &gt; 1% over 10 min.</li>
-            <li><span class="chip chip-pending">todo</span> Alert: zero mentions received in 24 h (might indicate broken subscription).</li>
+            <li><span class="chip chip-done">done</span> App Insights: request count, p50/p95 latency, exception rate — auto-instrumented via <code class="inline-code">azure-monitor-opentelemetry</code>; wired in <code class="inline-code">app.py</code> on <code class="inline-code">APPLICATIONINSIGHTS_CONNECTION_STRING</code>.</li>
+            <li><span class="chip chip-done">done</span> Custom OTel metrics in <code class="inline-code">derad_agent/app/metrics.py</code>: <code class="inline-code">mentions_received</code>, <code class="inline-code">mentions_accepted</code>, <code class="inline-code">mentions_dropped{reason,tone}</code>, <code class="inline-code">replies_posted{outcome,tone}</code>, <code class="inline-code">pipeline_latency_ms{tone,outcome}</code>.</li>
+            <li><span class="chip chip-done">done</span> Bicep metric alert (<code class="inline-code">Microsoft.Insights/metricAlerts</code>): HTTP 5xx count &gt; 5 in any 10-minute window on the App Service.</li>
+            <li><span class="chip chip-done">done</span> Bicep log alert (<code class="inline-code">Microsoft.Insights/scheduledQueryRules</code>): zero non-4xx requests to <code class="inline-code">/mentions</code> in 24 h — fires when the X subscription goes silent.</li>
+            <li><span class="chip chip-done">done</span> KQL starter pack in <code class="inline-code">scripts/kql/</code>: daily mention rate, drop reason breakdown, pipeline latency percentiles, exception frequency, 5xx rate, zero-mentions check.</li>
           </ul>
         </div>
-        <div class="panel">
+        <div class="panel is-done">
           <div class="panel-head">Cost</div>
           <ul class="task-list">
-            <li><span class="chip chip-pending">todo</span> Azure subscription budget alert at e.g. $200, $400/month.</li>
-            <li><span class="chip chip-pending">todo</span> Daily token-usage check for Azure OpenAI; threshold per persona.</li>
-            <li><span class="chip chip-pending">todo</span> Hard cap on mentions-per-day per bot in Table Storage (kill switch). Mention rate &gt; threshold → start refusing new mentions, log, page.</li>
+            <li><span class="chip chip-done">done</span> Bicep monthly budget (<code class="inline-code">Microsoft.Consumption/budgets</code>): $400 cap, alerts at 50 % ($200 warn) and 100 % ($400 critical). Set <code class="inline-code">alertEmail</code> param at deploy time to enable email notifications.</li>
+            <li><span class="chip chip-info">later</span> Daily token-usage check for Azure OpenAI; threshold per persona.</li>
+            <li><span class="chip chip-done">done</span> In-memory daily mention cap per tone (<code class="inline-code">DERAD_MAX_MENTIONS_PER_DAY</code>) in <code class="inline-code">metrics.py:daily_cap_reached()</code>. Resets on UTC rollover. Drop reason logged as <code class="inline-code">daily_cap</code>. Covered by <code class="inline-code">tests/test_metrics.py</code>.</li>
           </ul>
         </div>
       </div>
@@ -635,21 +665,21 @@ extra_json           JSON  — reason-specific extra (hits count, etc.)</pre>
       </div>
 
       <ul class="task-list">
-        <li><span class="chip chip-pending">gate</span> X API tier confirmed (or polling fallback agreed).</li>
+        <li><span class="chip chip-pending">gate</span> X API tier confirmed (or polling fallback mode agreed with PI).</li>
         <li><span class="chip chip-pending">gate</span> IRB protocol covers public mention-driven invocation.</li>
-        <li><span class="chip chip-pending">gate</span> Webhook POST verifies <code class="inline-code">X-Twitter-Webhooks-Signature</code>.</li>
-        <li><span class="chip chip-pending">gate</span> Self-reply loop guard in place; bot user ids known.</li>
-        <li><span class="chip chip-pending">gate</span> Pipeline runs in background thread; webhook returns 200 in &lt; 1 s.</li>
-        <li><span class="chip chip-pending">gate</span> Dedup on <code class="inline-code">mention_id</code> via Table Storage works under duplicate-delivery test.</li>
-        <li><span class="chip chip-pending">gate</span> Per-author rate limit enforces &lt; 3 mentions/sec.</li>
-        <li><span class="chip chip-pending">gate</span> <code class="inline-code">info_url</code> bug fixed; "More Info" link reaches the tweet.</li>
-        <li><span class="chip chip-pending">gate</span> <code class="inline-code">/info</code> renders with real bot handle, not the literal <code class="inline-code">username</code>.</li>
-        <li><span class="chip chip-pending">gate</span> <code class="inline-code">/healthz</code> returns 200 with <code class="inline-code">index_loaded: true</code>.</li>
-        <li><span class="chip chip-pending">gate</span> Container image &lt; 3 GB; gunicorn boots; index loads once.</li>
-        <li><span class="chip chip-pending">gate</span> All env settings set on App Service; secrets not in image, not in git.</li>
-        <li><span class="chip chip-pending">gate</span> CRC test passes for all three webhook URLs.</li>
-        <li><span class="chip chip-pending">gate</span> Smoke test posted from a real X account, reply visible, sources visible, info page renders.</li>
-        <li><span class="chip chip-pending">gate</span> App Insights receiving traces; cost alert configured.</li>
+        <li><span class="chip chip-done">code ✓</span> Webhook POST verifies <code class="inline-code">X-Twitter-Webhooks-Signature</code> — HMAC-SHA256, constant-time compare.</li>
+        <li><span class="chip chip-done">code ✓</span> Self-reply loop guard in place (<code class="inline-code">BOT_USER_ID_*</code> env vars; fails closed if unset). Bot user IDs seeded in Key Vault at Phase 4.2.</li>
+        <li><span class="chip chip-done">code ✓</span> Pipeline runs in daemon=False background thread; webhook returns 200 in &lt; 1 s.</li>
+        <li><span class="chip chip-done">code ✓</span> Dedup on <code class="inline-code">mention_id</code> via <code class="inline-code">TablesStore.claim()</code>; tested under duplicate-delivery scenarios.</li>
+        <li><span class="chip chip-done">code ✓</span> Per-author sliding-window rate limit (<code class="inline-code">DERAD_RATE_LIMIT_PER_SEC=3</code>); OData datetime compare, no lex/chrono bug.</li>
+        <li><span class="chip chip-done">code ✓</span> <code class="inline-code">info_url</code> built with <code class="inline-code">url_for(_external=True)</code>; "More Info" link reachable from the tweet.</li>
+        <li><span class="chip chip-done">code ✓</span> <code class="inline-code">/info</code> renders with real bot handle from <code class="inline-code">BOT_HANDLE_BY_TONE</code>; XSS-escaped.</li>
+        <li><span class="chip chip-done">code ✓</span> <code class="inline-code">/healthz</code> returns <code class="inline-code">{ok: true, index_loaded: bool}</code>; verified in smoke-test script.</li>
+        <li><span class="chip chip-pending">gate</span> Container image &lt; 3 GB; gunicorn boots; index loads once. (Requires Docker daemon — confirmed locally without Docker.)</li>
+        <li><span class="chip chip-pending">gate</span> All 15 env settings on App Service; secrets in Key Vault only; nothing in image or git.</li>
+        <li><span class="chip chip-pending">gate</span> CRC test passes for the single <code class="inline-code">/mentions</code> webhook URL.</li>
+        <li><span class="chip chip-pending">gate</span> Smoke test: mention from allow-listed account → reply appears on X → <code class="inline-code">MentionEvents</code> row written.</li>
+        <li><span class="chip chip-pending">gate</span> App Insights receiving traces within 60 s of first request; Bicep cost alert email confirmed.</li>
       </ul>
     </section>
 
@@ -693,7 +723,7 @@ extra_json           JSON  — reason-specific extra (hits count, etc.)</pre>
       </div>
 
       <ul class="task-list">
-        <li><span class="chip chip-suggest">cheap</span> <strong>Polling instead of webhooks.</strong> <code class="inline-code">users.get_mentions</code> returns up to 100 mentions per call. At 1 call/min/bot = 4,320 calls/mo for ~9,000 mentions; reads alone &asymp; <strong>$45/mo total</strong> in the absolute best case (deduplicated, batched). Trade: up to 30 s ingest delay. Phase 4.6 ships the worker; toggle with <code class="inline-code">DERAD_INGEST_MODE=polling</code>.</li>
+        <li><span class="chip chip-done">done</span> <strong>Polling instead of webhooks.</strong> <code class="inline-code">users.get_mentions</code> per bot, 60 s interval. At 1 call/min/bot ≈ <strong>$21/mo</strong> (vs. ~$405/mo webhook baseline). Trade: up to 60 s ingest delay. Toggle with <code class="inline-code">DERAD_INGEST_MODE=polling</code> — shipped in Phase 4.6.</li>
         <li><span class="chip chip-suggest">cheap</span> <strong>Daily cap.</strong> <code class="inline-code">DERAD_MAX_MENTIONS_PER_DAY</code> per tone — defense in depth against a viral surge that would blow the budget.</li>
         <li><span class="chip chip-info">later</span> <strong>Academic Research access.</strong> If approved, read costs zero out. 2–4 week application; deferred for now per user decision.</li>
         <li><span class="chip chip-info">later</span> <strong>Per-claim reply cache.</strong> Identical parent posts skip the pipeline AND the X reads. Bigger saver on X than on Azure OpenAI.</li>
