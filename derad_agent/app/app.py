@@ -67,13 +67,14 @@ ALLOWED_AUTHOR_IDS = {
 RATE_LIMIT_PER_SEC = int(os.getenv("DERAD_RATE_LIMIT_PER_SEC", "3"))
 TWEET_LIMIT = 280
 
-# Load participants at startup so allow-list checks are O(1) in-memory lookups.
-# If a new participant is registered mid-study, restart the app to pick them up.
+# Load participants at startup so allow-list checks and study metadata lookups are
+# pure in-memory. Restart the app to pick up newly registered participants.
 _participants_store = _participants.get_store()
-_REGISTERED_AUTHOR_IDS: set[str] = {
-    p.author_id for p in _participants_store.list_all()
+_PARTICIPANTS_BY_ID: dict[str, _participants.Participant] = {
+    p.author_id: p for p in _participants_store.list_all()
 }
-logger.info("Loaded %d registered participants", len(_REGISTERED_AUTHOR_IDS))
+_ALLOWED_IDS: set[str] = set(_PARTICIPANTS_BY_ID) | ALLOWED_AUTHOR_IDS
+logger.info("Loaded %d registered participants", len(_PARTICIPANTS_BY_ID))
 
 
 # 4-letter study code derived deterministically from reply_id.
@@ -211,9 +212,8 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         ev.reply_id = reply_id
         ev.reply_posted_utc = events.utcnow()
 
-        # Attach study metadata: code for DM survey, participant FK, day number.
         ev.study_code = _make_study_code(reply_id)
-        participant = _participants_store.get(author_id)
+        participant = _PARTICIPANTS_BY_ID.get(author_id)
         if participant:
             ev.participant_id = author_id
             ev.study_day = (
@@ -260,7 +260,7 @@ def _dispatch_tweet(tone: str, tweet: dict, received_at_utc: datetime) -> bool:
         _drop("self_reply", mention_id=mention_id, author_id=author_id)
         return False
 
-    if RESTRICT_TO_REGISTERED and author_id not in (_REGISTERED_AUTHOR_IDS | ALLOWED_AUTHOR_IDS):
+    if RESTRICT_TO_REGISTERED and author_id not in _ALLOWED_IDS:
         logger.info("Skipping mention %s from unregistered author %s", mention_id, author_id)
         _drop("unregistered", mention_id=mention_id, author_id=author_id)
         return False

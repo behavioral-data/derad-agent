@@ -31,7 +31,7 @@ import logging
 import os
 import threading
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Protocol
 
 logger = logging.getLogger(__name__)
@@ -418,3 +418,18 @@ def log_reply_reply(reply: BotReplyReply) -> None:
 def utcnow() -> datetime:
     """Single source of UTC-now so timings line up across the codebase."""
     return datetime.now(timezone.utc)
+
+
+# Shared constants for the 3-day bystander measurement window.
+THREE_DAY_MIN_AGE = timedelta(days=3)
+MEASUREMENT_WINDOW = timedelta(days=1)
+
+
+def in_three_day_window(posted_at: Optional[datetime], now: datetime) -> bool:
+    """True if posted_at falls in the [3-day, 4-day) window relative to now."""
+    if posted_at is None:
+        return False
+    if posted_at.tzinfo is None:
+        posted_at = posted_at.replace(tzinfo=timezone.utc)
+    age = now - posted_at
+    return THREE_DAY_MIN_AGE <= age < THREE_DAY_MIN_AGE + MEASUREMENT_WINDOW

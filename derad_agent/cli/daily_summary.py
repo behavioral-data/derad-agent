@@ -61,9 +61,15 @@ def _get_events_for_date(target_date: date) -> list[dict]:
     return rows
 
 
+_BOT_HANDLE_BY_TONE = {
+    "agreeable": os.getenv("BOT_HANDLE_AGREEABLE", "aggiexbot"),
+    "neutral": os.getenv("BOT_HANDLE_NEUTRAL", "nelliexbot"),
+    "satirical": os.getenv("BOT_HANDLE_SATIRICAL", "eddiexbot"),
+}
+
+
 def _bot_handle(tone: Optional[str]) -> str:
-    handles = {"agreeable": "aggiexbot", "neutral": "nelliexbot", "satirical": "eddiexbot"}
-    return handles.get(tone or "", "unknown_bot")
+    return _BOT_HANDLE_BY_TONE.get(tone or "", "unknown_bot")
 
 
 def main() -> None:
