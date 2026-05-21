@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 import os
+import secrets
 import threading
 import time
 from datetime import datetime, timezone
@@ -87,6 +88,19 @@ _ALLOWED_IDS: set[str] = set(_PARTICIPANTS_BY_ID) | ALLOWED_AUTHOR_IDS
 logger.info("Loaded %d registered participants", len(_PARTICIPANTS_BY_ID))
 
 
+# Short info-URL store: token → {tone, tweet_ids, note_ids}
+# Tokens are ephemeral (lost on restart); users click within minutes of receiving a reply.
+_INFO_STORE: dict[str, dict] = {}
+_INFO_STORE_LOCK = threading.Lock()
+
+
+def _make_info_token(tone: str, tweet_ids: list, note_ids: list) -> str:
+    token = secrets.token_urlsafe(6)  # 8-char URL-safe string
+    with _INFO_STORE_LOCK:
+        _INFO_STORE[token] = {"tone": tone, "tweet_ids": tweet_ids, "note_ids": note_ids}
+    return token
+
+
 # 4-letter study code derived deterministically from reply_id.
 # Alphabet excludes I and O to avoid confusion when read aloud.
 _CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ"  # 24 chars → 24^4 = 331,776 combinations
@@ -110,7 +124,7 @@ def _is_self_reply(tweet: dict, tone: str) -> bool:
     return (tweet.get("user") or {}).get("id_str") == bot_id
 
 
-def _build_info_url(reply_id: str, tone: str, tweet_ids, note_ids) -> str:
+def _build_info_url(tone: str, tweet_ids, note_ids, reply_id: str = "") -> str:
     return url_for(
         "info",
         reply_id=reply_id,
@@ -119,6 +133,18 @@ def _build_info_url(reply_id: str, tone: str, tweet_ids, note_ids) -> str:
         note_id=note_ids,
         _external=True,
     )
+
+
+# X shortens every URL to 23 chars via t.co regardless of actual length.
+_X_URL_LEN = 23
+
+
+def _append_url(text: str, url: str, limit: int = TWEET_LIMIT) -> str:
+    """Append url to text, truncating text with ellipsis if needed to stay within limit."""
+    budget = limit - _X_URL_LEN - 1  # -1 for the space
+    if len(text) > budget:
+        text = text[:budget - 1] + "…"
+    return f"{text} {url}"
 
 
 def _build_sources_text(reply: dict, info_url: str) -> str:
@@ -209,9 +235,17 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             logger.info("Empty reply text for mention %s; skipping", mention_id)
             _finalize("empty_reply")
             return
-        ev.reply_text = reply["text"]
+
+        tweet_ids = reply.get("tweets") or []
+        note_ids = reply.get("notes") or []
+        token = _make_info_token(tone, tweet_ids, note_ids)
+        with app.app_context():
+            info_url = url_for("info_short", token=token, _external=True)
+        reply_text = _append_url(reply["text"], info_url)
+        ev.reply_text = reply_text
+
         if DRY_RUN:
-            logger.info("DRY_RUN reply (tone=%s): %s", tone, reply["text"])
+            logger.info("DRY_RUN reply (tone=%s): %s", tone, reply_text)
         else:
             logger.info("Posting reply (tone=%s): (text suppressed)", tone)
 
@@ -219,7 +253,7 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             _finalize("dry_run")
             return
 
-        reply_id = post_reply(parent_id=mention_id, reply_text=reply["text"], tone=tone)
+        reply_id = post_reply(parent_id=mention_id, reply_text=reply_text, tone=tone)
         if reply_id is None:
             _finalize("x_post_error")
             return
@@ -237,7 +271,7 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         sources_outcome = "replied"
         if POST_SOURCES_TWEET and reply.get("sources"):
             with app.app_context():
-                info_url = _build_info_url(reply_id, tone, reply["tweets"], reply["notes"])
+                info_url = _build_info_url(tone, reply.get("tweets") or [], reply.get("notes") or [], reply_id=reply_id)
             sources_text = _fit_sources_text(reply["sources"], info_url)
             ev.sources_reply_id = post_reply(parent_id=reply_id, reply_text=sources_text, tone=tone)
             if ev.sources_reply_id is None:
@@ -316,18 +350,35 @@ def info():
     tone = request.args.get("tone", "neutral")
     bot_handle = BOT_HANDLE_BY_TONE.get(tone, "i")
 
-    safe_reply_id = escape(reply_id)
-    safe_handle = escape(bot_handle)
-    reply_html = (
-        '<blockquote class="twitter-tweet">'
-        f'<a href="https://twitter.com/{safe_handle}/status/{safe_reply_id}"></a>'
-        '</blockquote>'
-    )
+    if reply_id:
+        safe_reply_id = escape(reply_id)
+        safe_handle = escape(bot_handle)
+        reply_html = (
+            '<blockquote class="twitter-tweet">'
+            f'<a href="https://twitter.com/{safe_handle}/status/{safe_reply_id}"></a>'
+            '</blockquote>'
+        )
+    else:
+        reply_html = ""
     if index_loaded():
         notes_html = generate_notes_html(tweet_ids, note_ids, bot_handle=bot_handle)
     else:
         notes_html = ""
     return render_template("info.html", reply=reply_html, notes=notes_html), 200
+
+
+@app.route("/i/<token>", methods=["GET"])
+def info_short(token: str):
+    with _INFO_STORE_LOCK:
+        params = _INFO_STORE.get(token)
+    if params is None:
+        return render_template("info.html", reply="", notes=""), 404
+    tone = params["tone"]
+    tweet_ids = params["tweet_ids"]
+    note_ids = params["note_ids"]
+    bot_handle = BOT_HANDLE_BY_TONE.get(tone, "i")
+    notes_html = generate_notes_html(tweet_ids, note_ids, bot_handle=bot_handle) if index_loaded() else ""
+    return render_template("info.html", reply="", notes=notes_html), 200
 
 
 @app.route("/healthz", methods=["GET"])

@@ -11,15 +11,21 @@
     <p>This bot was created by University of Washington researchers as part of a study to investigate how AI bots affect online political conversations. Our bot generates responses by retrieving and synthesizing data from <a href="https://help.x.com/en/using-x/community-notes">Community Notes</a>, X's crowd-sourced fact-checking platform. We source notes from X's publicly available repository of <a href="https://x.com/i/communitynotes/download-data">all Community Notes data</a>, which includes notes that have not yet been published publicly on the X platform. Responses may contain inaccurate information; please consult linked sources to verify any claims.
     </p>
 
+    {% if reply %}
     <h2>About this Post</h2>
     {{reply|safe}}
+    <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+    {% endif %}
+    {% if notes %}
     <div class="sources">
-        <h3>Sources</h3>
+        <h3>Community Notes Sources</h3>
         <ul>
             {{notes|safe}}
         </ul>
     </div>
-    <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+    {% else %}
+    <p><em>No Community Notes sources were retrieved for this post.</em></p>
+    {% endif %}
 </main>
 <footer>
     <p>&copy; 2026 University of Washington</p>
