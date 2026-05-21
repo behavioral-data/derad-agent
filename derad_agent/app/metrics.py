@@ -51,6 +51,8 @@ pipeline_latency_ms = _meter.create_histogram(
 )
 
 
+# TODO: schedule chron job to log bot post engagement metrics 3 days after posting (I think it is easiest to do this by creating a script that runs at the beginning of each day, but if we can schedule something to run 3 days later at the time of posting that is better.
+
 # ── Mention-rate kill switch ────────────────────────────────────────────────
 
 _MAX_PER_DAY = int(os.getenv("DERAD_MAX_MENTIONS_PER_DAY", "0"))  # 0 = no cap

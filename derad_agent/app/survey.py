@@ -45,6 +45,10 @@ def _build_dm_client(tone: str):
 
 
 def build_survey_message(form_url: str) -> str:
+    # TODO: get at most 10 posts from last day replying to given author_id from Posts table
+    # TODO: create message with links to all posts and study_id for each post
+    # TODO: link to form URL at bottom of message
+    # TODO: schedule chron job to generate and send message via DMs at the beginning of each day
     return f"Thanks for interacting with our bot. Please complete this brief survey: {form_url}"
 
 

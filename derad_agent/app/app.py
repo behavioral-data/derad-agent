@@ -208,6 +208,8 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         metrics.replies_posted.add(1, {"tone": tone, "outcome": outcome})
         metrics.pipeline_latency_ms.record(ev.pipeline_ms, {"tone": tone, "outcome": outcome})
 
+        # TODO: create unique four-letter identifier for tweet (I recommend doing generating based on the replies_posted metric)
+
     try:
         if DRY_RUN:
             # Skip X API calls. Use the mention text (minus @handle) as the
@@ -267,6 +269,8 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
                 sources_outcome = "replied_no_sources"
 
         _finalize(sources_outcome)
+
+        # TODO: store tweet_id (reply_id), study_id (see _finalize TODO), author_id (bot username), parent_id (parent_id), text (reply_text), likes = 0, reposts = 0, replies = 0, created_at, source_notes in Posts table
 
     except Exception as exc:
         logger.exception("Pipeline failed for mention %s (tone=%s)", mention_id, tone)
@@ -344,6 +348,10 @@ def _dispatch_tweet(tone: str, tweet: dict, received_at_utc: datetime) -> bool:
         "Accepted mention %s (tone=%s, author=%s, parent=%s)",
         mention_id, tone, author_id, parent_id,
     )
+
+    # TODO: save tweet_id (mention_id), author_id, parent_id, tone, created_at in Mentions table
+    # TODO: save tweet_id (parent_id), likes, reposts, replies (of parent tweet) in Parents table
+
     metrics.mentions_accepted.add(1, {"tone": tone})
     # daemon=False: lets gunicorn's --graceful-timeout drain in-flight pipelines
     # on SIGTERM. We've already claimed mention_id in the dedup store, so X
@@ -384,6 +392,9 @@ def mention(tone: str, event: dict, received_at_utc: datetime):
 
     _dispatch_tweet(tone, tweet, received_at_utc)
     return "", 200
+
+
+# TODO: create endpoints to add and delete username from Participants table. At time of adding, we should retrieve the user_id associated with the username (https://docs.x.com/x-api/users/get-user-by-username)
 
 
 @app.route("/mentions", methods=["GET", "POST"])
