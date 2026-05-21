@@ -27,7 +27,9 @@ def _in_three_day_window(posted_at: datetime | None, now: datetime) -> bool:
     return THREE_DAY_MIN_AGE <= age < THREE_DAY_MIN_AGE + MEASUREMENT_WINDOW
 
 
-def _poll_one(reply_id: str, tone: str) -> None:
+def _poll_one(
+    reply_id: str, tone: str, mention_id: str | None = None, parent_id: str | None = None
+) -> None:
     try:
         response = get_x_client(tone=tone).posts.get_by_id(
             id=reply_id,
@@ -51,6 +53,8 @@ def _poll_one(reply_id: str, tone: str) -> None:
         retweet_count=m.get("retweet_count", 0),
         reply_count=m.get("reply_count", 0),
         quote_count=m.get("quote_count", 0),
+        mention_id=mention_id,
+        parent_id=parent_id,
     )
     log_engagement_snapshot(snap)
     logger.info(
@@ -63,15 +67,15 @@ def main() -> None:
     logging.basicConfig(level="INFO", format="%(asctime)s %(levelname)s %(message)s")
     store = get_store()
     now = datetime.now(timezone.utc)
-    reply_ids = [
-        (reply_id, tone)
-        for reply_id, tone, posted_at in store.iter_reply_ids()
+    candidates = [
+        (reply_id, tone, mention_id, parent_id)
+        for reply_id, tone, posted_at, mention_id, parent_id in store.iter_reply_ids()
         if _in_three_day_window(posted_at, now)
     ]
-    if not reply_ids:
+    if not candidates:
         logger.info("No reply IDs found in the 3-day measurement window — nothing to poll")
         return
-    logger.info("Polling 3-day engagement for %d replies", len(reply_ids))
-    for reply_id, tone in reply_ids:
-        _poll_one(reply_id, tone)
+    logger.info("Polling 3-day engagement for %d replies", len(candidates))
+    for reply_id, tone, mention_id, parent_id in candidates:
+        _poll_one(reply_id, tone, mention_id=mention_id, parent_id=parent_id)
     logger.info("Done")

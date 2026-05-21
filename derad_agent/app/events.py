@@ -70,6 +70,11 @@ class MentionEvent:
     reply_id: Optional[str] = None
     sources_reply_id: Optional[str] = None
 
+    # Study tracking
+    study_code: Optional[str] = None      # 4-letter code used in daily DM surveys
+    participant_id: Optional[str] = None  # author_id, explicit FK to Participants table
+    study_day: Optional[int] = None       # 1-based day number within the 5-day study
+
     # Outcome
     outcome: str = "replied"  # 'replied' | 'pipeline_error' | 'x_post_error' | 'parent_fetch_failed' | 'empty_reply'
     error_class: Optional[str] = None
@@ -98,6 +103,25 @@ class EngagementSnapshot:
     retweet_count: int = 0
     reply_count: int = 0
     quote_count: int = 0
+    mention_id: Optional[str] = None  # FK back to MentionEvents
+    parent_id: Optional[str] = None   # original post being fact-checked
+
+
+@dataclass
+class BotReplyReply:
+    """Text of a reply to a bot post — collected for bystander NLP analysis.
+
+    Written by the derad-collect-replies CLI (~3 days after each bot reply).
+    """
+    bot_reply_id: str        # the bot's reply tweet that was responded to
+    reply_tweet_id: str      # ID of the bystander's reply
+    author_id: str           # bystander author's X user ID
+    text: str                # full text of the bystander reply
+    collected_at_utc: datetime
+    author_username: Optional[str] = None
+    like_count: int = 0
+    mention_id: Optional[str] = None  # FK back to MentionEvents
+    tone: Optional[str] = None        # which bot posted the reply
 
 
 # ── Store interface ─────────────────────────────────────────────────────────
@@ -106,7 +130,8 @@ class EventsStore(Protocol):
     def write_event(self, ev: MentionEvent) -> None: ...
     def write_drop(self, drop: MentionDrop) -> None: ...
     def write_engagement(self, snap: EngagementSnapshot) -> None: ...
-    def iter_reply_ids(self) -> list[tuple[str, str, datetime | None]]: ...
+    def write_reply_reply(self, reply: BotReplyReply) -> None: ...
+    def iter_reply_ids(self) -> list[tuple[str, str, datetime | None, str | None, str | None]]: ...
 
 
 # ── In-memory backend (tests + local dev) ───────────────────────────────────
@@ -118,6 +143,7 @@ class InMemoryEventsStore:
         self.events: list[MentionEvent] = []
         self.drops: list[MentionDrop] = []
         self.engagements: list[EngagementSnapshot] = []
+        self.reply_replies: list[BotReplyReply] = []
         self._lock = threading.Lock()
 
     def write_event(self, ev: MentionEvent) -> None:
@@ -132,10 +158,14 @@ class InMemoryEventsStore:
         with self._lock:
             self.engagements.append(snap)
 
-    def iter_reply_ids(self) -> list[tuple[str, str, datetime | None]]:
+    def write_reply_reply(self, reply: BotReplyReply) -> None:
+        with self._lock:
+            self.reply_replies.append(reply)
+
+    def iter_reply_ids(self) -> list[tuple[str, str, datetime | None, str | None, str | None]]:
         with self._lock:
             return [
-                (ev.reply_id, ev.tone, ev.reply_posted_utc)
+                (ev.reply_id, ev.tone, ev.reply_posted_utc, ev.mention_id, ev.parent_id)
                 for ev in self.events
                 if ev.reply_id
             ]
@@ -165,6 +195,7 @@ class TablesEventsStore:
         events_table: str = "MentionEvents",
         drops_table: str = "MentionDrops",
         engagements_table: str = "EngagementSnapshots",
+        reply_replies_table: str = "BotReplyReplies",
         credential=None,
     ) -> None:
         from azure.core.exceptions import ResourceExistsError
@@ -173,7 +204,7 @@ class TablesEventsStore:
 
         cred = credential or DefaultAzureCredential()
         self._service = TableServiceClient(endpoint=endpoint, credential=cred)
-        for name in (events_table, drops_table, engagements_table):
+        for name in (events_table, drops_table, engagements_table, reply_replies_table):
             try:
                 self._service.create_table(name)
                 logger.info("Created events table %s", name)
@@ -182,6 +213,7 @@ class TablesEventsStore:
         self._events = self._service.get_table_client(events_table)
         self._drops = self._service.get_table_client(drops_table)
         self._engagements = self._service.get_table_client(engagements_table)
+        self._reply_replies = self._service.get_table_client(reply_replies_table)
 
     def write_event(self, ev: MentionEvent) -> None:
         entity = self._event_entity(ev)
@@ -229,6 +261,9 @@ class TablesEventsStore:
             "outcome": ev.outcome,
             "error_class": ev.error_class,
             "error_detail": self._truncate(ev.error_detail, cap=1000),
+            "study_code": ev.study_code,
+            "participant_id": ev.participant_id,
+            "study_day": ev.study_day,
         }
 
     def _drop_entity(self, drop: MentionDrop) -> dict[str, Any]:
@@ -257,21 +292,48 @@ class TablesEventsStore:
             "retweet_count": snap.retweet_count,
             "reply_count": snap.reply_count,
             "quote_count": snap.quote_count,
+            "mention_id": snap.mention_id,
+            "parent_id": snap.parent_id,
         }
         try:
             self._engagements.upsert_entity(entity)
         except Exception:
             logger.exception("write_engagement failed for reply %s; continuing", snap.reply_id)
 
-    def iter_reply_ids(self) -> list[tuple[str, str, datetime | None]]:
+    def write_reply_reply(self, reply: BotReplyReply) -> None:
+        entity = {
+            "PartitionKey": reply.collected_at_utc.strftime("%Y-%m"),
+            "RowKey": f"{reply.collected_at_utc.isoformat()}_{reply.reply_tweet_id}",
+            "bot_reply_id": reply.bot_reply_id,
+            "reply_tweet_id": reply.reply_tweet_id,
+            "author_id": reply.author_id,
+            "author_username": reply.author_username,
+            "text": self._truncate(reply.text),
+            "like_count": reply.like_count,
+            "collected_at_utc": reply.collected_at_utc,
+            "mention_id": reply.mention_id,
+            "tone": reply.tone,
+        }
+        try:
+            self._reply_replies.upsert_entity(entity)
+        except Exception:
+            logger.exception(
+                "write_reply_reply failed for reply_tweet_id=%s; continuing", reply.reply_tweet_id
+            )
+
+    def iter_reply_ids(self) -> list[tuple[str, str, datetime | None, str | None, str | None]]:
         result = []
         try:
-            for entity in self._events.list_entities(select=["reply_id", "tone", "reply_posted_utc"]):
+            for entity in self._events.list_entities(
+                select=["reply_id", "tone", "reply_posted_utc", "mention_id", "parent_id"]
+            ):
                 rid = entity.get("reply_id")
                 tone = entity.get("tone", "")
                 posted_at = entity.get("reply_posted_utc")
+                mention_id = entity.get("mention_id")
+                parent_id = entity.get("parent_id")
                 if rid:
-                    result.append((rid, tone, posted_at))
+                    result.append((rid, tone, posted_at, mention_id, parent_id))
         except Exception:
             logger.exception("iter_reply_ids failed")
         return result
@@ -341,6 +403,16 @@ def log_engagement_snapshot(snap: EngagementSnapshot) -> None:
         get_store().write_engagement(snap)
     except Exception:
         logger.exception("log_engagement_snapshot swallowed exception for reply %s", snap.reply_id)
+
+
+def log_reply_reply(reply: BotReplyReply) -> None:
+    """Best-effort write. Never raises."""
+    try:
+        get_store().write_reply_reply(reply)
+    except Exception:
+        logger.exception(
+            "log_reply_reply swallowed exception for reply_tweet_id=%s", reply.reply_tweet_id
+        )
 
 
 def utcnow() -> datetime:

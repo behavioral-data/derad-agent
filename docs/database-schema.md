@@ -8,25 +8,44 @@ Two backends exist behind a common interface:
 
 | Backend | When used |
 |---------|-----------|
-| `TablesStore` / `TablesEventsStore` / `TablesCursorStore` | Production (Azure) |
-| `InMemoryStore` / `InMemoryEventsStore` / `InMemoryCursorStore` | Local dev / testing |
+| `TablesStore` / `TablesEventsStore` / `TablesParticipantsStore` | Production (Azure) |
+| `InMemoryStore` / `InMemoryEventsStore` / `InMemoryParticipantsStore` | Local dev / testing |
 
 Backend selection is controlled by environment variables:
 
 ```
-DERAD_STORE_BACKEND     # dedup + rate-limit  (default: "memory")
-DERAD_CURSOR_BACKEND    # poll cursors         (default: "memory")
-DERAD_EVENTS_BACKEND    # event logging        (default: "memory")
-DERAD_TABLES_ENDPOINT   # Azure Tables URL
+DERAD_STORE_BACKEND         # dedup + rate-limit  (default: "memory")
+DERAD_EVENTS_BACKEND        # event logging        (default: "memory")
+DERAD_PARTICIPANTS_BACKEND  # participant registry  (default: "memory")
+DERAD_TABLES_ENDPOINT       # Azure Tables URL (shared by all backends)
 ```
 
 ---
 
 ## Tables
 
-### 1. `MentionEvents` — processed mentions
+### 1. `Participants` — registered study participants
 
-One row per mention that made it all the way through the pipeline (accepted by all guards and dispatched).
+One row per UW student enrolled in the study. This is the production allow-list for the mention guard — only mentions from registered participants are processed.
+
+**PartitionKey**: `"participants"` (fixed single partition — ~30 rows)  
+**RowKey**: `{author_id}` (X numeric user ID)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `author_username` | string | X @handle (human-readable, for DM composition) |
+| `tone` | string | Assigned bot: `agreeable`, `neutral`, or `satirical` |
+| `enrolled_at_utc` | datetime | Study start date for this participant |
+| `notes` | string | Optional researcher notes |
+
+**Managed by:** `derad-register-participant` CLI  
+**Source:** `derad_agent/app/participants.py` — `Participant` dataclass + `TablesParticipantsStore`
+
+---
+
+### 2. `MentionEvents` — processed mentions
+
+One row per mention that made it all the way through the pipeline (accepted by all guards and dispatched). This is the central research table.
 
 **PartitionKey**: `YYYY-MM` (monthly, for archival)  
 **RowKey**: `{ISO_timestamp}_{mention_id}` (sortable, unique)
@@ -37,7 +56,10 @@ One row per mention that made it all the way through the pipeline (accepted by a
 | `parent_id` | string | ID of the tweet being replied to |
 | `author_id` | string | Numeric X user ID of mention author |
 | `author_username` | string? | X username of mention author |
-| `tone` | string | Bot reply style: `neutral`, `agreeable`, `satirical` |
+| `tone` | string | Bot reply style: `neutral`, `agreeable`, or `satirical` |
+| `study_code` | string? | 4-letter code used in daily DM surveys (e.g. `ABKM`) |
+| `participant_id` | string? | `author_id` as explicit FK to `Participants` table |
+| `study_day` | int? | 1-based day number within the 5-day study (1–5) |
 | `parent_text` | string (≤32 KB) | Full text of the parent tweet |
 | `parent_author_id` | string? | User ID of the original tweet author |
 | `parent_author_username` | string? | Username of the original tweet author |
@@ -51,19 +73,19 @@ One row per mention that made it all the way through the pipeline (accepted by a
 | `reply_text` | string (≤32 KB) | Full text of the bot's reply |
 | `reply_id` | string? | X API ID of the posted reply tweet |
 | `sources_reply_id` | string? | ID of follow-up tweet with source links |
-| `received_at_utc` | datetime | When the webhook received the mention |
+| `received_at_utc` | datetime | When the stream received the mention |
 | `pipeline_start_utc` | datetime? | When processing started |
 | `reply_posted_utc` | datetime? | When the reply was posted to X |
 | `pipeline_ms` | int? | End-to-end latency (ms) |
 | `outcome` | string | Terminal state: `replied`, `pipeline_error`, `x_post_error`, `parent_fetch_failed`, `empty_reply` |
 | `error_class` | string? | Python exception class name (on error outcomes) |
-| `error_detail` | string? (≤1 KB) | Exception message / traceback (on error outcomes) |
+| `error_detail` | string? (≤1 KB) | Exception message (on error outcomes) |
 
-**Source**: `derad_agent/app/events.py` — `MentionEvent` dataclass + `TablesEventsStore.record_event()`
+**Source:** `derad_agent/app/events.py` — `MentionEvent` dataclass + `TablesEventsStore.write_event()`
 
 ---
 
-### 2. `MentionDrops` — rejected mentions
+### 3. `MentionDrops` — rejected mentions
 
 One row per mention that was filtered out at a guard before entering the pipeline.
 
@@ -76,16 +98,16 @@ One row per mention that was filtered out at a guard before entering the pipelin
 | `author_id` | string? | User ID of mention author |
 | `tone` | string? | Bot tone (if detectable) |
 | `drop_reason` | string | Why rejected: `duplicate`, `rate_limit`, `self_reply`, `unregistered`, `no_parent`, `invalid_payload` |
-| `received_at_utc` | datetime | When the webhook received the mention |
+| `received_at_utc` | datetime | When the stream received the mention |
 | `extra_json` | JSON string | Additional context (varies by `drop_reason`) |
 
-**Source**: `derad_agent/app/events.py` — `MentionDrop` dataclass + `TablesEventsStore.record_drop()`
+**Source:** `derad_agent/app/events.py` — `MentionDrop` dataclass + `TablesEventsStore.write_drop()`
 
 ---
 
-### 3. `EngagementSnapshots` — periodic reply metrics
+### 4. `EngagementSnapshots` — periodic reply metrics
 
-Multiple rows per bot reply tweet, one per polling snapshot.
+Multiple rows per bot reply tweet, one per polling snapshot. Collected ~3 days after posting by `derad-poll-engagement`.
 
 **PartitionKey**: `YYYY-MM`  
 **RowKey**: `{ISO_timestamp}_{reply_id}`
@@ -99,12 +121,39 @@ Multiple rows per bot reply tweet, one per polling snapshot.
 | `retweet_count` | int | Retweets at polling time |
 | `reply_count` | int | Replies at polling time |
 | `quote_count` | int | Quote tweets at polling time |
+| `mention_id` | string? | FK back to `MentionEvents` |
+| `parent_id` | string? | ID of the original post being fact-checked |
 
-**Source**: `derad_agent/app/events.py` — `EngagementSnapshot` dataclass
+**Source:** `derad_agent/app/events.py` — `EngagementSnapshot` dataclass  
+**Managed by:** `derad-poll-engagement` CLI (run manually ~3 days after each bot reply)
 
 ---
 
-### 4. `Mentions` — dedup store
+### 5. `BotReplyReplies` — bystander replies to bot posts
+
+Text of replies to bot posts collected for bystander NLP analysis. Written by `derad-collect-replies` at the same ~3-day window as engagement snapshots.
+
+**PartitionKey**: `YYYY-MM` (from `collected_at_utc`)  
+**RowKey**: `{ISO_timestamp}_{reply_tweet_id}`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `bot_reply_id` | string | The bot's reply tweet that was responded to |
+| `reply_tweet_id` | string | ID of the bystander's reply |
+| `author_id` | string | Bystander author's X user ID |
+| `author_username` | string? | Bystander's @handle |
+| `text` | string (≤32 KB) | Full text of the bystander reply |
+| `like_count` | int | Likes at collection time |
+| `collected_at_utc` | datetime | When this reply was collected |
+| `mention_id` | string? | FK back to `MentionEvents` |
+| `tone` | string? | Which bot posted the reply that was responded to |
+
+**Source:** `derad_agent/app/events.py` — `BotReplyReply` dataclass  
+**Managed by:** `derad-collect-replies` CLI
+
+---
+
+### 6. `Mentions` — dedup store
 
 Tracks which mention IDs have already been processed to prevent double-handling.
 
@@ -118,11 +167,11 @@ Tracks which mention IDs have already been processed to prevent double-handling.
 
 The `claim()` operation is atomic: if a row already exists it returns `False` (duplicate), otherwise writes the row and returns `True` (proceed). Entries expire after 24 hours.
 
-**Source**: `derad_agent/app/dedup.py` — `TablesStore`
+**Source:** `derad_agent/app/dedup.py` — `TablesStore`
 
 ---
 
-### 5. `RateLimits` — per-author rate limiting
+### 7. `RateLimits` — per-author rate limiting
 
 Stores one row per mention hit per author. Used to enforce rolling time-window rate limits.
 
@@ -133,67 +182,47 @@ Stores one row per mention hit per author. Used to enforce rolling time-window r
 |-------|------|-------------|
 | `AtUtc` | `Edm.DateTime` | Exact timestamp of the mention hit |
 
-To check rate limits, an OData filter counts rows within `author_id` partition where `AtUtc >= now - window_seconds`. If that count exceeds the configured limit, the mention is dropped.
-
-**Source**: `derad_agent/app/dedup.py` — `TablesStore.check_rate_limit()`
-
----
-
-### 6. `Cursors` — poll watermarks
-
-Persists the latest tweet ID seen per bot tone so polling can resume after restarts.
-
-**PartitionKey**: `"cursors"` (fixed)  
-**RowKey**: `{cursor_key}` (e.g., `"poll_cursor:neutral"`)
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `cursor_value` | string | Latest tweet ID for this tone (used as `since_id` in next poll) |
-
-On first-ever poll (bootstrap), the watermark is recorded but no mentions are dispatched to avoid ingesting pre-study data.
-
-**Source**: `derad_agent/app/cursors.py` — `TablesCursorStore`
+**Source:** `derad_agent/app/dedup.py` — `TablesStore.check_rate_limit()`
 
 ---
 
 ## Data Flow
 
 ```
-X API Webhook
+X Filtered Stream (persistent SSE connection to api.twitter.com)
       │
       ▼
-Signature verified + payload parsed
-      │
-      ├──[invalid payload]──────────────────────────► MentionDrops (drop_reason=invalid_payload)
+Tone extracted from matching_rules[].tag
       │
       ▼
-Dedup check (Mentions table)
+Participant allow-list check (Participants table loaded at startup)
       │
-      ├──[duplicate]────────────────────────────────► MentionDrops (drop_reason=duplicate)
-      │
-      ▼
-Rate-limit check (RateLimits table)
-      │
-      ├──[exceeded]─────────────────────────────────► MentionDrops (drop_reason=rate_limit)
+      ├──[unregistered]─────────────────────────────► MentionDrops (drop_reason=unregistered)
       │
       ▼
-Other guards (self_reply, unregistered, no_parent)
+Other guards (self_reply, duplicate, rate_limit, daily_cap)
       │
-      ├──[filtered]─────────────────────────────────► MentionDrops (drop_reason=...)
+      ├──[filtered]────────────────────────────────► MentionDrops (drop_reason=...)
       │
       ▼
 Pipeline (planning → search → reply generation)
       │
-      └──[any outcome]──────────────────────────────► MentionEvents (outcome=replied/error/...)
+      └──[any outcome]─────────────────────────────► MentionEvents (outcome=replied/error/...)
+                                                        includes study_code, study_day, participant_id
 
-
-Background poller (per tone):
-  Cursors table → fetch since_id → poll X API → same guard logic above
-  After poll → update Cursors table with new watermark
-
-Engagement poller:
-  Reads reply_ids from MentionEvents → polls X API → writes EngagementSnapshots
+Daily researcher workflow (run each day of study):
+  derad-daily-summary       → prints per-participant reply list with study codes (for DM composition)
+  derad-poll-engagement     → polls X API for bystander engagement metrics → EngagementSnapshots
+  derad-collect-replies     → fetches replies to bot posts → BotReplyReplies
 ```
+
+---
+
+## Study Code
+
+Every successful bot reply gets a **4-letter study code** (e.g. `ABKM`) stored in `MentionEvents.study_code`. The code is derived deterministically from the `reply_id` using SHA-256 mod 24, over an unambiguous alphabet (A–Z excluding I and O).
+
+Researchers use study codes to match daily DM survey responses to specific bot replies, since codes are short enough to type manually.
 
 ---
 
@@ -201,8 +230,8 @@ Engagement poller:
 
 | Convention | Detail |
 |------------|--------|
-| **Partitioning** | Event tables use `YYYY-MM`; dedup/cursors use fixed partitions; rate-limits partition by author |
+| **Partitioning** | Event tables use `YYYY-MM`; dedup uses a fixed partition; rate-limits partition by author; participants use a fixed partition |
 | **Timestamps** | All datetimes are UTC; stored as ISO strings; rate-limit table uses `Edm.DateTime` for OData filtering |
-| **Text truncation** | `parent_text` / `reply_text` → 32 KB; `error_detail` → 1 KB (Azure row size limit ~1 MB) |
+| **Text truncation** | `parent_text` / `reply_text` / `text` → 32 KB; `error_detail` → 1 KB (Azure row size limit ~1 MB) |
 | **Lists/dicts** | Serialized as JSON strings (`queries_json`, `cited_note_ids_json`, `extra_json`) |
 | **Export** | `derad_agent/cli/export.py` handles field deserialization (JSON fields, datetime parsing) for offline analysis |

@@ -25,9 +25,9 @@ param tags object = {
 param appServicePlanSku string = 'B2'
 
 @description('Public bot handles wired into /info and the tweet href.')
-param botHandleAgreeable string = 'aggie_bot'
-param botHandleNeutral string = 'nellie_bot'
-param botHandleSatirical string = 'eddie_bot'
+param botHandleAgreeable string = 'aggiexbot'
+param botHandleNeutral string = 'nelliexbot'
+param botHandleSatirical string = 'eddiexbot'
 
 @description('Restrict to allow-listed authors during supervised launch.')
 param restrictToRegistered bool = true
@@ -141,11 +141,16 @@ resource mentionDropsTable 'Microsoft.Storage/storageAccounts/tableServices/tabl
   name: 'MentionDrops'
 }
 
-// Polling cursors — newest tweet ID seen per bot tone. Only written when
-// DERAD_INGEST_MODE=polling; inert in webhook mode.
-resource cursorsTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2024-01-01' = {
+// Registered study participants — source of truth for the allow-list guard.
+resource participantsTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2024-01-01' = {
   parent: tableSvc
-  name: 'Cursors'
+  name: 'Participants'
+}
+
+// Replies to bot posts collected ~3 days after posting for bystander NLP analysis.
+resource botReplyRepliesTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2024-01-01' = {
+  parent: tableSvc
+  name: 'BotReplyReplies'
 }
 
 // ── Key Vault (RBAC, purge protection ON) ───────────────────────────────────
@@ -203,12 +208,6 @@ resource appService 'Microsoft.Web/sites@2024-11-01' = {
       ftpsState: 'Disabled'
       healthCheckPath: '/healthz'
       http20Enabled: true
-      cors: {
-        allowedOrigins: [
-          'https://platform.twitter.com'
-        ]
-        supportCredentials: false
-      }
       appSettings: [
         { name: 'WEBSITES_PORT', value: '8000' }
         { name: 'WEBSITES_ENABLE_APP_SERVICE_STORAGE', value: 'false' }
@@ -221,14 +220,9 @@ resource appService 'Microsoft.Web/sites@2024-11-01' = {
         { name: 'DERAD_RATE_LIMIT_PER_SEC', value: '3' }
         { name: 'DERAD_POST_SOURCES_TWEET', value: 'false' }
         { name: 'DERAD_MAX_MENTIONS_PER_DAY', value: '500' }
-        // Ingest mode: 'webhooks' (default) or 'polling'. XOR — do not set both.
-        // polling activates the background poller thread; the /mentions webhook
-        // still answers CRC + healthz but skips event processing.
-        { name: 'DERAD_INGEST_MODE', value: 'webhooks' }
-        { name: 'DERAD_POLL_INTERVAL_SEC', value: '60' }
+        { name: 'DERAD_INGEST_MODE', value: 'streaming' }
         { name: 'DERAD_STORE_BACKEND', value: 'tables' }
         { name: 'DERAD_EVENTS_BACKEND', value: 'tables' }
-        { name: 'DERAD_CURSOR_BACKEND', value: 'tables' }
         { name: 'DERAD_TABLES_ENDPOINT', value: 'https://${storage.name}.table.core.windows.net' }
         { name: 'AZURE_CLIENT_ID', value: uami.properties.clientId }
         { name: 'BOT_HANDLE_AGREEABLE', value: botHandleAgreeable }
@@ -245,6 +239,7 @@ resource appService 'Microsoft.Web/sites@2024-11-01' = {
         { name: 'AZURE_OPENAI_DEPLOYMENT_CHAT', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/azure-openai-deployment-chat)' }
         { name: 'X_API_KEY', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/x-api-key)' }
         { name: 'X_API_SECRET', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/x-api-secret)' }
+        { name: 'X_BEARER_TOKEN', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/x-bearer-token)' }
         { name: 'X_ACCESS_TOKEN_AGREEABLE', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/x-access-token-agreeable)' }
         { name: 'X_ACCESS_TOKEN_SECRET_AGREEABLE', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/x-access-token-secret-agreeable)' }
         { name: 'X_ACCESS_TOKEN_NEUTRAL', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/x-access-token-neutral)' }
@@ -410,17 +405,17 @@ resource alert5xx 'Microsoft.Insights/metricAlerts@2018-03-01' = {
   }
 }
 
-// Log alert: zero requests to /mentions in 24 hours.
-// Queries AppRequests in Log Analytics (populated by App Insights auto-instrumentation).
-// Fires when the webhook endpoint goes silent — usually means the X Account
-// Activity subscription was revoked or the bot's access token expired.
-// Scoped to the Log Analytics workspace where workspace-mode App Insights writes.
+// Log alert: no accepted mentions logged in 24 hours.
+// Queries AppTraces (console logs) in Log Analytics for the "Accepted mention" line
+// that _dispatch_tweet emits on every successfully accepted tweet. Fires when the
+// filtered stream goes silent — usually means the bearer token expired, the stream
+// rules were wiped, or the App Service restarted and failed to reconnect.
 resource alertZeroMentions 'Microsoft.Insights/scheduledQueryRules@2022-06-15' = {
   name: 'alert-zero-mentions-${appName}'
   location: location
   tags: tags
   properties: {
-    description: 'No requests to /mentions in 24 h — X subscription may be broken or access token expired.'
+    description: 'No accepted mentions in 24 h — filtered stream may be disconnected or bearer token expired.'
     severity: 3
     enabled: true
     evaluationFrequency: 'PT1H'
@@ -429,9 +424,7 @@ resource alertZeroMentions 'Microsoft.Insights/scheduledQueryRules@2022-06-15' =
     criteria: {
       allOf: [
         {
-          // Returns one row per matching request. If no rows → 0 rows → Count < 1 → fires.
-          // Exclude 4xx (X CRC handshakes, bad signatures) to avoid false alerts.
-          query: 'AppRequests | where TimeGenerated > ago(24h) | where Url contains "/mentions" | where not(ResultCode startswith "4")'
+          query: 'AppTraces | where TimeGenerated > ago(24h) | where Message contains "Accepted mention"'
           timeAggregation: 'Count'
           threshold: 1
           operator: 'LessThan'
