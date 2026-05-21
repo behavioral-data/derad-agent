@@ -56,7 +56,7 @@ STEP 4: Warm, non-accusatory; presents evidence without lecturing.
 
 OUTPUT:
 {{
-  "response": "It sounds like you're concerned about what might be harming children — that's a worry a lot of parents share. The evidence from studies covering millions of children finds no link between vaccines and autism; the original study making that claim was retracted.",
+  "response": "It sounds like you're concerned about children's safety — a lot of parents share that worry.\n\nStudies covering millions of children find no link; the original Wakefield study was retracted.",
   "reasons": [{{"reason": "Multiple large studies covering millions of children find no link; the original Wakefield study was retracted.", "note_id": "ex1", "tweet_id": "t1", "evidence_links": []}}]
 }}
 
@@ -76,7 +76,7 @@ Run STEP 1-4 internally, then output JSON only.
 
 Produce JSON only with this exact schema:
 {{
-  "response": "<2-3 sentences, under 240 characters: (1) restate the claim in your own words to show it was heard, (2) validate that this concern is understandable without agreeing or disagreeing, (3) share what the evidence shows using polite, non-confrontational language>",
+  "response": "<under 240 characters total, two parts separated by a blank line (\\n\\n). Line 1: one sentence that restates the claim and validates the concern. Line 2: one sentence presenting what the evidence shows, using polite non-confrontational language.>",
   "reasons": [
     {{
       "reason": "<a specific point from this note, stated respectfully — frame it as information the person might find relevant, not as a correction>",
@@ -128,7 +128,7 @@ STEP 4: No partisan framing; a reader on any side of the vaccine debate would re
 
 OUTPUT:
 {{
-  "response": "Multiple large-scale studies covering millions of children have found no causal link between vaccines and autism. The original study making this claim was retracted, and its author lost his medical license.",
+  "response": "Multiple large-scale studies find no causal link between vaccines and autism.\n\nThe original Wakefield study was retracted, and its author lost his medical license.",
   "reasons": [{{"reason": "Multiple large studies covering millions of children find no link; the original Wakefield study was retracted.", "note_id": "ex1", "tweet_id": "t1", "evidence_links": []}}]
 }}
 
@@ -148,7 +148,7 @@ Run STEP 1-4 internally, then output JSON only.
 
 Produce JSON only with this exact schema:
 {{
-  "response": "<2-3 sentences, under 240 characters: a synthesized, neutral summary that addresses the key factual claims, provides important context, and uses clear, non-argumentative language that a diverse audience would find helpful and fair>",
+  "response": "<under 240 characters total, two parts separated by a blank line (\\n\\n). Line 1: the key factual finding in one direct sentence. Line 2: one sentence of supporting context or nuance that a diverse audience would find fair.>",
   "reasons": [
     {{
       "reason": "<a specific factual point drawn from this note, stated neutrally and without editorializing — focus on what adds context or corrects the record>",
@@ -260,7 +260,7 @@ Form: deadpan exhaustion, NOT a press-release headline.
 
 OUTPUT:
 {{
-  "response": "Scientists Who Have Spent 25 Years And Studied Millions Of Children Specifically To Answer This Question Report That No, Still No, Vaccines Do Not Cause Autism, But Thank You For Checking Again",
+  "response": "Scientists Who Have Spent 25 Years And Studied Millions Of Children Report That No, Still No, Vaccines Do Not Cause Autism\n\nThe researchers, completing their 25th consecutive year of confirming this, said they remain available for questions.",
   "reasons": [{{"reason": "Multiple large studies covering millions of children find no link; the original Wakefield study was retracted.", "note_id": "ex1", "tweet_id": "t1", "evidence_links": []}}]
 }}
 
@@ -290,7 +290,7 @@ most specific and absurd detail, regardless of recency.
 
 Run STEP 1-4 internally using the full set of notes, then output JSON only:
 {{
-  "response": "<the satire>",
+  "response": "<under 240 characters total, two parts separated by a blank line (\\n\\n). Line 1: the satirical headline or punchline. Line 2: a dry elaboration or second beat — a deadpan footnote, the absurd implication taken one step further, or the thing that makes someone actually laugh rather than just nod. Both lines should be funny, not explanatory.>",
   "reasons": [
     {{
       "reason": "<the specific fact from this note that grounds the joke>",

@@ -140,11 +140,11 @@ _X_URL_LEN = 23
 
 
 def _append_url(text: str, url: str, limit: int = TWEET_LIMIT) -> str:
-    """Append url to text, truncating text with ellipsis if needed to stay within limit."""
-    budget = limit - _X_URL_LEN - 1  # -1 for the space
+    """Append url on its own line, truncating text with ellipsis if needed to stay within limit."""
+    budget = limit - _X_URL_LEN - 1  # -1 for the newline
     if len(text) > budget:
         text = text[:budget - 1] + "…"
-    return f"{text} {url}"
+    return f"{text}\n{url}"
 
 
 def _build_sources_text(reply: dict, info_url: str) -> str:
