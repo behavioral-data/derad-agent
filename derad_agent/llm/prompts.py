@@ -37,7 +37,32 @@ RESPONSE_OUTPUT_AGREEABLE_TEMPLATE = """You are responding to someone who has ma
 
 Do NOT try to change the person's mind or move their position. Do NOT editorialize about whether the claim is right or wrong. Your only job is to help them feel understood, then let the evidence speak for itself.
 
-You are responding to a claim. Below are independent pieces of evidence: real statements written by people about tweets related to this claim. Read them, weigh the evidence they present, and form your own response.
+# REASONING PROCESS (internal — think before writing)
+
+STEP 1: Identify the core concern. What is the person actually saying or afraid of? What emotional or political stake does this claim carry?
+STEP 2: Read all notes. What does the evidence collectively show? Where is it consistent, where is it mixed?
+STEP 3: Draft the three techniques. Restatement: say back what the person said so they feel heard. Validation: what is the understandable concern behind the claim, even if the claim is wrong? Evidence: how do the notes address the claim without editorializing?
+STEP 4: Check the tone. Read it back — does it feel respectful and non-defensive? Does it present evidence without pushing the person toward a conclusion?
+
+# EXAMPLE
+
+CLAIM: "Vaccines cause autism."
+NOTE: "False. Multiple large studies covering millions of children find no link. The original Wakefield study was retracted; Wakefield lost his medical license."
+
+STEP 1: Core concern — parents worried about harming their children through vaccination.
+STEP 2: Evidence is consistent: no link found across large studies; the originating claim was retracted.
+STEP 3: Restatement — concerned about vaccine safety and child harm. Validation — caring about children's health is completely reasonable. Evidence — large-scale research finds no link; the original claim was retracted.
+STEP 4: Warm, non-accusatory; presents evidence without lecturing.
+
+OUTPUT:
+{{
+  "response": "It sounds like you're concerned about what might be harming children — that's a worry a lot of parents share. The evidence from studies covering millions of children finds no link between vaccines and autism; the original study making that claim was retracted.",
+  "reasons": [{{"reason": "Multiple large studies covering millions of children find no link; the original Wakefield study was retracted.", "note_id": "ex1", "tweet_id": "t1", "evidence_links": []}}]
+}}
+
+# YOUR TASK
+
+Today's date: {current_date}. Community Notes may use future tense for events that have since occurred — treat any past-dated events as settled history.
 
 CLAIM:
 {statement}
@@ -47,11 +72,11 @@ EVIDENCE_NOTES_JSON:
 
 Each note has a "note" field (the text), a "note_id", a "tweet_id", and optional "evidence_links".
 
-Based on what these notes say, write a response that applies all three techniques: restate the claim, validate the concern behind it, then present what the evidence shows politely.
+Run STEP 1-4 internally, then output JSON only.
 
 Produce JSON only with this exact schema:
 {{
-  "response": "<3-5 sentences: (1) restate the claim in your own words to show it was heard, (2) validate that this concern is understandable without agreeing or disagreeing, (3) share what the evidence shows using polite, non-confrontational language>",
+  "response": "<2-3 sentences, under 240 characters: (1) restate the claim in your own words to show it was heard, (2) validate that this concern is understandable without agreeing or disagreeing, (3) share what the evidence shows using polite, non-confrontational language>",
   "reasons": [
     {{
       "reason": "<a specific point from this note, stated respectfully — frame it as information the person might find relevant, not as a correction>",
@@ -65,12 +90,12 @@ Produce JSON only with this exact schema:
 Rules:
 - Read the actual content of each note and reason over what it says. Do NOT rely on any metadata or labels — only the note text matters.
 - Respond directly to the claim. Do NOT describe the dataset, the retrieval process, or the distribution of notes.
-- Do NOT cite percentages, counts, ratios, or any statistical language.
+- Specific numbers and statistics from the notes may be included when they add clarity. Do not invent statistics or extrapolate beyond what the notes say.
 - Do NOT try to persuade or move the person's policy position — present evidence only, let them draw conclusions.
 - Ground every reason in a specific note. Do not invent note_id or tweet_id values.
-- Return 3-5 reasons.
+- Return 1-3 reasons.
 - Include evidence_links only when source URLs appear in the note.
-- If the evidence is mixed or unclear, say so plainly without citing numbers.
+- If the evidence is mixed or unclear, say so plainly.
 - If there are no evidence notes, return an empty reasons list and say the evidence is insufficient.
 """
 
@@ -85,7 +110,32 @@ Follow these principles, modeled on effective crowd-sourced fact-checking:
 4. CLARITY — Write in clear, direct sentences that are easy to understand for a general audience.
 5. CONTEXT — Prioritize providing useful context that helps readers understand the full picture, not just a narrow rebuttal.
 
-You are responding to a claim. Below are independent pieces of evidence: real statements written by people about tweets related to this claim. Read them, weigh the evidence they present, and synthesize your response.
+# REASONING PROCESS (internal — think before writing)
+
+STEP 1: Read all notes. What is the combined factual picture? Where do they agree, where is the evidence mixed?
+STEP 2: Identify the key context gap. What would a neutral reader need to know to evaluate this claim fairly?
+STEP 3: Synthesize across notes into one response. Prioritize facts over framing — state what is known and stop there.
+STEP 4: Audit for neutrality. Would someone who agrees with the claim AND someone who disagrees both find this response fair? Remove any charged words, rhetorical framing, or implied conclusions.
+
+# EXAMPLE
+
+CLAIM: "Vaccines cause autism."
+NOTE: "False. Multiple large studies covering millions of children find no link. The original Wakefield study was retracted; Wakefield lost his medical license."
+
+STEP 1: Evidence is consistent — no causal link found across large studies. The claim traces to a single retracted study.
+STEP 2: Key context: the scale of the research (millions of children) and the retraction status of the originating study.
+STEP 3: Synthesize: large-scale research finds no link; the originating study was retracted.
+STEP 4: No partisan framing; a reader on any side of the vaccine debate would recognize this as factual.
+
+OUTPUT:
+{{
+  "response": "Multiple large-scale studies covering millions of children have found no causal link between vaccines and autism. The original study making this claim was retracted, and its author lost his medical license.",
+  "reasons": [{{"reason": "Multiple large studies covering millions of children find no link; the original Wakefield study was retracted.", "note_id": "ex1", "tweet_id": "t1", "evidence_links": []}}]
+}}
+
+# YOUR TASK
+
+Today's date: {current_date}. Community Notes may use future tense for events that have since occurred — treat any past-dated events as settled history.
 
 CLAIM:
 {statement}
@@ -95,11 +145,11 @@ EVIDENCE_NOTES_JSON:
 
 Each note has a "note" field (the text), a "note_id", a "tweet_id", and optional "evidence_links".
 
-Based on what these notes say collectively, write a synthesized, neutral response to the claim that would be considered helpful by a diverse audience.
+Run STEP 1-4 internally, then output JSON only.
 
 Produce JSON only with this exact schema:
 {{
-  "response": "<3-5 sentences: a synthesized, neutral summary that addresses the key factual claims, provides important context, and uses clear, non-argumentative language that a diverse audience would find helpful and fair>",
+  "response": "<2-3 sentences, under 240 characters: a synthesized, neutral summary that addresses the key factual claims, provides important context, and uses clear, non-argumentative language that a diverse audience would find helpful and fair>",
   "reasons": [
     {{
       "reason": "<a specific factual point drawn from this note, stated neutrally and without editorializing — focus on what adds context or corrects the record>",
@@ -114,12 +164,12 @@ Rules:
 - Read the actual content of each note and reason over what it says. Do NOT rely on any metadata or labels — only the note text matters.
 - Synthesize across notes — the response should reflect the combined picture from all relevant notes, not just the strongest single note.
 - Respond directly to the claim. Do NOT describe the dataset, the retrieval process, or the distribution of notes.
-- Do NOT cite percentages, counts, ratios, or any statistical language.
+- Specific numbers and statistics from the notes may be included when they add clarity. Do not invent statistics or extrapolate beyond what the notes say.
 - Do NOT introduce speculation, opinion, or language that reads as argumentative or partisan.
 - Ground every reason in a specific note. Do not invent note_id or tweet_id values.
-- Return 3-5 reasons.
+- Return 1-3 reasons.
 - Include evidence_links only when source URLs appear in the note.
-- If the evidence is mixed or unclear, say so plainly without citing numbers.
+- If the evidence is mixed or unclear, say so plainly.
 - If there are no evidence notes, return an empty reasons list and say the evidence is insufficient.
 """
 
@@ -139,7 +189,7 @@ if normal, a reluctant clarification — whatever shape best fits the gap
 between this particular claim and reality. Choose the form AFTER you find
 the joke. Don't default to "Institution Releases Statement" because it's easy.
 
-No length limit. Use what the bit needs.
+Keep the response under 240 characters — tweet format forces constraint, and constraint often sharpens the joke.
 
 # WHAT MAKES IT FUNNY
 The gap between World A (what the claim implies) and World B (what the Note
@@ -345,8 +395,8 @@ def get_planner_prompt():
 
 
 _STYLE_INPUT_VARIABLES = {
-    "agreeable": ["statement", "evidence_notes_json"],
-    "neutral":   ["statement", "evidence_notes_json"],
+    "agreeable": ["statement", "evidence_notes_json", "current_date"],
+    "neutral":   ["statement", "evidence_notes_json", "current_date"],
     "satirical": ["statement", "evidence_notes_json", "current_date"],
 }
 

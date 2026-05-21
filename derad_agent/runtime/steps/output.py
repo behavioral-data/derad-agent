@@ -148,9 +148,8 @@ def step_compose_reply(
     invoke_vars: Dict[str, str] = {
         "statement": statement,
         "evidence_notes_json": json.dumps(candidates, ensure_ascii=False),
+        "current_date": datetime.now(timezone.utc).strftime("%B %d, %Y"),
     }
-    if style == "satirical":
-        invoke_vars["current_date"] = datetime.now(timezone.utc).strftime("%B %d, %Y")
 
     raw = chain.invoke(invoke_vars)
     text = extract_text_from_response(raw)
