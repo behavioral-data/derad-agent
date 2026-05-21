@@ -90,7 +90,6 @@ Produce JSON only with this exact schema:
 Rules:
 - Read the actual content of each note and reason over what it says. Do NOT rely on any metadata or labels — only the note text matters.
 - Respond directly to the claim. Do NOT describe the dataset, the retrieval process, or the distribution of notes.
-- Specific numbers and statistics from the notes may be included when they add clarity. Do not invent statistics or extrapolate beyond what the notes say.
 - Do NOT try to persuade or move the person's policy position — present evidence only, let them draw conclusions.
 - Ground every reason in a specific note. Do not invent note_id or tweet_id values.
 - Return 1-3 reasons.
@@ -164,7 +163,6 @@ Rules:
 - Read the actual content of each note and reason over what it says. Do NOT rely on any metadata or labels — only the note text matters.
 - Synthesize across notes — the response should reflect the combined picture from all relevant notes, not just the strongest single note.
 - Respond directly to the claim. Do NOT describe the dataset, the retrieval process, or the distribution of notes.
-- Specific numbers and statistics from the notes may be included when they add clarity. Do not invent statistics or extrapolate beyond what the notes say.
 - Do NOT introduce speculation, opinion, or language that reads as argumentative or partisan.
 - Ground every reason in a specific note. Do not invent note_id or tweet_id values.
 - Return 1-3 reasons.
@@ -196,8 +194,7 @@ The gap between World A (what the claim implies) and World B (what the Note
 says) is the raw material. Dramatize the gap — don't describe it.
 
 The joke usually lives in:
-- The specific absurd SCALE of the reality (10 million sharks, 25 years,
-  1.2 million children) treated as a mundane bureaucratic footnote
+- The specific absurd SCALE or consequence of reality treated as a mundane bureaucratic footnote
 - Something that would have to be TRUE in World A that is obviously insane
 - History or bureaucracy quietly updating itself to accommodate the lie
 - The most inconvenienced bystander in the scenario
@@ -247,7 +244,7 @@ STEP 4: Write it. Then ask: does this make someone laugh, or just nod?
 
 # FEW-SHOT EXAMPLES
 
-## EXAMPLE 1 — absurdist bureaucratic scale (NOT a headline)
+# EXAMPLE
 CLAIM: "Vaccines cause autism."
 NOTE: "False. Multiple large studies covering millions of children find no link.
 The original Wakefield study was retracted; Wakefield lost his medical license."
@@ -265,45 +262,6 @@ OUTPUT:
 {{
   "response": "Scientists Who Have Spent 25 Years And Studied Millions Of Children Specifically To Answer This Question Report That No, Still No, Vaccines Do Not Cause Autism, But Thank You For Checking Again",
   "reasons": [{{"reason": "Multiple large studies covering millions of children find no link; the original Wakefield study was retracted.", "note_id": "ex1", "tweet_id": "t1", "evidence_links": []}}]
-}}
-
-## EXAMPLE 2 — logical corner the conspiracy paints itself into (sardonic observation)
-CLAIM: "The moon landing was faked in a Hollywood studio."
-NOTE: "False. Retroreflectors left by Apollo missions are still used today —
-observatories worldwide bounce lasers off them to measure the Moon's distance."
-
-STEP 1: World A = Kubrick filmed it on a set. World B = laser-reflecting hardware
-has been sitting on the Moon for 55 years and anyone can ping it.
-STEP 2: (i) the prop department would have needed to plant retroreflectors on the
-actual Moon anyway; (ii) hundreds of independent observatories are unknowing
-co-conspirators; (iii) the "cover-up" involves publishing exactly where the
-retroreflectors are and inviting people to shoot lasers at them.
-STEP 3: (e) the logical corner — the hoax would require doing the thing anyway.
-Form: one dry sentence, no institution, no press release.
-
-OUTPUT:
-{{
-  "response": "For The Hoax To Have Worked, Someone Would Have Still Had To Go To The Moon And Leave The Retroreflectors",
-  "reasons": [{{"reason": "Retroreflectors left by Apollo missions are still in active use — observatories worldwide bounce lasers off them.", "note_id": "ex2", "tweet_id": "t2", "evidence_links": []}}]
-}}
-
-## EXAMPLE 3 — the inconvenienced bystander with specific math
-CLAIM: "Sharks have killed more humans than humans have killed sharks."
-NOTE: "False. Humans kill ~100 million sharks per year through commercial fishing.
-Shark attacks on humans: ~70-80 per year, 5-10 fatalities. Ratio ~10 million to 1."
-
-STEP 1: World A = sharks are apex predators hunting us. World B = each individual
-shark is losing this war at 10-million-to-1.
-STEP 2: (i) to break even, a shark would need to kill 10 million people per year;
-(ii) every "dangerous shark" documentary needs a correction reel;
-(iii) the apex predator is demonstrably the fishing industry.
-STEP 3: (a) the shark as inconvenienced bystander doing its personal math.
-Form: short scenario from the shark's perspective, no institution.
-
-OUTPUT:
-{{
-  "response": "Shark, Having Done The Math, Would Need To Personally Kill 10 Million Humans Per Year Just To Break Even",
-  "reasons": [{{"reason": "Humans kill ~100 million sharks per year; sharks kill 5-10 humans per year — roughly 10 million to 1.", "note_id": "ex3", "tweet_id": "t3", "evidence_links": []}}]
 }}
 
 # YOUR TASK

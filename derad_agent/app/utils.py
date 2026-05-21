@@ -129,6 +129,7 @@ def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5):
     # dedup/cap, used by /info so the carousel matches what the user saw.
     all_cited_tweet_ids: list[str] = []
     all_cited_note_ids: list[str] = []
+    reasons_detail: list[dict] = []
     tweets: list = []
     notes: list = []
     sources: list = []
@@ -139,20 +140,20 @@ def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5):
             all_cited_tweet_ids.append(str(tid))
         if nid is not None:
             all_cited_note_ids.append(str(nid))
+        links = [l.strip() for l in (reason.get("evidence_links") or []) if isinstance(l, str) and l.strip()]
+        reasons_detail.append({
+            "reason": str(reason.get("reason") or ""),
+            "note_id": str(nid) if nid is not None else None,
+            "tweet_id": str(tid) if tid is not None else None,
+            "evidence_links": links,
+        })
         if len(sources) >= max_sources:
             continue
-        reason_contributed = False
-        for link in (reason.get("evidence_links") or []):
-            if not isinstance(link, str):
-                continue
-            stripped = link.strip()
-            if not stripped:
-                continue
-            reason_contributed = True
-            if stripped not in seen and len(sources) < max_sources:
-                sources.append(stripped)
-                seen.add(stripped)
-        if reason_contributed:
+        if links:
+            for link in links:
+                if link not in seen and len(sources) < max_sources:
+                    sources.append(link)
+                    seen.add(link)
             tweets.append(tid)
             notes.append(nid)
 
@@ -164,6 +165,7 @@ def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5):
         "queries": queries,
         "all_cited_tweet_ids": all_cited_tweet_ids,
         "all_cited_note_ids": all_cited_note_ids,
+        "reasons_detail": reasons_detail,
     }
 
 

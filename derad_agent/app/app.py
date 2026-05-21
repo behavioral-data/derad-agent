@@ -88,16 +88,16 @@ _ALLOWED_IDS: set[str] = set(_PARTICIPANTS_BY_ID) | ALLOWED_AUTHOR_IDS
 logger.info("Loaded %d registered participants", len(_PARTICIPANTS_BY_ID))
 
 
-# Short info-URL store: token → {tone, tweet_ids, note_ids}
+# Short info-URL store: token → {tone, reply_text, reasons}
 # Tokens are ephemeral (lost on restart); users click within minutes of receiving a reply.
 _INFO_STORE: dict[str, dict] = {}
 _INFO_STORE_LOCK = threading.Lock()
 
 
-def _make_info_token(tone: str, tweet_ids: list, note_ids: list) -> str:
+def _make_info_token(tone: str, reply_text: str, reasons: list) -> str:
     token = secrets.token_urlsafe(6)  # 8-char URL-safe string
     with _INFO_STORE_LOCK:
-        _INFO_STORE[token] = {"tone": tone, "tweet_ids": tweet_ids, "note_ids": note_ids}
+        _INFO_STORE[token] = {"tone": tone, "reply_text": reply_text, "reasons": reasons}
     return token
 
 
@@ -236,9 +236,7 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             _finalize("empty_reply")
             return
 
-        tweet_ids = reply.get("tweets") or []
-        note_ids = reply.get("notes") or []
-        token = _make_info_token(tone, tweet_ids, note_ids)
+        token = _make_info_token(tone, reply["text"], reply.get("reasons_detail") or [])
         with app.app_context():
             info_url = url_for("info_short", token=token, _external=True)
         reply_text = _append_url(reply["text"], info_url)
@@ -372,13 +370,12 @@ def info_short(token: str):
     with _INFO_STORE_LOCK:
         params = _INFO_STORE.get(token)
     if params is None:
-        return render_template("info.html", reply="", notes=""), 404
-    tone = params["tone"]
-    tweet_ids = params["tweet_ids"]
-    note_ids = params["note_ids"]
-    bot_handle = BOT_HANDLE_BY_TONE.get(tone, "i")
-    notes_html = generate_notes_html(tweet_ids, note_ids, bot_handle=bot_handle) if index_loaded() else ""
-    return render_template("info.html", reply="", notes=notes_html), 200
+        return render_template("info.html"), 404
+    return render_template(
+        "info.html",
+        headline=params.get("reply_text", ""),
+        reasons=params.get("reasons", []),
+    ), 200
 
 
 @app.route("/healthz", methods=["GET"])

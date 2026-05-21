@@ -10,15 +10,61 @@ body {
     margin: 0 auto;
 }
 
+/* ── Bot-reply headline (short URL mode) ──────────────────────────────────── */
+
+blockquote.bot-reply {
+    margin: 16px auto;
+    padding: 16px 20px;
+    border-left: 4px solid #1d9bf0;
+    background: #f7f9fa;
+    border-radius: 0 8px 8px 0;
+    font-size: 1.05rem;
+    text-align: left;
+    color: #0f1419;
+}
+
+.reason-card {
+    margin: 12px 0;
+    padding: 14px 16px;
+    border: 1px solid rgb(207, 217, 222);
+    border-radius: 12px;
+    text-align: left;
+    background: #fff;
+}
+
+.reason-card p {
+    margin: 0 0 8px;
+    overflow-wrap: break-word;
+}
+
+.source-links {
+    margin: 6px 0 0;
+    padding: 0 0 0 16px;
+    list-style: disc;
+}
+
+.source-links li {
+    font-size: 0.85rem;
+    overflow-wrap: break-word;
+    word-break: break-all;
+}
+
+p.source-tweet {
+    margin: 0;
+    font-size: 0.85rem;
+}
+
+/* ── Community Notes carousel (long URL / /info route) ──────────────────── */
+
 .sources {
     margin-top: 40px;
 }
 
-ul {
+.sources ul {
     margin: 100px auto;
     height: 300px;
     padding: 20px;
-    display:  flex;
+    display: flex;
     gap: 4vw;
 
     overflow-x: scroll;
@@ -27,14 +73,14 @@ ul {
     anchor-name: --my-carousel;
 }
 
-li {
+.sources li {
     min-width: 250px;
     max-width: 550px;
     border-width: 1px;
     border-radius: 12px;
     border-style: solid;
     border-color: rgb(207, 217, 222);
-    overflow:hidden;
+    overflow: hidden;
 
     list-style-type: none;
     flex: 0 0 100%;
@@ -51,7 +97,7 @@ li {
     overflow-wrap: break-word;
 }
 
-ul::scroll-button(*) {
+.sources ul::scroll-button(*) {
     margin-top: 100px;
     border: 0;
     font-size: 2rem;
@@ -61,44 +107,44 @@ ul::scroll-button(*) {
     cursor: pointer;
 }
 
-ul::scroll-button(*):hover,
-ul::scroll-button(*):focus {
+.sources ul::scroll-button(*):hover,
+.sources ul::scroll-button(*):focus {
     opacity: 1;
 }
 
-ul::scroll-button(*):active {
+.sources ul::scroll-button(*):active {
     translate: 1px 1px;
 }
 
-ul::scroll-button(*):disabled {
+.sources ul::scroll-button(*):disabled {
     opacity: 0.2;
     cursor: unset;
 }
 
-ul::scroll-button(left) {
+.sources ul::scroll-button(left) {
     content: "◄" / "Previous";
 }
 
-ul::scroll-button(right) {
+.sources ul::scroll-button(right) {
     content: "►" / "Next";
 }
 
-ul::scroll-button(*) {
+.sources ul::scroll-button(*) {
     position: absolute;
     position-anchor: --my-carousel;
 }
 
-ul::scroll-button(left) {
+.sources ul::scroll-button(left) {
     right: calc(anchor(left) - 70px);
     bottom: calc(anchor(top) + 13px);
 }
 
-ul::scroll-button(right) {
+.sources ul::scroll-button(right) {
     left: calc(anchor(right) - 70px);
     bottom: calc(anchor(top) + 13px);
 }
 
-ul::scroll-marker-group {
+.sources ul::scroll-marker-group {
     position: absolute;
     position-anchor: --my-carousel;
     top: calc(anchor(bottom) - 70px);
@@ -109,7 +155,7 @@ ul::scroll-marker-group {
     gap: 20px;
 }
 
-li::scroll-marker {
+.sources li::scroll-marker {
     content: attr(data-accName);
     width: 16px;
     height: 16px;
@@ -120,6 +166,6 @@ li::scroll-marker {
     text-indent: 16px;
 }
 
-li::scroll-marker:target-current {
+.sources li::scroll-marker:target-current {
     background-color: black;
 }

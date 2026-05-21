@@ -11,11 +11,35 @@
     <p>This bot was created by University of Washington researchers as part of a study to investigate how AI bots affect online political conversations. Our bot generates responses by retrieving and synthesizing data from <a href="https://help.x.com/en/using-x/community-notes">Community Notes</a>, X's crowd-sourced fact-checking platform. We source notes from X's publicly available repository of <a href="https://x.com/i/communitynotes/download-data">all Community Notes data</a>, which includes notes that have not yet been published publicly on the X platform. Responses may contain inaccurate information; please consult linked sources to verify any claims.
     </p>
 
-    {% if reply %}
+    {% if headline %}
+    <h2>Bot Reply</h2>
+    <blockquote class="bot-reply">{{ headline }}</blockquote>
+
+    {% if reasons %}
+    <h3>Supporting Evidence</h3>
+    {% for r in reasons %}
+    <div class="reason-card">
+        <p>{{ r.reason }}</p>
+        {% if r.evidence_links %}
+        <ul class="source-links">
+            {% for link in r.evidence_links %}
+            <li><a href="{{ link }}">{{ link }}</a></li>
+            {% endfor %}
+        </ul>
+        {% elif r.tweet_id %}
+        <p class="source-tweet"><a href="https://x.com/i/web/status/{{ r.tweet_id }}">View source tweet →</a></p>
+        {% endif %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <p><em>No supporting evidence recorded for this reply.</em></p>
+    {% endif %}
+
+    {% elif reply %}
     <h2>About this Post</h2>
     {{reply|safe}}
     <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-    {% endif %}
+
     {% if notes %}
     <div class="sources">
         <h3>Community Notes Sources</h3>
@@ -25,6 +49,7 @@
     </div>
     {% else %}
     <p><em>No Community Notes sources were retrieved for this post.</em></p>
+    {% endif %}
     {% endif %}
 </main>
 <footer>
