@@ -76,7 +76,7 @@ Run STEP 1-4 internally, then output JSON only.
 
 Produce JSON only with this exact schema:
 {{
-  "response": "<under 240 characters total, two parts separated by a blank line (\\n\\n). Line 1: one sentence that restates the claim and validates the concern. Line 2: one sentence presenting what the evidence shows, using polite non-confrontational language.>",
+  "response": "<two complete sentences separated by a blank line (\\n\\n). Line 1: restate the claim and validate the concern. Line 2: present what the evidence shows using polite non-confrontational language.>",
   "reasons": [
     {{
       "reason": "<a specific point from this note, stated respectfully — frame it as information the person might find relevant, not as a correction>",
@@ -148,7 +148,7 @@ Run STEP 1-4 internally, then output JSON only.
 
 Produce JSON only with this exact schema:
 {{
-  "response": "<under 240 characters total, two parts separated by a blank line (\\n\\n). Line 1: the key factual finding in one direct sentence. Line 2: one sentence of supporting context or nuance that a diverse audience would find fair.>",
+  "response": "<two complete sentences separated by a blank line (\\n\\n). Line 1: the key factual finding in one direct sentence. Line 2: one sentence of supporting context or nuance that a diverse audience would find fair.>",
   "reasons": [
     {{
       "reason": "<a specific factual point drawn from this note, stated neutrally and without editorializing — focus on what adds context or corrects the record>",
@@ -290,7 +290,7 @@ most specific and absurd detail, regardless of recency.
 
 Run STEP 1-4 internally using the full set of notes, then output JSON only:
 {{
-  "response": "<under 240 characters total, two parts separated by a blank line (\\n\\n). Line 1: the satirical headline or punchline. Line 2: a dry elaboration or second beat — a deadpan footnote, the absurd implication taken one step further, or the thing that makes someone actually laugh rather than just nod. Both lines should be funny, not explanatory.>",
+  "response": "<two parts separated by a blank line (\\n\\n). Line 1: the satirical headline or punchline. Line 2: a dry elaboration or second beat — a deadpan footnote, the absurd implication taken one step further, or the thing that makes someone actually laugh rather than just nod. Both lines should be funny, not explanatory.>",
   "reasons": [
     {{
       "reason": "<the specific fact from this note that grounds the joke>",
