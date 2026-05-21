@@ -18,7 +18,7 @@ requires-python = ">=3.9"
 readme = "README.md"
 dependencies = [
     "langchain>=0.1.16",
-    "langchain-openai>=0.0.5",
+    "langchain-openai>=1.0",
     "openai>=1.27.0",
     "python-dotenv>=1.0.0",
     "rich>=13.0.0",
@@ -37,6 +37,8 @@ derad-ask = "derad_agent.cli.ask:main"
 derad-poll-engagement = "derad_agent.cli.poll_engagement:main"
 derad-export = "derad_agent.cli.export:main"
 derad-register-participant = "derad_agent.cli.register_participant:main"
+derad-list-participants = "derad_agent.cli.list_participants:main"
+derad-bulk-register = "derad_agent.cli.bulk_register:main"
 derad-collect-replies = "derad_agent.cli.collect_replies:main"
 derad-daily-summary = "derad_agent.cli.daily_summary:main"
 

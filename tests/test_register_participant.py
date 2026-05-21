@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import sys
 from datetime import date, datetime, timezone
+from unittest.mock import MagicMock
 
 import pytest
 
-from derad_agent.app.participants import InMemoryParticipantsStore, reset_store
-from derad_agent.cli.register_participant import main
+from derad_agent.app.participants import InMemoryParticipantsStore, Participant, reset_store
+from derad_agent.cli.register_participant import _pick_tone, main
 
 
 @pytest.fixture(autouse=True)
@@ -24,8 +25,14 @@ def _run(args: list[str]):
     main()
 
 
+def _fake_user_response(user_id: str = "99999"):
+    resp = MagicMock()
+    resp.data = {"id": user_id, "username": "testuser"}
+    return resp
+
+
 class TestRegisterParticipantCLI:
-    def test_registers_participant(self, fresh_store):
+    def test_registers_with_explicit_author_id(self, fresh_store):
         _run(["--author-id", "12345", "--username", "janesmith", "--tone", "neutral"])
         p = fresh_store.get("12345")
         assert p is not None
@@ -61,3 +68,38 @@ class TestRegisterParticipantCLI:
                 "--enrolled", "not-a-date",
             ])
         assert exc_info.value.code == 1
+
+    def test_lookup_by_username_when_no_author_id(self, fresh_store, monkeypatch):
+        fake_client = MagicMock()
+        fake_client.users.get_by_username.return_value = _fake_user_response("77777")
+        monkeypatch.setattr(
+            "derad_agent.cli.register_participant.get_x_client",
+            lambda tone: fake_client,
+        )
+        _run(["--username", "lookedupuser", "--tone", "neutral"])
+        p = fresh_store.get("77777")
+        assert p is not None
+        assert p.author_username == "lookedupuser"
+        fake_client.users.get_by_username.assert_called_once_with(username="lookedupuser")
+
+
+class TestPickTone:
+    def test_explicit_tone_returned_unchanged(self, fresh_store):
+        assert _pick_tone("agreeable") == "agreeable"
+
+    def test_random_picks_least_used(self, fresh_store):
+        # Register 2 agreeable, 2 neutral, 0 satirical → random should pick satirical
+        for i in range(2):
+            fresh_store.register(Participant(
+                author_id=f"a{i}", author_username=f"u{i}",
+                tone="agreeable", enrolled_at_utc=datetime(2026, 5, 1, tzinfo=timezone.utc),
+            ))
+        for i in range(2):
+            fresh_store.register(Participant(
+                author_id=f"n{i}", author_username=f"v{i}",
+                tone="neutral", enrolled_at_utc=datetime(2026, 5, 1, tzinfo=timezone.utc),
+            ))
+        assert _pick_tone("random") == "satirical"
+
+    def test_random_with_empty_store_picks_any_valid_tone(self, fresh_store):
+        assert _pick_tone("random") in {"agreeable", "neutral", "satirical"}
