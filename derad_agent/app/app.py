@@ -1,11 +1,12 @@
 import hashlib
+import json
 import logging
 import os
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
-from flask import Flask, jsonify, render_template, request, url_for
+from flask import Flask, Response, jsonify, render_template, request, stream_with_context, url_for
 from markupsafe import escape
 
 from derad_agent.app import events, metrics
@@ -23,10 +24,19 @@ from derad_agent.app.utils import (
 from derad_agent.app import streamer as _streamer
 from derad_agent.llm.config import _require_env
 
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
+_LOG_FILE = os.getenv("DERAD_LOG_FILE", "/tmp/derad_stream.log")
+_log_fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+_root = logging.getLogger()
+_root.setLevel(os.getenv("LOG_LEVEL", "INFO"))
+_sh = logging.StreamHandler()
+_sh.setFormatter(_log_fmt)
+_root.addHandler(_sh)
+try:
+    _fh = logging.FileHandler(_LOG_FILE)
+    _fh.setFormatter(_log_fmt)
+    _root.addHandler(_fh)
+except OSError:
+    pass  # non-writable filesystem (e.g. read-only container layer) — stdout only
 for _noisy in ("azure.core", "azure.monitor", "azure.identity"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
@@ -155,6 +165,7 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         received_at_utc=received_at_utc,
         pipeline_start_utc=pipeline_start_utc,
         author_username=author_username,
+        bot_author_id=BOT_USER_ID_BY_TONE.get(tone),
     )
 
     def _finalize(outcome: str, exc: BaseException | None = None) -> None:
@@ -199,7 +210,10 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             _finalize("empty_reply")
             return
         ev.reply_text = reply["text"]
-        logger.info("DRY_RUN reply (tone=%s): %s", tone, reply["text"] if DRY_RUN else "(posting)")
+        if DRY_RUN:
+            logger.info("DRY_RUN reply (tone=%s): %s", tone, reply["text"])
+        else:
+            logger.info("Posting reply (tone=%s): (text suppressed)", tone)
 
         if DRY_RUN:
             _finalize("dry_run")
@@ -319,6 +333,93 @@ def info():
 @app.route("/healthz", methods=["GET"])
 def healthz():
     return jsonify({"ok": True, "index_loaded": index_loaded()}), 200
+
+
+# ── Dashboard ─────────────────────────────────────────────────────────────────
+
+@app.route("/dashboard")
+def dashboard():
+    return render_template("dashboard.html")
+
+
+@app.route("/api/activity")
+def api_activity():
+    ev_store = events.get_store()
+    recent_events = ev_store.list_recent(50)
+    recent_drops = ev_store.list_recent_drops(20)
+
+    outcome_counts: dict[str, int] = {}
+    tone_counts: dict[str, int] = {"agreeable": 0, "neutral": 0, "satirical": 0}
+    latencies: list[int] = []
+    for ev in recent_events:
+        outcome = ev.get("outcome") or "unknown"
+        outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
+        tone = ev.get("tone") or ""
+        if tone in tone_counts:
+            tone_counts[tone] += 1
+        ms = ev.get("pipeline_ms")
+        if ms:
+            latencies.append(int(ms))
+
+    part_store = _participants.get_store()
+    all_parts = part_store.list_all()
+    participant_tone_counts = {"agreeable": 0, "neutral": 0, "satirical": 0}
+    for p in all_parts:
+        if p.tone in participant_tone_counts:
+            participant_tone_counts[p.tone] += 1
+
+    payload = {
+        "events": recent_events,
+        "drops": recent_drops,
+        "metrics": {
+            "total_events": len(recent_events),
+            "outcome_counts": outcome_counts,
+            "tone_counts": tone_counts,
+            "avg_pipeline_ms": int(sum(latencies) / len(latencies)) if latencies else 0,
+            "participant_count": len(all_parts),
+            "participant_tone_counts": participant_tone_counts,
+            "dry_run": DRY_RUN,
+            "stream_connected": _streamer.is_connected() if hasattr(_streamer, "is_connected") else None,
+        },
+    }
+    return jsonify(payload), 200
+
+
+_SSE_TTL = int(os.getenv("DERAD_SSE_TTL", "1800"))  # 30 min default; browser auto-reconnects
+
+
+@app.route("/stream/logs")
+def stream_logs():
+    def _generate():
+        deadline = time.monotonic() + _SSE_TTL
+        # Backfill last 80 lines
+        try:
+            with open(_LOG_FILE, "r") as f:
+                lines = f.readlines()
+            for line in lines[-80:]:
+                yield f"data: {json.dumps({'line': line.rstrip()})}\n\n"
+        except FileNotFoundError:
+            yield f"data: {json.dumps({'line': f'[log: {_LOG_FILE} not found — check DERAD_LOG_FILE]'})}\n\n"
+            return
+
+        # Tail new lines until TTL
+        try:
+            with open(_LOG_FILE, "r") as f:
+                f.seek(0, 2)
+                while time.monotonic() < deadline:
+                    line = f.readline()
+                    if line:
+                        yield f"data: {json.dumps({'line': line.rstrip()})}\n\n"
+                    else:
+                        time.sleep(0.3)
+                        yield ": keep-alive\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'line': f'[stream error: {exc}]'})}\n\n"
+
+    resp = Response(stream_with_context(_generate()), mimetype="text/event-stream")
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"
+    return resp
 
 
 preload_index_async()

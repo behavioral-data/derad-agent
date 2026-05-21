@@ -147,6 +147,12 @@ resource participantsTable 'Microsoft.Storage/storageAccounts/tableServices/tabl
   name: 'Participants'
 }
 
+// Engagement snapshots — public metrics polled at the 3-day measurement point.
+resource engagementSnapshotsTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2024-01-01' = {
+  parent: tableSvc
+  name: 'EngagementSnapshots'
+}
+
 // Replies to bot posts collected ~3 days after posting for bystander NLP analysis.
 resource botReplyRepliesTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2024-01-01' = {
   parent: tableSvc
@@ -223,6 +229,7 @@ resource appService 'Microsoft.Web/sites@2024-11-01' = {
         { name: 'DERAD_INGEST_MODE', value: 'streaming' }
         { name: 'DERAD_STORE_BACKEND', value: 'tables' }
         { name: 'DERAD_EVENTS_BACKEND', value: 'tables' }
+        { name: 'DERAD_PARTICIPANTS_BACKEND', value: 'tables' }
         { name: 'DERAD_TABLES_ENDPOINT', value: 'https://${storage.name}.table.core.windows.net' }
         { name: 'AZURE_CLIENT_ID', value: uami.properties.clientId }
         { name: 'BOT_HANDLE_AGREEABLE', value: botHandleAgreeable }

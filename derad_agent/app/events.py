@@ -74,6 +74,7 @@ class MentionEvent:
     study_code: Optional[str] = None      # 4-letter code used in daily DM surveys
     participant_id: Optional[str] = None  # author_id, explicit FK to Participants table
     study_day: Optional[int] = None       # 1-based day number within the 5-day study
+    bot_author_id: Optional[str] = None   # X user ID of the bot that replied
 
     # Outcome
     outcome: str = "replied"  # 'replied' | 'pipeline_error' | 'x_post_error' | 'parent_fetch_failed' | 'empty_reply'
@@ -170,6 +171,41 @@ class InMemoryEventsStore:
                 if ev.reply_id
             ]
 
+    def list_recent(self, limit: int = 50) -> list[dict]:
+        with self._lock:
+            events = list(reversed(self.events[-limit:]))
+        return [
+            {
+                "mention_id": e.mention_id,
+                "author_id": e.author_id,
+                "author_username": e.author_username,
+                "tone": e.tone,
+                "outcome": e.outcome,
+                "reply_id": e.reply_id,
+                "received_at_utc": e.received_at_utc.isoformat() if e.received_at_utc else None,
+                "pipeline_ms": e.pipeline_ms,
+                "study_day": e.study_day,
+                "study_code": e.study_code,
+                "reply_text": (e.reply_text or "")[:120],
+                "parent_text": (e.parent_text or "")[:120],
+            }
+            for e in events
+        ]
+
+    def list_recent_drops(self, limit: int = 20) -> list[dict]:
+        with self._lock:
+            drops = list(reversed(self.drops[-limit:]))
+        return [
+            {
+                "mention_id": d.mention_id,
+                "author_id": d.author_id,
+                "tone": d.tone,
+                "drop_reason": d.drop_reason,
+                "received_at_utc": d.received_at_utc.isoformat() if d.received_at_utc else None,
+            }
+            for d in drops
+        ]
+
 
 # ── Azure Tables backend ────────────────────────────────────────────────────
 
@@ -264,6 +300,7 @@ class TablesEventsStore:
             "study_code": ev.study_code,
             "participant_id": ev.participant_id,
             "study_day": ev.study_day,
+            "bot_author_id": ev.bot_author_id,
         }
 
     def _drop_entity(self, drop: MentionDrop) -> dict[str, Any]:
@@ -337,6 +374,57 @@ class TablesEventsStore:
         except Exception:
             logger.exception("iter_reply_ids failed")
         return result
+
+    _EVENT_SELECT = [
+        "RowKey", "mention_id", "author_id", "author_username", "tone", "outcome",
+        "received_at_utc", "pipeline_ms", "study_day", "study_code",
+        "reply_text", "parent_text", "reply_id", "bot_author_id",
+    ]
+    _DROP_SELECT = [
+        "RowKey", "mention_id", "author_id", "tone", "drop_reason", "received_at_utc",
+    ]
+
+    @staticmethod
+    def _normalize(d: dict) -> dict:
+        d.pop("odata.etag", None)
+        for k, v in list(d.items()):
+            if hasattr(v, "isoformat"):
+                d[k] = v.isoformat()
+        return d
+
+    def list_recent(self, limit: int = 50) -> list[dict]:
+        now = datetime.now(timezone.utc)
+        months = [now.strftime("%Y-%m")]
+        if now.day <= 3:
+            months.append((now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m"))
+        result = []
+        try:
+            for month in months:
+                for entity in self._events.query_entities(
+                    f"PartitionKey eq '{month}'", select=self._EVENT_SELECT
+                ):
+                    d = self._normalize(dict(entity))
+                    for fld in ("reply_text", "parent_text"):
+                        if d.get(fld):
+                            d[fld] = d[fld][:120]
+                    result.append(d)
+        except Exception:
+            logger.exception("list_recent failed")
+        result.sort(key=lambda e: e.get("RowKey", ""), reverse=True)
+        return result[:limit]
+
+    def list_recent_drops(self, limit: int = 20) -> list[dict]:
+        month = datetime.now(timezone.utc).strftime("%Y-%m")
+        result = []
+        try:
+            for entity in self._drops.query_entities(
+                f"PartitionKey eq '{month}'", select=self._DROP_SELECT
+            ):
+                result.append(self._normalize(dict(entity)))
+        except Exception:
+            logger.exception("list_recent_drops failed")
+        result.sort(key=lambda e: e.get("RowKey", ""), reverse=True)
+        return result[:limit]
 
     def _truncate(self, value: Optional[str], cap: int = _FIELD_CAP) -> Optional[str]:
         if value is None:

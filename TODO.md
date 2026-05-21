@@ -1,4 +1,0 @@
-- [ ] switch for registered user vs everyone
-- [ ] rate limit per user (payload has user id)
-- [ ] duplicate events from webhooks
-- [ ] power analysis for how many particiapnts we need
