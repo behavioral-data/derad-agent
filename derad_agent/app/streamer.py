@@ -67,12 +67,25 @@ def _bot_rules() -> list[dict]:
 
 
 def _sync_rules(token: str) -> None:
-    """Replace any existing stream rules with fresh bot-mention rules."""
+    """Sync stream rules: skip if already correct, otherwise replace."""
     headers = {"Authorization": f"Bearer {token}"}
 
     resp = requests.get(_RULES_URL, headers=headers, timeout=30)
     resp.raise_for_status()
     existing = resp.json().get("data") or []
+
+    new_rules = _bot_rules()
+    if not new_rules:
+        logger.warning("No BOT_HANDLE_* env vars set — stream will receive no events")
+        return
+
+    # Skip if existing rules already match desired rules exactly (avoid unnecessary churn).
+    existing_values = {r.get("value") for r in existing}
+    desired_values = {r["value"] for r in new_rules}
+    if existing_values == desired_values:
+        logger.info("Stream rules already up to date: %s", sorted(desired_values))
+        return
+
     if existing:
         ids = [r["id"] for r in existing]
         del_resp = requests.post(
@@ -84,10 +97,6 @@ def _sync_rules(token: str) -> None:
         del_resp.raise_for_status()
         logger.info("Deleted %d stale stream rules", len(ids))
 
-    new_rules = _bot_rules()
-    if not new_rules:
-        logger.warning("No BOT_HANDLE_* env vars set — stream will receive no events")
-        return
     add_resp = requests.post(
         _RULES_URL,
         headers=headers,
@@ -133,8 +142,13 @@ def _stream_loop(dispatch_fn: Callable, token: str) -> None:
                 timeout=(10, 30),
             ) as resp:
                 if resp.status_code == 429:
-                    logger.warning("Stream rate-limited (429); backing off 60 s")
-                    time.sleep(60)
+                    # X rate-limits repeated connection attempts; use the same
+                    # exponential backoff as other failures, floored at 60 s.
+                    wait = max(backoff, 60.0)
+                    logger.warning("Stream rate-limited (429); backing off %.0f s", wait)
+                    _connected.clear()
+                    time.sleep(wait)
+                    backoff = min(wait * 2, 300)
                     continue
                 resp.raise_for_status()
                 backoff = 1.0
