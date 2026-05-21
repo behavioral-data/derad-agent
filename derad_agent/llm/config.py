@@ -4,6 +4,7 @@ Loads credentials from ``derad_agent/llm/.env`` and exposes factory
 helpers for embedding and chat models, plus path constants for index
 and TSV data locations.
 """
+import functools
 from pathlib import Path
 import os
 import warnings
@@ -78,6 +79,7 @@ def get_embedder():
     )
 
 
+@functools.lru_cache(maxsize=16)
 def get_llm(
     temperature: float = None,
     max_tokens: int = 2048,
@@ -85,7 +87,7 @@ def get_llm(
     text_verbosity: str = None,
     provider: str = "openai",
 ):
-    """Get a chat model.
+    """Get a chat model (cached per unique argument combination).
 
     provider="grok"  — Azure AI Services (Grok); requires AZURE_AI_ENDPOINT.
                        reasoning_effort and text_verbosity are silently ignored.
@@ -121,28 +123,12 @@ def get_llm(
     if text_verbosity is not None:
         config["verbosity"] = text_verbosity
 
-    try:
-        return AzureChatOpenAI(**config)
-    except TypeError as exc:
-        unsupported = ("reasoning" in config) or ("verbosity" in config)
-        if not unsupported:
-            raise
-        warnings.warn(
-            "Installed langchain-openai does not support reasoning/verbosity; "
-            "falling back to standard AzureChatOpenAI arguments.",
-            stacklevel=2,
-        )
-        fallback_config = dict(config)
-        fallback_config.pop("reasoning", None)
-        fallback_config.pop("verbosity", None)
-        try:
-            return AzureChatOpenAI(**fallback_config)
-        except TypeError:
-            raise exc
+    return AzureChatOpenAI(**config)
 
 
+@functools.lru_cache(maxsize=4)
 def get_x_client(tone="agreeable"):
-    """X client singleton."""
+    """X client, cached per tone."""
     from xdk import Client
     from xdk.oauth1_auth import OAuth1
 

@@ -5,12 +5,10 @@ from typing import List
 from .text import sanitize_query
 
 
-def validate_agent_inputs(statement: str, user_dir) -> None:
-    """Raise ValueError if statement is empty or index directory is missing."""
+def validate_agent_inputs(statement: str, index_dir) -> None:
+    """Raise ValueError if statement is empty."""
     if not statement or not statement.strip():
         raise ValueError("Statement cannot be empty")
-    if not user_dir.exists():
-        raise ValueError(f"User directory does not exist: {user_dir}")
 
 
 def validate_search_queries(

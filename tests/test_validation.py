@@ -19,11 +19,6 @@ class TestValidateAgentInputs:
         with pytest.raises(ValueError, match="Statement cannot be empty"):
             validate_agent_inputs("   ", mock_user_dir)
 
-    def test_missing_dir_raises(self, tmp_path):
-        with pytest.raises(ValueError, match="does not exist"):
-            validate_agent_inputs("q", tmp_path / "nonexistent")
-
-
 class TestValidateSearchQueries:
     def test_valid(self):
         assert validate_search_queries(["query one", "query two"]) == ["query one", "query two"]

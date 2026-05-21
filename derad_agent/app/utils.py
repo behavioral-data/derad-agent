@@ -109,12 +109,6 @@ def fetch_tweet(tweet_id, *, tone: str = "neutral") -> Optional[TweetSnapshot]:
     )
 
 
-def fetch_tweet_text(tweet_id, *, tone: str = "neutral") -> Optional[str]:
-    """Backwards-compatible wrapper used by code paths that only need the text."""
-    snap = fetch_tweet(tweet_id, tone=tone)
-    return snap.text if snap else None
-
-
 def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5):
     from derad_agent.runtime.landscape_api import retrieve_statement_landscape
 

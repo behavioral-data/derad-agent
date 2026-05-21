@@ -56,11 +56,10 @@ def run_landscape_agent(
     embedder = get_embedder()
     index = load_notes_index(notes_index_dir)
     logger.log_info(
-        f"Loaded notes index: {len(index.tweet_ids):,} tweets, "
-        f"{sum(len(v) for v in index.notes_by_tweet.values()):,} notes"
+        f"Loaded notes index: {len(index.tweet_ids):,} tweets, {index.total_notes:,} notes"
     )
 
-    queries, planner_thinking, _ = step_1_generate_queries(statement=statement, logger=logger)
+    queries = step_1_generate_queries(statement=statement, logger=logger)
 
     excluded = [exclude_tweet_id] if exclude_tweet_id else []
 
@@ -104,7 +103,6 @@ def run_landscape_agent(
     return {
         "statement": statement,
         "queries": queries,
-        "planner_thinking": planner_thinking,
         "retrieved_tweets": [
             {"tweet_id": tid, "similarity": round(sim, 4)} for tid, sim in retrieved
         ],
