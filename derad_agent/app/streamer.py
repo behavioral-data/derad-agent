@@ -28,11 +28,11 @@ logger = logging.getLogger(__name__)
 
 INGEST_MODE = os.getenv("DERAD_INGEST_MODE", "streaming").lower()
 
-_connected = False
+_connected = threading.Event()
 
 
 def is_connected() -> bool:
-    return _connected
+    return _connected.is_set()
 
 
 _BASE = "https://api.twitter.com/2/tweets/search/stream"
@@ -138,8 +138,7 @@ def _stream_loop(dispatch_fn: Callable, token: str) -> None:
                     continue
                 resp.raise_for_status()
                 backoff = 1.0
-                global _connected
-                _connected = True
+                _connected.set()
                 logger.info("Filtered stream connected")
 
                 for raw_line in resp.iter_lines():
@@ -171,7 +170,7 @@ def _stream_loop(dispatch_fn: Callable, token: str) -> None:
             logger.warning("Stream lost: %s — reconnecting in %.0f s", exc, backoff)
         except Exception:
             logger.exception("Unexpected stream error — reconnecting in %.0f s", backoff)
-        _connected = False
+        _connected.clear()
 
         time.sleep(backoff)
         backoff = min(backoff * 2, 300)

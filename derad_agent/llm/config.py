@@ -69,6 +69,10 @@ def _require_env(var: str) -> str:
     return value
 
 
+def _parse_bool_env(var: str, default: bool = False) -> bool:
+    return os.getenv(var, str(default).lower()).lower() == "true"
+
+
 def get_embedder():
     """Return an Azure OpenAI embedding model."""
     return _EmbCls(

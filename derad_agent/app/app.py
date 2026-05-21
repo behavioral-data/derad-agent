@@ -23,7 +23,7 @@ from derad_agent.app.utils import (
     preload_index_async,
 )
 from derad_agent.app import streamer as _streamer
-from derad_agent.llm.config import _require_env
+from derad_agent.llm.config import _parse_bool_env, _require_env
 
 _LOG_FILE = os.getenv("DERAD_LOG_FILE", "/tmp/derad_stream.log")
 _log_fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -67,10 +67,9 @@ BOT_USER_ID_BY_TONE = {
     "satirical": os.getenv("BOT_USER_ID_SATIRICAL"),
 }
 
-POST_SOURCES_TWEET = os.getenv("DERAD_POST_SOURCES_TWEET", "false").lower() == "true"
-DRY_RUN = os.getenv("DERAD_DRY_RUN", "false").lower() == "true"
-
-RESTRICT_TO_REGISTERED = os.getenv("DERAD_RESTRICT_TO_REGISTERED", "true").lower() == "true"
+POST_SOURCES_TWEET = _parse_bool_env("DERAD_POST_SOURCES_TWEET")
+DRY_RUN = _parse_bool_env("DERAD_DRY_RUN")
+RESTRICT_TO_REGISTERED = _parse_bool_env("DERAD_RESTRICT_TO_REGISTERED", default=True)
 # Dev/test escape hatch — production allow-list comes from the Participants table.
 ALLOWED_AUTHOR_IDS = {
     a.strip() for a in os.getenv("DERAD_ALLOWED_AUTHOR_IDS", "").split(",") if a.strip()
@@ -94,11 +93,34 @@ _INFO_STORE: dict[str, dict] = {}
 _INFO_STORE_LOCK = threading.Lock()
 
 
+_INFO_STORE_TTL = 7200  # 2 hours — well past any reasonable click window
+
+
 def _make_info_token(tone: str, reply_text: str, reasons: list) -> str:
     token = secrets.token_urlsafe(6)  # 8-char URL-safe string
     with _INFO_STORE_LOCK:
-        _INFO_STORE[token] = {"tone": tone, "reply_text": reply_text, "reasons": reasons}
+        _INFO_STORE[token] = {
+            "tone": tone,
+            "reply_text": reply_text,
+            "reasons": reasons,
+            "_ts": time.monotonic(),
+        }
     return token
+
+
+def _evict_info_store() -> None:
+    while True:
+        time.sleep(600)
+        cutoff = time.monotonic() - _INFO_STORE_TTL
+        with _INFO_STORE_LOCK:
+            stale = [k for k, v in _INFO_STORE.items() if v.get("_ts", 0) < cutoff]
+            for k in stale:
+                del _INFO_STORE[k]
+        if stale:
+            logger.debug("Evicted %d stale info tokens", len(stale))
+
+
+threading.Thread(target=_evict_info_store, daemon=True, name="info-store-evictor").start()
 
 
 # 4-letter study code derived deterministically from reply_id.

@@ -1,7 +1,7 @@
 """Compose a reply from a list of evidence notes.
 
 Hands the filtered, recency-sorted notes to the response-output LLM
-prompt and returns a 3-5 sentence reply plus structured reasons grounded
+prompt and returns a two-sentence reply plus structured reasons grounded
 in the supplied note_ids.
 """
 
@@ -155,7 +155,8 @@ def step_compose_reply(
     text = extract_text_from_response(raw)
     try:
         parsed = parse_json_response(text)
-    except Exception:
+    except Exception as _parse_exc:
+        logger.warning("JSON parse failed, attempting repair: %s", _parse_exc)
         repair_prompt = (
             "Convert the following text into valid JSON only, preserving the same schema keys. "
             "Return JSON and nothing else.\n\n"
