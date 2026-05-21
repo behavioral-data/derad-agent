@@ -7,7 +7,7 @@ where = ["."]
 include = ["derad_agent*"]
 
 [tool.setuptools.package-data]
-"derad_agent.app" = ["templates/*.html", "static/*.css"]
+"derad_agent.app" = ["templates/*.html", "static/*.css", "static/dash/*"]
 
 [project]
 name = "derad-agent"
