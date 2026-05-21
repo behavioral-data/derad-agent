@@ -255,6 +255,7 @@ class TablesEventsStore:
         entity = self._event_entity(ev)
         try:
             self._events.create_entity(entity)
+            logger.info("Wrote event to tables (mention=%s outcome=%s)", ev.mention_id, ev.outcome)
         except Exception:
             logger.exception("write_event failed for mention %s; continuing", ev.mention_id)
 
@@ -262,6 +263,7 @@ class TablesEventsStore:
         entity = self._drop_entity(drop)
         try:
             self._drops.create_entity(entity)
+            logger.info("Wrote drop to tables (mention=%s reason=%s)", drop.mention_id, drop.drop_reason)
         except Exception:
             logger.exception(
                 "write_drop failed for mention %s reason=%s; continuing",
