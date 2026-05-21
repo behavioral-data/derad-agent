@@ -135,6 +135,40 @@
   overflow-wrap: break-word;
 }
 
+/* ── Community Note block ─────────────────────────────────────────────────── */
+
+.info-note-block {
+  margin: 10px 0 8px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--border);
+  background: var(--gray-50, #f4f2ee);
+}
+
+[data-theme="light"] .info-note-block {
+  background: #f2f0eb;
+  border-left-color: #d0ccc4;
+}
+
+.info-note-label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  color: var(--gray-400, #999);
+}
+
+.info-note-text {
+  margin: 0;
+  font-size: 0.83rem;
+  line-height: 1.6;
+  color: var(--gray-300, #555);
+  overflow-wrap: break-word;
+}
+
+[data-theme="light"] .info-note-text {
+  color: #666;
+}
+
 /* ── Source links ─────────────────────────────────────────────────────────── */
 
 .info-sources {

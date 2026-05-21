@@ -133,6 +133,7 @@ def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5):
     tweets: list = []
     notes: list = []
     sources: list = []
+    index = get_index()
     seen = set()
     for reason in (reply.get("reasons") or []):
         tid, nid = reason.get("tweet_id"), reason.get("note_id")
@@ -141,11 +142,18 @@ def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5):
         if nid is not None:
             all_cited_note_ids.append(str(nid))
         links = [l.strip() for l in (reason.get("evidence_links") or []) if isinstance(l, str) and l.strip()]
+        note_text = None
+        if tid is not None and nid is not None:
+            for n in index.notes_by_tweet.get(str(tid), []):
+                if str(n.get("note_id")) == str(nid):
+                    note_text = (n.get("summary") or "").strip() or None
+                    break
         reasons_detail.append({
             "reason": str(reason.get("reason") or ""),
             "note_id": str(nid) if nid is not None else None,
             "tweet_id": str(tid) if tid is not None else None,
             "evidence_links": links,
+            "note_text": note_text,
         })
         if len(sources) >= max_sources:
             continue

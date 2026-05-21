@@ -47,7 +47,13 @@
       <div class="info-reason panel">
         <div class="info-reason-idx">{{ '%02d' % loop.index }}</div>
         <div class="info-reason-body">
-          <p>{{ r.reason }}</p>
+          <p class="info-reason-text">{{ r.reason }}</p>
+          {% if r.note_text %}
+          <div class="info-note-block">
+            <span class="info-note-label eyebrow">Community Note</span>
+            <p class="info-note-text">{{ r.note_text }}</p>
+          </div>
+          {% endif %}
           {% if r.evidence_links %}
           <ul class="info-sources">
             {% for link in r.evidence_links %}
