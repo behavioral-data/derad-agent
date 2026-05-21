@@ -1,171 +1,275 @@
-body {
-    text-align: center;
-    min-width: 300px;
-    max-width: 600px;
-    margin: 0 auto;
-    font-family: sans-serif;
+/* ── Page shell ─────────────────────────────────────────────────────────── */
+
+.info-wrap {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 0 24px 64px;
 }
 
-.twitter-tweet {
-    margin: 0 auto;
+/* ── Header ──────────────────────────────────────────────────────────────── */
+
+.info-hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 0 18px;
+  border-bottom: 1.5px solid var(--border);
+  margin-bottom: 24px;
 }
 
-/* ── Bot-reply headline (short URL mode) ──────────────────────────────────── */
-
-blockquote.bot-reply {
-    margin: 16px auto;
-    padding: 16px 20px;
-    border-left: 4px solid #1d9bf0;
-    background: #f7f9fa;
-    border-radius: 0 8px 8px 0;
-    font-size: 1.05rem;
-    text-align: left;
-    color: #0f1419;
+.info-wordmark {
+  font-family: var(--serif);
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
 }
 
-.reason-card {
-    margin: 12px 0;
-    padding: 14px 16px;
-    border: 1px solid rgb(207, 217, 222);
-    border-radius: 12px;
-    text-align: left;
-    background: #fff;
+/* ── Research context callout ─────────────────────────────────────────────── */
+
+.info-context {
+  font-size: 0.85rem;
+  line-height: 1.65;
+  margin-bottom: 32px;
 }
 
-.reason-card p {
-    margin: 0 0 8px;
-    overflow-wrap: break-word;
+.info-context a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
-.source-links {
-    margin: 6px 0 0;
-    padding: 0 0 0 16px;
-    list-style: disc;
+/* ── Section ──────────────────────────────────────────────────────────────── */
+
+.info-section {
+  padding-top: 28px;
+  margin-top: 28px;
+  border-top: 1px solid var(--border);
 }
 
-.source-links li {
-    font-size: 0.85rem;
-    overflow-wrap: break-word;
-    word-break: break-all;
+.info-section:first-of-type {
+  border-top: none;
+  margin-top: 0;
+  padding-top: 0;
 }
 
-p.source-tweet {
-    margin: 0;
-    font-size: 0.85rem;
+.info-section-hd {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
-/* ── Community Notes carousel (long URL / /info route) ──────────────────── */
+/* ── Tone chip variants ──────────────────────────────────────────────────── */
+
+.chip-tone-agreeable { background: #d4edda; color: #1a5e30; border-color: #a3cfbb; }
+.chip-tone-neutral   { background: #d1e8f7; color: #0c4a6e; border-color: #93c5d7; }
+.chip-tone-satirical { background: #fde8d8; color: #7c2d12; border-color: #fdba74; }
+
+/* ── Bot reply blockquote ─────────────────────────────────────────────────── */
+
+.info-reply {
+  margin: 0;
+  padding: 18px 20px 18px 22px;
+  border-left: 3px solid var(--accent);
+  background: var(--gray-50, #f8f6f2);
+}
+
+[data-theme="light"] .info-reply {
+  background: #faf8f4;
+}
+
+.info-reply-lead {
+  margin: 0 0 12px;
+  font-family: var(--serif);
+  font-size: 1.1rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.info-reply-body {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: var(--gray-300, #555);
+}
+
+[data-theme="light"] .info-reply-body {
+  color: #555;
+}
+
+/* ── Evidence reasons ─────────────────────────────────────────────────────── */
+
+.info-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.info-reason.panel {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 14px 16px;
+}
+
+.info-reason-idx {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--gray-400, #999);
+  padding-top: 2px;
+  flex-shrink: 0;
+  width: 24px;
+}
+
+.info-reason-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.info-reason-body p {
+  margin: 0 0 8px;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}
+
+/* ── Source links ─────────────────────────────────────────────────────────── */
+
+.info-sources {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 0;
+}
+
+.info-sources li {
+  margin-bottom: 3px;
+}
+
+.info-src-link {
+  font-size: 0.75rem;
+  overflow-wrap: break-word;
+  word-break: break-all;
+  color: var(--accent) !important;
+  text-decoration: none;
+}
+
+.info-src-link:hover {
+  text-decoration: underline;
+}
+
+/* ── Empty / not-found states ─────────────────────────────────────────────── */
+
+.info-empty-note {
+  margin-top: 20px;
+  color: var(--gray-400, #999);
+  font-style: italic;
+}
+
+.info-not-found {
+  margin-top: 32px;
+}
+
+/* ── Footer ───────────────────────────────────────────────────────────────── */
+
+.info-footer {
+  margin-top: 48px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Community Notes carousel (long URL / legacy /info route) ─────────────── */
 
 .sources {
-    margin-top: 40px;
+  margin-top: 20px;
 }
 
 .sources ul {
-    margin: 100px auto;
-    height: 300px;
-    padding: 20px;
-    display: flex;
-    gap: 4vw;
-
-    overflow-x: scroll;
-    scroll-snap-type: x mandatory;
-
-    anchor-name: --my-carousel;
+  margin: 100px auto;
+  height: 300px;
+  padding: 20px;
+  display: flex;
+  gap: 4vw;
+  overflow-x: scroll;
+  scroll-snap-type: x mandatory;
+  anchor-name: --my-carousel;
 }
 
 .sources li {
-    min-width: 250px;
-    max-width: 550px;
-    border-width: 1px;
-    border-radius: 12px;
-    border-style: solid;
-    border-color: rgb(207, 217, 222);
-    overflow: hidden;
-
-    list-style-type: none;
-    flex: 0 0 100%;
-
-    scroll-snap-align: center;
-
-    scroll-marker-group: after;
+  min-width: 250px;
+  max-width: 550px;
+  border-width: 1px;
+  border-radius: 0;
+  border-style: solid;
+  border-color: var(--border);
+  overflow: hidden;
+  list-style-type: none;
+  flex: 0 0 100%;
+  scroll-snap-align: center;
+  scroll-marker-group: after;
 }
 
 .note-body {
-    outline-style: none;
-    padding: 12px 16px 4px;
-    background-color: rgb(255, 255, 255);
-    overflow-wrap: break-word;
+  outline-style: none;
+  padding: 12px 16px 4px;
+  background-color: var(--surface, #fff);
+  overflow-wrap: break-word;
 }
 
 .sources ul::scroll-button(*) {
-    margin-top: 100px;
-    border: 0;
-    font-size: 2rem;
-    background: none;
-    color: black;
-    opacity: 0.7;
-    cursor: pointer;
+  margin-top: 100px;
+  border: 0;
+  font-size: 2rem;
+  background: none;
+  color: var(--text);
+  opacity: 0.7;
+  cursor: pointer;
 }
 
 .sources ul::scroll-button(*):hover,
-.sources ul::scroll-button(*):focus {
-    opacity: 1;
-}
-
-.sources ul::scroll-button(*):active {
-    translate: 1px 1px;
-}
-
-.sources ul::scroll-button(*):disabled {
-    opacity: 0.2;
-    cursor: unset;
-}
-
-.sources ul::scroll-button(left) {
-    content: "◄" / "Previous";
-}
-
-.sources ul::scroll-button(right) {
-    content: "►" / "Next";
-}
+.sources ul::scroll-button(*):focus { opacity: 1; }
+.sources ul::scroll-button(*):active { translate: 1px 1px; }
+.sources ul::scroll-button(*):disabled { opacity: 0.2; cursor: unset; }
+.sources ul::scroll-button(left)  { content: "◄" / "Previous"; }
+.sources ul::scroll-button(right) { content: "►" / "Next"; }
 
 .sources ul::scroll-button(*) {
-    position: absolute;
-    position-anchor: --my-carousel;
+  position: absolute;
+  position-anchor: --my-carousel;
 }
 
 .sources ul::scroll-button(left) {
-    right: calc(anchor(left) - 70px);
-    bottom: calc(anchor(top) + 13px);
+  right: calc(anchor(left) - 70px);
+  bottom: calc(anchor(top) + 13px);
 }
 
 .sources ul::scroll-button(right) {
-    left: calc(anchor(right) - 70px);
-    bottom: calc(anchor(top) + 13px);
+  left: calc(anchor(right) - 70px);
+  bottom: calc(anchor(top) + 13px);
 }
 
 .sources ul::scroll-marker-group {
-    position: absolute;
-    position-anchor: --my-carousel;
-    top: calc(anchor(bottom) - 70px);
-    justify-self: anchor-center;
-
-    display: flex;
-    justify-content: center;
-    gap: 20px;
+  position: absolute;
+  position-anchor: --my-carousel;
+  top: calc(anchor(bottom) - 70px);
+  justify-self: anchor-center;
+  display: flex;
+  justify-content: center;
+  gap: 20px;
 }
 
 .sources li::scroll-marker {
-    content: attr(data-accName);
-    width: 16px;
-    height: 16px;
-    background-color: transparent;
-    border: 2px solid black;
-    border-radius: 50%;
-    overflow: hidden;
-    text-indent: 16px;
+  content: attr(data-accName);
+  width: 16px;
+  height: 16px;
+  background-color: transparent;
+  border: 2px solid var(--text);
+  border-radius: 50%;
+  overflow: hidden;
+  text-indent: 16px;
 }
 
 .sources li::scroll-marker:target-current {
-    background-color: black;
+  background-color: var(--text);
 }

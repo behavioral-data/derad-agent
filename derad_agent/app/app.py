@@ -397,6 +397,7 @@ def info_short(token: str):
         "info.html",
         headline=params.get("reply_text", ""),
         reasons=params.get("reasons", []),
+        tone=params.get("tone", ""),
     ), 200
 
 

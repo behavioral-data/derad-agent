@@ -1,59 +1,98 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <link rel="stylesheet" href="{{ url_for('static',filename='info.css') }}">
-    <meta charset="UTF-8">
-    <title>Political Conversations Bot - Research Study</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DeRad Agent — Reply Context</title>
+  <link rel="stylesheet" href="/static/dash/html-design-system.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='info.css') }}">
 </head>
-<body>
-<main>
-    <h2>About this Bot</h2>
-    <p>This bot was created by University of Washington researchers as part of a study to investigate how AI bots affect online political conversations. Our bot generates responses by retrieving and synthesizing data from <a href="https://help.x.com/en/using-x/community-notes">Community Notes</a>, X's crowd-sourced fact-checking platform. We source notes from X's publicly available repository of <a href="https://x.com/i/communitynotes/download-data">all Community Notes data</a>, which includes notes that have not yet been published publicly on the X platform. Responses may contain inaccurate information; please consult linked sources to verify any claims.
-    </p>
+<body data-theme="light">
 
-    {% if headline %}
-    <h2>Bot Reply</h2>
-    <blockquote class="bot-reply">{{ headline }}</blockquote>
+<div class="info-wrap">
 
-    {% if reasons %}
-    <h3>Supporting Evidence</h3>
-    {% for r in reasons %}
-    <div class="reason-card">
-        <p>{{ r.reason }}</p>
-        {% if r.evidence_links %}
-        <ul class="source-links">
+  <header class="info-hdr">
+    <span class="info-wordmark">DeRad Agent</span>
+  </header>
+
+  <div class="callout sky info-context">
+    This bot generates replies by retrieving and synthesizing data from
+    <a href="https://help.x.com/en/using-x/community-notes" rel="noopener noreferrer">X Community Notes</a>,
+    a crowd-sourced fact-checking platform. Sources include notes from the
+    <a href="https://x.com/i/communitynotes/download-data" rel="noopener noreferrer">public Community Notes archive</a>.
+    Responses may contain inaccuracies — verify claims using the sources below.
+  </div>
+
+  {% if headline %}
+  {# ── Short URL mode: bot reply + evidence reasons ── #}
+  {% set parts = headline.split('\n\n') %}
+
+  <section class="info-section">
+    <span class="eyebrow">Bot Reply</span>
+    <blockquote class="info-reply">
+      {% if parts | length > 1 %}
+      <p class="info-reply-lead">{{ parts[0] }}</p>
+      <p class="info-reply-body">{{ parts[1:] | join(' ') }}</p>
+      {% else %}
+      <p class="info-reply-body">{{ headline }}</p>
+      {% endif %}
+    </blockquote>
+  </section>
+
+  {% if reasons %}
+  <section class="info-section">
+    <span class="eyebrow">Supporting Evidence</span>
+    <div class="info-reasons">
+      {% for r in reasons %}
+      <div class="info-reason panel">
+        <div class="info-reason-idx">{{ '%02d' % loop.index }}</div>
+        <div class="info-reason-body">
+          <p>{{ r.reason }}</p>
+          {% if r.evidence_links %}
+          <ul class="info-sources">
             {% for link in r.evidence_links %}
-            <li><a href="{{ link }}">{{ link }}</a></li>
+            <li><a href="{{ link }}" class="info-src-link meta" rel="noopener noreferrer">{{ link }}</a></li>
             {% endfor %}
-        </ul>
-        {% elif r.tweet_id %}
-        <p class="source-tweet"><a href="https://x.com/i/web/status/{{ r.tweet_id }}">View source tweet →</a></p>
-        {% endif %}
+          </ul>
+          {% elif r.tweet_id %}
+          <a class="info-src-link meta" href="https://x.com/i/web/status/{{ r.tweet_id }}" rel="noopener noreferrer">View source tweet →</a>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
     </div>
-    {% endfor %}
-    {% else %}
-    <p><em>No supporting evidence recorded for this reply.</em></p>
-    {% endif %}
+  </section>
+  {% else %}
+  <p class="info-empty-note meta"><em>No supporting evidence recorded for this reply.</em></p>
+  {% endif %}
 
-    {% elif reply %}
-    <h2>About this Post</h2>
-    {{reply|safe}}
+  {% elif reply %}
+  {# ── Long URL mode: tweet embed + community notes carousel ── #}
+  <section class="info-section">
+    <span class="eyebrow">About this Post</span>
+    {{ reply | safe }}
     <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+  </section>
 
-    {% if notes %}
-    <div class="sources">
-        <h3>Community Notes Sources</h3>
-        <ul>
-            {{notes|safe}}
-        </ul>
-    </div>
-    {% else %}
-    <p><em>No Community Notes sources were retrieved for this post.</em></p>
-    {% endif %}
-    {% endif %}
-</main>
-<footer>
-    <p>&copy; 2026 University of Washington</p>
-</footer>
+  {% if notes %}
+  <section class="info-section sources">
+    <span class="eyebrow">Community Notes Sources</span>
+    <ul>{{ notes | safe }}</ul>
+  </section>
+  {% else %}
+  <p class="info-empty-note meta"><em>No Community Notes sources were retrieved for this post.</em></p>
+  {% endif %}
+
+  {% else %}
+  <div class="callout warning info-not-found">
+    <strong>Link expired.</strong> This reply context link has expired or is invalid. Links are valid for 2 hours after posting.
+  </div>
+  {% endif %}
+
+  <footer class="info-footer">
+    <span class="meta">© 2026 University of Washington</span>
+  </footer>
+
+</div>
 </body>
 </html>
