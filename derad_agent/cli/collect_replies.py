@@ -55,11 +55,13 @@ def _collect_one(
 
     for tweet in data:
         tweet_dict = tweet if isinstance(tweet, dict) else (tweet.__dict__ if hasattr(tweet, "__dict__") else {})
-        if tweet_dict.get("in_reply_to_tweet_id") != bot_reply_id and \
-           tweet_dict.get("referenced_tweets"):
-            refs = tweet_dict.get("referenced_tweets") or []
-            if not any(r.get("id") == bot_reply_id and r.get("type") == "replied_to" for r in refs):
-                continue
+        direct = tweet_dict.get("in_reply_to_tweet_id") == bot_reply_id
+        ref_reply = any(
+            r.get("id") == bot_reply_id and r.get("type") == "replied_to"
+            for r in (tweet_dict.get("referenced_tweets") or [])
+        )
+        if not direct and not ref_reply:
+            continue
 
         tweet_id = str(tweet_dict.get("id", ""))
         author_id = str(tweet_dict.get("author_id", ""))
