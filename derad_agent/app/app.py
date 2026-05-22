@@ -87,25 +87,102 @@ _ALLOWED_IDS: set[str] = set(_PARTICIPANTS_BY_ID) | ALLOWED_AUTHOR_IDS
 logger.info("Loaded %d registered participants", len(_PARTICIPANTS_BY_ID))
 
 
-# Short info-URL store: token → {tone, reply_text, reasons}
-# Tokens are ephemeral (lost on restart); users click within minutes of receiving a reply.
+# Info-URL store: token → {tone, reply_text, reasons, parent_id}
+# In-memory cache for fast reads; Azure Tables for durable persistence across restarts.
 _INFO_STORE: dict[str, dict] = {}
 _INFO_STORE_LOCK = threading.Lock()
+_INFO_STORE_TTL = 86400  # 24 h memory cache; Tables holds tokens permanently
+
+_info_table_client = None
+_info_table_init_lock = threading.Lock()
 
 
-_INFO_STORE_TTL = 7200  # 2 hours — well past any reasonable click window
+def _get_info_table():
+    """Return an Azure Table client for InfoTokens, or None if Tables not configured."""
+    global _info_table_client
+    if _info_table_client is not None:
+        return _info_table_client
+    with _info_table_init_lock:
+        if _info_table_client is not None:
+            return _info_table_client
+        if os.getenv("DERAD_EVENTS_BACKEND", "memory").lower() != "tables":
+            return None
+        endpoint = os.getenv("DERAD_TABLES_ENDPOINT")
+        if not endpoint:
+            return None
+        try:
+            from azure.core.exceptions import ResourceExistsError
+            from azure.data.tables import TableServiceClient
+            from azure.identity import DefaultAzureCredential
+            svc = TableServiceClient(endpoint=endpoint, credential=DefaultAzureCredential())
+            try:
+                svc.create_table("InfoTokens")
+                logger.info("Created InfoTokens table")
+            except ResourceExistsError:
+                pass
+            _info_table_client = svc.get_table_client("InfoTokens")
+        except Exception:
+            logger.exception("InfoTokens table init failed; tokens will be in-memory only")
+    return _info_table_client
 
 
-def _make_info_token(tone: str, reply_text: str, reasons: list) -> str:
-    token = secrets.token_urlsafe(6)  # 8-char URL-safe string
+def _make_info_token(tone: str, reply_text: str, reasons: list, *, parent_id: str = "") -> str:
+    token = secrets.token_urlsafe(6)
+    payload = {
+        "tone": tone,
+        "reply_text": reply_text,
+        "reasons": reasons,
+        "parent_id": parent_id,
+        "_ts": time.monotonic(),
+    }
     with _INFO_STORE_LOCK:
-        _INFO_STORE[token] = {
-            "tone": tone,
-            "reply_text": reply_text,
-            "reasons": reasons,
+        _INFO_STORE[token] = payload
+
+    def _persist():
+        table = _get_info_table()
+        if table is None:
+            return
+        try:
+            table.upsert_entity({
+                "PartitionKey": "info",
+                "RowKey": token,
+                "tone": tone,
+                "reply_text": reply_text,
+                "reasons_json": json.dumps(reasons, ensure_ascii=False),
+                "parent_id": parent_id,
+                "created_at": datetime.now(timezone.utc),
+            })
+        except Exception:
+            logger.exception("Failed to persist info token %s to Azure Tables", token)
+
+    threading.Thread(target=_persist, daemon=True, name=f"info-persist-{token}").start()
+    return token
+
+
+def _get_info_params(token: str) -> dict | None:
+    """Look up a token: memory first, then Azure Tables on cache miss."""
+    with _INFO_STORE_LOCK:
+        params = _INFO_STORE.get(token)
+    if params is not None:
+        return params
+    table = _get_info_table()
+    if table is None:
+        return None
+    try:
+        entity = table.get_entity("info", token)
+        params = {
+            "tone": entity.get("tone", ""),
+            "reply_text": entity.get("reply_text", ""),
+            "reasons": json.loads(entity.get("reasons_json", "[]")),
+            "parent_id": entity.get("parent_id", ""),
             "_ts": time.monotonic(),
         }
-    return token
+        with _INFO_STORE_LOCK:
+            _INFO_STORE[token] = params
+        return params
+    except Exception:
+        logger.debug("Info token %s not found in Azure Tables", token)
+        return None
 
 
 def _evict_info_store() -> None:
@@ -117,7 +194,7 @@ def _evict_info_store() -> None:
             for k in stale:
                 del _INFO_STORE[k]
         if stale:
-            logger.debug("Evicted %d stale info tokens", len(stale))
+            logger.debug("Evicted %d stale info tokens from memory cache", len(stale))
 
 
 threading.Thread(target=_evict_info_store, daemon=True, name="info-store-evictor").start()
@@ -258,7 +335,7 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             _finalize("empty_reply")
             return
 
-        token = _make_info_token(tone, reply["text"], reply.get("reasons_detail") or [])
+        token = _make_info_token(tone, reply["text"], reply.get("reasons_detail") or [], parent_id=parent_id)
         with app.app_context():
             info_url = url_for("info_short", token=token, _external=True)
         reply_text = _append_url(reply["text"], info_url)
@@ -389,8 +466,7 @@ def info():
 
 @app.route("/i/<token>", methods=["GET"])
 def info_short(token: str):
-    with _INFO_STORE_LOCK:
-        params = _INFO_STORE.get(token)
+    params = _get_info_params(token)
     if params is None:
         return render_template("info.html"), 404
     return render_template(
@@ -398,6 +474,7 @@ def info_short(token: str):
         headline=params.get("reply_text", ""),
         reasons=params.get("reasons", []),
         tone=params.get("tone", ""),
+        parent_id=params.get("parent_id", ""),
     ), 200
 
 

@@ -6,30 +6,12 @@
   padding: 0 24px 64px;
 }
 
-/* ── Header ──────────────────────────────────────────────────────────────── */
-
-.info-hdr {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 20px 0 18px;
-  border-bottom: 1.5px solid var(--border);
-  margin-bottom: 24px;
-}
-
-.info-wordmark {
-  font-family: var(--serif);
-  font-size: 1rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--text);
-}
-
 /* ── Research context callout ─────────────────────────────────────────────── */
 
 .info-context {
   font-size: 0.85rem;
   line-height: 1.65;
+  margin-top: 24px;
   margin-bottom: 32px;
 }
 
@@ -47,10 +29,18 @@
   border-top: 1px solid var(--border);
 }
 
-.info-section:first-of-type {
+.info-section-first {
   border-top: none;
   margin-top: 0;
   padding-top: 0;
+}
+
+/* ── Embedded tweet ──────────────────────────────────────────────────────── */
+
+.info-tweet-embed {
+  margin-top: 12px;
+  display: flex;
+  justify-content: center;
 }
 
 .info-section-hd {
@@ -167,6 +157,17 @@
 
 [data-theme="light"] .info-note-text {
   color: #666;
+}
+
+/* ── Community note tweet link ────────────────────────────────────────────── */
+
+.info-reason-links {
+  margin-top: 6px;
+}
+
+.info-tweet-link {
+  display: inline-block;
+  margin-top: 4px;
 }
 
 /* ── Source links ─────────────────────────────────────────────────────────── */

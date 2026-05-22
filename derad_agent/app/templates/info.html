@@ -3,17 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DeRad Agent — Reply Context</title>
+  <title>Reply Context</title>
   <link rel="stylesheet" href="/static/dash/html-design-system.css">
   <link rel="stylesheet" href="{{ url_for('static', filename='info.css') }}">
 </head>
 <body data-theme="light">
 
 <div class="info-wrap">
-
-  <header class="info-hdr">
-    <span class="info-wordmark">DeRad Agent</span>
-  </header>
 
   <div class="callout sky info-context">
     This bot generates replies by retrieving and synthesizing data from
@@ -25,9 +21,20 @@
 
   {% if headline %}
   {# ── Short URL mode: bot reply + evidence reasons ── #}
-  {% set parts = headline.split('\n\n') %}
 
-  <section class="info-section">
+  {% if parent_id %}
+  <section class="info-section info-section-first">
+    <span class="eyebrow">Original Post</span>
+    <div class="info-tweet-embed">
+      <blockquote class="twitter-tweet" data-conversation="none">
+        <a href="https://twitter.com/i/web/status/{{ parent_id }}"></a>
+      </blockquote>
+    </div>
+  </section>
+  {% endif %}
+
+  {% set parts = headline.split('\n\n') %}
+  <section class="info-section{% if not parent_id %} info-section-first{% endif %}">
     <span class="eyebrow">Bot Reply</span>
     <blockquote class="info-reply">
       {% if parts | length > 1 %}
@@ -54,15 +61,18 @@
             <p class="info-note-text">{{ r.note_text }}</p>
           </div>
           {% endif %}
-          {% if r.evidence_links %}
-          <ul class="info-sources">
-            {% for link in r.evidence_links %}
-            <li><a href="{{ link }}" class="info-src-link meta" rel="noopener noreferrer">{{ link }}</a></li>
-            {% endfor %}
-          </ul>
-          {% elif r.tweet_id %}
-          <a class="info-src-link meta" href="https://x.com/i/web/status/{{ r.tweet_id }}" rel="noopener noreferrer">View source tweet →</a>
-          {% endif %}
+          <div class="info-reason-links">
+            {% if r.evidence_links %}
+            <ul class="info-sources">
+              {% for link in r.evidence_links %}
+              <li><a href="{{ link }}" class="info-src-link meta" rel="noopener noreferrer">{{ link }}</a></li>
+              {% endfor %}
+            </ul>
+            {% endif %}
+            {% if r.tweet_id %}
+            <a class="info-src-link meta info-tweet-link" href="https://x.com/i/web/status/{{ r.tweet_id }}" rel="noopener noreferrer">View tweet this note was added to →</a>
+            {% endif %}
+          </div>
         </div>
       </div>
       {% endfor %}
@@ -74,10 +84,9 @@
 
   {% elif reply %}
   {# ── Long URL mode: tweet embed + community notes carousel ── #}
-  <section class="info-section">
+  <section class="info-section info-section-first">
     <span class="eyebrow">About this Post</span>
     {{ reply | safe }}
-    <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
   </section>
 
   {% if notes %}
@@ -91,7 +100,7 @@
 
   {% else %}
   <div class="callout warning info-not-found">
-    <strong>Link expired.</strong> This reply context link has expired or is invalid. Links are valid for 2 hours after posting.
+    <strong>Link not found.</strong> This reply context link is invalid or has been removed.
   </div>
   {% endif %}
 
@@ -100,5 +109,10 @@
   </footer>
 
 </div>
+
+{% if parent_id or reply %}
+<script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+{% endif %}
+
 </body>
 </html>
