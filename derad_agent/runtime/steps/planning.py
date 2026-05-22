@@ -44,13 +44,13 @@ def step_1_generate_queries(
         raw_output = extract_text_from_response(raw_output_obj)
     except Exception as e:
         logger.log_warning(f"Planner LLM call failed (content filter or API error): {e}")
-        return True, [statement]
+        return False, []
 
     logger.log_debug(f"Response received: {len(raw_output)} chars")
 
     try:
         parsed = parse_json_response(raw_output)
-        factcheckable = bool(parsed.get("factcheckable", True))
+        factcheckable = bool(parsed.get("factcheckable", False))
         if not factcheckable:
             logger.log_info("Planner: tweet is not factcheckable — skipping retrieval")
             return False, []
@@ -64,8 +64,8 @@ def step_1_generate_queries(
     except Exception as e:
         logger.log_warning(f"Failed to parse JSON planner output: {e}")
         logger.log_warning(f"Raw planner output:\n{raw_output[:1000]}")
-        queries = [statement]
-        factcheckable = True
+        queries = []
+        factcheckable = False
 
     return factcheckable, queries
 

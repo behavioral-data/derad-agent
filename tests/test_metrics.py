@@ -20,7 +20,6 @@ os.environ.setdefault("AZURE_OPENAI_API_KEY", "test_key")
 os.environ.setdefault("AZURE_OPENAI_ENDPOINT", "https://test.example/")
 os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_EMBED", "test-embed")
 os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_CHAT", "test-chat")
-os.environ.setdefault("DERAD_ALLOWED_AUTHOR_IDS", "111,222")
 os.environ.setdefault("BOT_USER_ID_NEUTRAL", "999")
 
 from derad_agent.app import app as app_module  # noqa: E402

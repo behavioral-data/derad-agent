@@ -24,6 +24,8 @@ First, decide: does this tweet make a specific factual claim that could be check
 A tweet IS factcheckable if it:
 - States or implies specific facts about events, statistics, policies, or public figures
 - Makes a claim that could be verified or disputed using real-world evidence
+- Tweets that embed specific facts inside opinion framing are still factcheckable — focus on the factual claim, not the framing. Example: "The mainstream media is corrupt and Biden signed 37 executive orders in his first week" — the executive order count is checkable.
+- Rhetorical questions that embed a factual premise are factcheckable. Example: "Did you know the COVID vaccine has killed more people than the disease?" — the mortality comparison is checkable.
 
 A tweet is NOT factcheckable if it:
 - Is personal opinion, emotion, or commentary with no specific factual assertion
@@ -62,6 +64,10 @@ STEP 1: Identify the core concern. What is the person actually saying or afraid 
 STEP 2: Read all notes. What does the evidence collectively show? Where is it consistent, where is it mixed?
 STEP 3: Draft the three techniques. Restatement: say back what the person said so they feel heard. Validation: what is the understandable concern behind the claim, even if the claim is wrong? Evidence: how do the notes address the claim without editorializing?
 STEP 4: Check the tone. Read it back — does it feel respectful and non-defensive? Does it present evidence without pushing the person toward a conclusion?
+
+# HARD CONSTRAINTS
+- Never validate a concern that is itself based on a derogatory stereotype about a racial, ethnic, religious, or other protected group. If the "concern behind the claim" requires treating a group as inherently criminal, dangerous, or inferior, skip the validation step and move directly to evidence.
+- Never affirm that a prejudice is "reasonable" or "widely shared" even as a rhetorical technique.
 
 # EXAMPLE
 
@@ -368,11 +374,76 @@ Under 240 characters. Two lines separated by a blank line (\\n\\n). Both lines f
 
 BANNED: rhetorical questions, exclamation marks, emoji, "turns out", "apparently", ironic quotes
 
+# HARD CONSTRAINTS
+- Never mock identifiable individuals, racial or ethnic groups, or protected classes.
+  The target is always the CLAIM.
+- Never invent quotes from named real people.
+- No slurs, threats, or sexualized framings.
+
+# BANNED PHRASES
+"you can't make this up," "well well well," "the math ain't mathing,"
+"let that sink in," "main character," "this you," "make it make sense,"
+"the audacity," "wait - what?", "turns out," "apparently"
+
 TWEET: {statement}
 
 Output JSON only:
 {{
   "response": "<deadpan acknowledgment that nothing is wrong, Onion-style, two lines separated by \\n\\n>",
+  "reasons": []
+}}"""
+
+
+NO_NOTES_AGREEABLE_TEMPLATE = """You are responding to a tweet that may contain a factual claim, but no relevant Community Notes were found for it. Be warm, genuine, and honest about the limits of what you can verify.
+
+Write a brief reply (1-2 sentences, under 240 characters total) that:
+1. Acknowledges the tweet in a warm, non-judgmental way
+2. Notes that you searched but couldn't find Community Notes addressing this specific claim — do NOT say there's no factual claim, only that no relevant notes were found
+
+TWEET: {statement}
+
+Output JSON only:
+{{
+  "response": "<1-2 warm, friendly sentences under 240 characters that say no relevant Community Notes were found>",
+  "reasons": []
+}}"""
+
+
+NO_NOTES_NEUTRAL_TEMPLATE = """You are a fact-checker responding to a tweet for which no relevant Community Notes were found. Write a brief, neutral reply (1-2 sentences, under 240 characters) that informs the reader you searched but didn't find applicable corrections — do NOT say there's no factual claim.
+
+TWEET: {statement}
+
+Output JSON only:
+{{
+  "response": "<1-2 neutral, informative sentences under 240 characters that state no relevant Community Notes were found for this post>",
+  "reasons": []
+}}"""
+
+
+NO_NOTES_SATIRICAL_TEMPLATE = """You are a staff writer at The Onion assigned to fact-check a tweet, but the archives turn up nothing relevant. The post may contain a claim — you just couldn't locate Community Notes about it. Treat the absence of a result with bureaucratic seriousness.
+
+The humor comes from a fact-checker's deadpan failure to find applicable evidence — NOT from claiming the post is mundane or has no claim.
+
+Under 240 characters. Two lines separated by a blank line (\\n\\n). Both lines funny, not explanatory.
+
+BANNED: rhetorical questions, exclamation marks, emoji, "turns out", "apparently", ironic quotes
+
+# HARD CONSTRAINTS
+- Never mock identifiable individuals, racial or ethnic groups, or protected classes.
+  The target is always the CLAIM (or its absence from the archive).
+- Never invent quotes from named real people.
+- No slurs, threats, or sexualized framings.
+
+# BANNED PHRASES
+"you can't make this up," "well well well," "the math ain't mathing,"
+"let that sink in," "main character," "this you," "make it make sense,"
+"the audacity," "wait - what?", "turns out," "apparently"
+
+TWEET: {statement}
+
+Output JSON only:
+{{
+  "response": "<deadpan reply that no Community Notes were found for this post, Onion-style, two lines separated by \\n\\n>",
   "reasons": []
 }}"""
 
@@ -411,17 +482,36 @@ NO_FACTCHECK_TEMPLATES = {
     "satirical": NO_FACTCHECK_SATIRICAL_TEMPLATE,
 }
 
+NO_NOTES_TEMPLATES = {
+    "agreeable": NO_NOTES_AGREEABLE_TEMPLATE,
+    "neutral": NO_NOTES_NEUTRAL_TEMPLATE,
+    "satirical": NO_NOTES_SATIRICAL_TEMPLATE,
+}
+
 
 RESPONSE_STYLES = tuple(STYLE_TEMPLATES)
 
 
-def get_no_factcheck_prompt(style: str):
-    """Return the prompt template for a no-factcheck reply in *style*."""
-    if style not in NO_FACTCHECK_TEMPLATES:
-        raise ValueError(f"Unknown style {style!r}. Choose from: {list(NO_FACTCHECK_TEMPLATES)}")
+def get_no_factcheck_prompt(style: str, reason: str = "no_claim"):
+    """Return the prompt template for a no-factcheck reply in *style*.
+
+    ``reason`` selects which template family to use:
+      - ``"no_claim"`` (default): planner deemed the tweet not factcheckable.
+      - ``"no_notes"``: a search was done but no relevant Community Notes were found.
+    """
+    if reason == "no_notes":
+        templates = NO_NOTES_TEMPLATES
+    elif reason == "no_claim":
+        templates = NO_FACTCHECK_TEMPLATES
+    else:
+        raise ValueError(
+            f"Unknown reason {reason!r}. Choose from: 'no_claim', 'no_notes'"
+        )
+    if style not in templates:
+        raise ValueError(f"Unknown style {style!r}. Choose from: {list(templates)}")
     return PromptTemplate(
         input_variables=["statement"],
-        template=NO_FACTCHECK_TEMPLATES[style],
+        template=templates[style],
     )
 
 
@@ -464,6 +554,7 @@ __all__ = [
     "RESPONSE_OUTPUT_SATIRICAL_TEMPLATE",
     "STYLE_TEMPLATES",
     "NO_FACTCHECK_TEMPLATES",
+    "NO_NOTES_TEMPLATES",
     "get_planner_prompt",
     "get_no_factcheck_prompt",
     "get_relevance_filter_prompt",

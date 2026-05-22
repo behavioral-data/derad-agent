@@ -112,8 +112,9 @@ az webapp restart --name azapplikxqqfjcgk72 --resource-group rg-derad-agent
 | Setting                    | Current                  | Production value    |
 | -------------------------- | ------------------------ | ------------------- |
 | `DERAD_DRY_RUN`            | `true`                   | `false`             |
-| `DERAD_ALLOWED_AUTHOR_IDS` | `111,222,333` (test IDs) | real bot author IDs |
-| `DERAD_RESTRICT_TO_REGISTERED` | `true` | `false` (or keep `true` during supervised launch) |
+
+The bot now replies to every mention — there is no allow-list. Author registration in
+the Participants table is used for study tracking metadata only.
 
 Update via:
 
@@ -193,7 +194,6 @@ You need the `Storage Table Data Reader` role on `azsalikxqqfjcgk72` — ask @ad
 - [ ] Generate API key/secret, bearer token, and per-bot access token pairs
 - [ ] Populate all KV secrets (bearer token, keys, per-bot tokens, user IDs)
 - [ ] Set `DERAD_DRY_RUN=false` in App Service
-- [ ] Update `DERAD_ALLOWED_AUTHOR_IDS` to real allowed author IDs (or set `DERAD_RESTRICT_TO_REGISTERED=false`)
 - [ ] Restart App Service and verify `/healthz` returns `index_loaded: true`
 - [ ] Check App Service logs for "Filtered stream connected" — confirms the stream is live
 - [ ] Send a test mention from an allowed account and check `MentionEvents` table

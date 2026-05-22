@@ -2,8 +2,8 @@
 """End-to-end smoke test for the derad-agent study workflow.
 
 Exercises every phase in one process with no external API calls:
-  1. Participant registration
-  2. Allow-list guard (registered user passes, unregistered is dropped)
+  1. Participant registration (metadata only — bot replies to everyone)
+  2. Open dispatch (unregistered user is accepted, no allow-list gate)
   3. Mention → process_mention → study_code + study_day stamped
   4. MentionEvent written to store
   5. Poll engagement (3-day-old reply, mocked X metrics)
@@ -23,7 +23,6 @@ import sys
 os.environ["DERAD_EVENTS_BACKEND"] = "memory"
 os.environ["DERAD_PARTICIPANTS_BACKEND"] = "memory"
 os.environ["DERAD_INGEST_MODE"] = "off"          # prevent streamer from starting
-os.environ["DERAD_RESTRICT_TO_REGISTERED"] = "true"
 os.environ["DERAD_DRY_RUN"] = "false"            # override .env so we test the full path
 os.environ.setdefault("SERVER_NAME", "localhost:5000")
 os.environ.setdefault("X_API_KEY", "smoke-fake-key")
@@ -107,9 +106,9 @@ assert_eq("username", p_store.get("test_author_123").author_username, "studypart
 assert_eq("list_all length", len(p_store.list_all()), 1)
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Phase 2 — Import app (reads participants store at module level)
+# Phase 2 — Import app (participants metadata only, no allow-list gate)
 # ═════════════════════════════════════════════════════════════════════════════
-section("Phase 2 · App startup with participant in allow-list")
+section("Phase 2 · App startup (participant metadata loaded, no allow-list)")
 
 # Import app NOW so _PARTICIPANTS_BY_ID is populated from our store.
 from derad_agent.app import app as app_module
@@ -124,27 +123,37 @@ events_module.reset_store(e_store)
 metrics_module._reset_counts_for_test()
 
 assert_true("participant in _PARTICIPANTS_BY_ID", "test_author_123" in app_module._PARTICIPANTS_BY_ID)
-assert_true("participant in _ALLOWED_IDS", "test_author_123" in app_module._ALLOWED_IDS)
-print(f"  {_CYAN}allow-list size: {len(app_module._ALLOWED_IDS)}{_RESET}")
+print(f"  {_CYAN}participants loaded (metadata only): {len(app_module._PARTICIPANTS_BY_ID)}{_RESET}")
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Phase 3 — Allow-list guard: unregistered user is dropped
+# Phase 3 — Open dispatch: unregistered authors are accepted (no allow-list)
 # ═════════════════════════════════════════════════════════════════════════════
-section("Phase 3 · Allow-list guard")
+section("Phase 3 · Open dispatch (no allow-list gate)")
 
-# Unregistered author
+
+class _SyncThread:
+    """Runs process_mention synchronously for testing."""
+    def __init__(self, target=None, args=(), kwargs=None, daemon=False, **_):
+        self._target, self._args = target, args
+    def start(self):
+        self._target(*self._args)
+
+
+# Unregistered author should now be accepted (no allow-list gate)
 unregd_tweet = {
     "id_str": "m_unregistered",
     "in_reply_to_status_id_str": "parent_001",
     "user": {"id_str": "unknown_author_456"},
 }
-result = app_module._dispatch_tweet("neutral", unregd_tweet, RECEIVED)
-assert_eq("unregistered author → dropped (False)", result, False)
+with patch.object(app_module.threading, "Thread", _SyncThread):
+    with patch.object(app_module, "fetch_tweet", return_value=None):
+        result = app_module._dispatch_tweet("neutral", unregd_tweet, RECEIVED)
+assert_eq("unregistered author → accepted (True)", result, True)
 
 drop_reasons = [d.drop_reason for d in e_store.drops]
-assert_true("drop reason = unregistered", "unregistered" in drop_reasons)
+assert_true("no 'unregistered' drop reason recorded", "unregistered" not in drop_reasons)
 
-# Registered author: set up fresh dedup store so previous dispatch doesn't block
+# Registered author: fresh dedup so previous dispatch doesn't block
 dedup_module._default_store = dedup_module.InMemoryStore()
 metrics_module._reset_counts_for_test()
 
@@ -153,13 +162,6 @@ registered_tweet = {
     "in_reply_to_status_id_str": "parent_002",
     "user": {"id_str": "test_author_123"},
 }
-
-class _SyncThread:
-    """Runs process_mention synchronously for testing."""
-    def __init__(self, target=None, args=(), kwargs=None, daemon=False, **_):
-        self._target, self._args = target, args
-    def start(self):
-        self._target(*self._args)
 
 with patch.object(app_module.threading, "Thread", _SyncThread):
     with patch.object(app_module, "fetch_tweet", return_value=None):

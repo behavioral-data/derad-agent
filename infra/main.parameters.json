@@ -19,12 +19,6 @@
     },
     "botHandleSatirical": {
       "value": "${BOT_HANDLE_SATIRICAL=eddie_bot}"
-    },
-    "restrictToRegistered": {
-      "value": true
-    },
-    "allowedAuthorIds": {
-      "value": "${DERAD_ALLOWED_AUTHOR_IDS=}"
     }
   }
 }

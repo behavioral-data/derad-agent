@@ -192,11 +192,20 @@ def step_compose_reply(
     }
 
 
-def step_compose_no_factcheck_reply(statement: str, style: str = "neutral") -> Dict[str, Any]:
-    """Generate a tone-appropriate reply when the tweet has no factcheckable claim
-    or when no relevant Community Notes were found."""
+def step_compose_no_factcheck_reply(
+    statement: str,
+    style: str = "neutral",
+    *,
+    reason: str = "no_claim",
+) -> Dict[str, Any]:
+    """Generate a tone-appropriate reply when no grounded reply is available.
+
+    ``reason`` controls the template family used:
+      - ``"no_claim"``: planner gate fired — tweet has no factcheckable claim.
+      - ``"no_notes"``: search ran but no relevant Community Notes were found.
+    """
     provider = STYLE_LLM_PROVIDERS.get(style, "openai")
-    prompt = get_no_factcheck_prompt(style)
+    prompt = get_no_factcheck_prompt(style, reason=reason)
     llm = get_llm(
         temperature=None,
         max_tokens=200,
@@ -206,15 +215,15 @@ def step_compose_no_factcheck_reply(statement: str, style: str = "neutral") -> D
     )
     chain = prompt | llm
 
-    raw = chain.invoke({"statement": statement})
-    text = extract_text_from_response(raw)
     try:
+        raw = chain.invoke({"statement": statement})
+        text = extract_text_from_response(raw)
         parsed = parse_json_response(text)
+        response_text = str(parsed.get("response") or "").strip()
     except Exception as exc:
-        logger.warning("No-factcheck reply parse failed: %s", exc)
-        parsed = {}
+        logger.warning("No-factcheck reply generation failed (reason=%s): %s", reason, exc)
+        response_text = ""
 
-    response_text = str(parsed.get("response") or "").strip()
     if not response_text:
         response_text = "No Community Notes corrections found for this post."
 

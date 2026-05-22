@@ -80,7 +80,6 @@ DERAD_AGENT_INDEX_ROOT=/projects/bdata/advaitmb/derad-agent/indexes
 # Local dev settings — keep ingest off so prod stream isn't disrupted
 DERAD_INGEST_MODE=off
 DERAD_DRY_RUN=false
-DERAD_RESTRICT_TO_REGISTERED=false
 SERVER_NAME=localhost:5001
 EOF
 

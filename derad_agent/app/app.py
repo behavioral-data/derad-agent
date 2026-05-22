@@ -139,20 +139,49 @@ def _make_info_token(tone: str, reply_text: str, reasons: list, *, parent_id: st
         table = _get_info_table()
         if table is None:
             return
+        # Azure Tables enforces a 64 KiB cap per string property. Verbose notes
+        # can blow past this and silently lose the persisted token. Stay well
+        # under the limit; truncate the longest field first, then bail out
+        # entirely if it's still too large.
+        reasons_json = json.dumps(reasons, ensure_ascii=False)
+        _LIMIT = 60_000
+        if len(reasons_json.encode("utf-8")) > _LIMIT:
+            logger.warning(
+                "reasons_json for token %s exceeds %d bytes; truncating note_text fields",
+                token, _LIMIT,
+            )
+            truncated = []
+            for r in reasons or []:
+                if isinstance(r, dict):
+                    r2 = dict(r)
+                    nt = r2.get("note_text")
+                    if isinstance(nt, str) and len(nt) > 500:
+                        r2["note_text"] = nt[:500]
+                    truncated.append(r2)
+                else:
+                    truncated.append(r)
+            reasons_json = json.dumps(truncated, ensure_ascii=False)
+            if len(reasons_json.encode("utf-8")) > _LIMIT:
+                logger.error(
+                    "reasons_json for token %s still exceeds %d bytes after truncation; "
+                    "persisting empty reasons list",
+                    token, _LIMIT,
+                )
+                reasons_json = "[]"
         try:
             table.upsert_entity({
                 "PartitionKey": "info",
                 "RowKey": token,
                 "tone": tone,
                 "reply_text": reply_text,
-                "reasons_json": json.dumps(reasons, ensure_ascii=False),
+                "reasons_json": reasons_json,
                 "parent_id": parent_id,
                 "created_at": datetime.now(timezone.utc),
             })
         except Exception:
             logger.exception("Failed to persist info token %s to Azure Tables", token)
 
-    threading.Thread(target=_persist, daemon=True, name=f"info-persist-{token}").start()
+    threading.Thread(target=_persist, daemon=False, name=f"info-persist-{token}").start()
     return token
 
 
@@ -204,7 +233,7 @@ def _update_info_token(token: str, **fields) -> None:
         except Exception:
             logger.exception("Failed to update info token %s in Azure Tables", token)
 
-    threading.Thread(target=_persist_update, daemon=True, name=f"info-update-{token}").start()
+    threading.Thread(target=_persist_update, daemon=False, name=f"info-update-{token}").start()
 
 
 def _evict_info_store() -> None:
@@ -219,7 +248,31 @@ def _evict_info_store() -> None:
             logger.debug("Evicted %d stale info tokens from memory cache", len(stale))
 
 
-threading.Thread(target=_evict_info_store, daemon=True, name="info-store-evictor").start()
+# Gunicorn forks workers AFTER module import, and threads do not survive fork.
+# Starting the evictor at module level means forked workers never evict — the
+# in-memory _INFO_STORE grows unbounded. Defer the start to first request via
+# a before_request hook so each worker gets its own evictor.
+_evictor_started = False
+_evictor_start_lock = threading.Lock()
+
+
+def _ensure_evictor_started() -> None:
+    global _evictor_started
+    if _evictor_started:
+        return
+    with _evictor_start_lock:
+        if _evictor_started:
+            return
+        # Double-check by name in case another path already started it in this process.
+        if any(t.name == "info-store-evictor" for t in threading.enumerate()):
+            _evictor_started = True
+            return
+        threading.Thread(
+            target=_evict_info_store,
+            daemon=True,
+            name="info-store-evictor",
+        ).start()
+        _evictor_started = True
 
 
 # 4-letter study code derived deterministically from reply_id.
@@ -237,12 +290,35 @@ def _make_study_code(reply_id: str) -> str:
     return "".join(code)
 
 
-def _is_self_reply(tweet: dict, tone: str) -> bool:
+def _is_self_reply(tweet: dict, tone: str) -> tuple[bool, str]:
+    """Return ``(should_drop, reason)``.
+
+    ``reason`` is ``"self_reply"`` when the mention author matches the bot's
+    configured user id, or ``"self_reply_unconfigured"`` when the bot id env
+    var is unset (we still fail closed but tag the drop so analytics can
+    distinguish misconfiguration from genuine self-replies).
+    """
     bot_id = BOT_USER_ID_BY_TONE.get(tone)
     if not bot_id:
-        logger.warning("BOT_USER_ID for tone=%s is unset — skipping mention as self-reply fail-closed", tone)
-        return True
-    return (tweet.get("user") or {}).get("id_str") == bot_id
+        logger.warning(
+            "BOT_USER_ID for tone=%s is unset — skipping mention as self-reply fail-closed",
+            tone,
+        )
+        return True, "self_reply_unconfigured"
+    if (tweet.get("user") or {}).get("id_str") == bot_id:
+        return True, "self_reply"
+    return False, "self_reply"
+
+
+# Startup warning for missing BOT_USER_ID env vars — surfaces misconfiguration
+# before the first mention silently fails closed.
+for _tone, _bot_id in BOT_USER_ID_BY_TONE.items():
+    if not _bot_id:
+        logger.warning(
+            "BOT_USER_ID_%s is unset at import time — all mentions for tone=%s "
+            "will be dropped with reason=self_reply_unconfigured",
+            _tone.upper(), _tone,
+        )
 
 
 def _build_info_url(tone: str, tweet_ids, note_ids, reply_id: str = "") -> str:
@@ -357,6 +433,11 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             _finalize("empty_reply")
             return
 
+        # Distinguish grounded factcheck replies from no-factcheck fallbacks for
+        # downstream research analysis. reasons_detail is populated only when the
+        # reply was grounded in Community Notes.
+        ev.reply_type = "factcheck" if reply.get("reasons_detail") else "no_factcheck"
+
         token = _make_info_token(tone, reply["text"], reply.get("reasons_detail") or [], parent_id=parent_id)
         with app.app_context():
             info_url = url_for("info_short", token=token, _external=True)
@@ -423,9 +504,10 @@ def _dispatch_tweet(tone: str, tweet: dict, received_at_utc: datetime) -> bool:
               extra={"has_mention_id": bool(mention_id), "has_parent_id": bool(parent_id)})
         return False
 
-    if _is_self_reply(tweet, tone):
-        logger.info("Skipping self-reply %s (tone=%s)", mention_id, tone)
-        _drop("self_reply", mention_id=mention_id, author_id=author_id)
+    is_self, self_reason = _is_self_reply(tweet, tone)
+    if is_self:
+        logger.info("Skipping self-reply %s (tone=%s reason=%s)", mention_id, tone, self_reason)
+        _drop(self_reason, mention_id=mention_id, author_id=author_id)
         return False
 
     store = get_store()
@@ -455,6 +537,14 @@ def _dispatch_tweet(tone: str, tweet: dict, received_at_utc: datetime) -> bool:
         daemon=False,
     ).start()
     return True
+
+
+@app.before_request
+def _before_request_start_evictor():
+    """Lazily start the info-store evictor on the first request in this worker
+    process. Module-level start does not survive gunicorn fork; this hook
+    ensures every worker has exactly one evictor thread."""
+    _ensure_evictor_started()
 
 
 @app.route("/info", methods=["GET"])

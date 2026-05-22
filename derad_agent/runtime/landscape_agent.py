@@ -67,7 +67,9 @@ def run_landscape_agent(
     factcheckable, queries = step_1_generate_queries(statement=statement, logger=logger)
 
     if not factcheckable:
-        reply = step_compose_no_factcheck_reply(statement=statement, style=style)
+        reply = step_compose_no_factcheck_reply(
+            statement=statement, style=style, reason="no_claim"
+        )
         return {
             "statement": statement,
             "queries": [],
@@ -111,7 +113,9 @@ def run_landscape_agent(
 
     if not selected_notes:
         logger.log_info("No relevant notes after filtering — using no-factcheck fallback")
-        reply = step_compose_no_factcheck_reply(statement=statement, style=style)
+        reply = step_compose_no_factcheck_reply(
+            statement=statement, style=style, reason="no_notes"
+        )
     else:
         reply = step_compose_reply(
             statement=statement,

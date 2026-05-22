@@ -78,6 +78,9 @@ class MentionEvent:
 
     # Outcome
     outcome: str = "replied"  # 'replied' | 'pipeline_error' | 'x_post_error' | 'parent_fetch_failed' | 'empty_reply'
+    # reply_type distinguishes a grounded factcheck reply ('factcheck') from a
+    # planner/empty-notes fallback ('no_factcheck'). None when no reply was sent.
+    reply_type: Optional[str] = None
     error_class: Optional[str] = None
     error_detail: Optional[str] = None
 
@@ -297,6 +300,7 @@ class TablesEventsStore:
             "reply_posted_utc": ev.reply_posted_utc,
             "pipeline_ms": ev.pipeline_ms,
             "outcome": ev.outcome,
+            "reply_type": ev.reply_type,
             "error_class": ev.error_class,
             "error_detail": self._truncate(ev.error_detail, cap=1000),
             "study_code": ev.study_code,
@@ -445,7 +449,13 @@ _default_lock = threading.Lock()
 def _build_default_store() -> EventsStore:
     backend = os.getenv("DERAD_EVENTS_BACKEND", "memory").lower()
     if backend == "tables":
-        endpoint = os.environ["DERAD_TABLES_ENDPOINT"]
+        endpoint = os.getenv("DERAD_TABLES_ENDPOINT")
+        if not endpoint:
+            logger.warning(
+                "DERAD_EVENTS_BACKEND=tables but DERAD_TABLES_ENDPOINT is unset; "
+                "falling back to InMemoryEventsStore"
+            )
+            return InMemoryEventsStore()
         logger.info("Events store: TablesEventsStore at %s", endpoint)
         return TablesEventsStore(endpoint)
     logger.info("Events store: InMemoryEventsStore")

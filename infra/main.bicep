@@ -29,12 +29,6 @@ param botHandleAgreeable string = 'aggiexbot'
 param botHandleNeutral string = 'nelliexbot'
 param botHandleSatirical string = 'eddiexbot'
 
-@description('Restrict to allow-listed authors during supervised launch.')
-param restrictToRegistered bool = true
-
-@description('Comma-separated X user ids that are allowed when restricted is true.')
-param allowedAuthorIds string = ''
-
 @description('Email for cost and webhook alert notifications. Empty = rules are created but notify nobody.')
 param alertEmail string = ''
 
@@ -134,14 +128,15 @@ resource mentionEventsTable 'Microsoft.Storage/storageAccounts/tableServices/tab
   name: 'MentionEvents'
 }
 
-// Mirror of the drops we didn't process — dedup hits, rate-limit, allow-list,
-// self-reply, no-parent, invalid payload. Lets us characterize filtered traffic.
+// Mirror of the drops we didn't process — dedup hits, rate-limit, self-reply,
+// no-parent, invalid payload. Lets us characterize filtered traffic.
 resource mentionDropsTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2024-01-01' = {
   parent: tableSvc
   name: 'MentionDrops'
 }
 
-// Registered study participants — source of truth for the allow-list guard.
+// Registered study participants — metadata only (enrolment, tone assignment).
+// The bot now replies to every mention; this table is read for study tracking.
 resource participantsTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2024-01-01' = {
   parent: tableSvc
   name: 'Participants'
@@ -221,8 +216,6 @@ resource appService 'Microsoft.Web/sites@2024-11-01' = {
         { name: 'DERAD_AGENT_INDEX_ROOT', value: '/app/indexes' }
         { name: 'SERVER_NAME', value: '${appName}.azurewebsites.net' }
         { name: 'PREFERRED_URL_SCHEME', value: 'https' }
-        { name: 'DERAD_RESTRICT_TO_REGISTERED', value: string(restrictToRegistered) }
-        { name: 'DERAD_ALLOWED_AUTHOR_IDS', value: allowedAuthorIds }
         { name: 'DERAD_RATE_LIMIT_PER_SEC', value: '3' }
         { name: 'DERAD_POST_SOURCES_TWEET', value: 'false' }
         { name: 'DERAD_MAX_MENTIONS_PER_DAY', value: '500' }
