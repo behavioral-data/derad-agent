@@ -15,7 +15,7 @@ from html import unescape
 from typing import Any, Dict, List, Optional, Sequence
 
 from derad_agent.llm.config import get_llm, STYLE_LLM_PROVIDERS
-from derad_agent.llm.prompts import get_style_prompt
+from derad_agent.llm.prompts import get_style_prompt, get_no_factcheck_prompt
 
 from ._helpers import extract_text_from_response, parse_json_response
 
@@ -192,4 +192,37 @@ def step_compose_reply(
     }
 
 
-__all__ = ["step_compose_reply"]
+def step_compose_no_factcheck_reply(statement: str, style: str = "neutral") -> Dict[str, Any]:
+    """Generate a tone-appropriate reply when the tweet has no factcheckable claim
+    or when no relevant Community Notes were found."""
+    provider = STYLE_LLM_PROVIDERS.get(style, "openai")
+    prompt = get_no_factcheck_prompt(style)
+    llm = get_llm(
+        temperature=None,
+        max_tokens=200,
+        reasoning_effort="low",
+        text_verbosity="low",
+        provider=provider,
+    )
+    chain = prompt | llm
+
+    raw = chain.invoke({"statement": statement})
+    text = extract_text_from_response(raw)
+    try:
+        parsed = parse_json_response(text)
+    except Exception as exc:
+        logger.warning("No-factcheck reply parse failed: %s", exc)
+        parsed = {}
+
+    response_text = str(parsed.get("response") or "").strip()
+    if not response_text:
+        response_text = "No Community Notes corrections found for this post."
+
+    return {
+        "statement": statement,
+        "response": response_text,
+        "reasons": [],
+    }
+
+
+__all__ = ["step_compose_reply", "step_compose_no_factcheck_reply"]

@@ -14,7 +14,12 @@ from .notes_index import (
     retrieve_tweets,
     select_recent_helpful_notes,
 )
-from .steps import step_1_generate_queries, step_filter_notes_by_relevance, step_compose_reply
+from .steps import (
+    step_1_generate_queries,
+    step_filter_notes_by_relevance,
+    step_compose_reply,
+    step_compose_no_factcheck_reply,
+)
 
 
 def run_landscape_agent(
@@ -59,7 +64,17 @@ def run_landscape_agent(
         f"Loaded notes index: {len(index.tweet_ids):,} tweets, {index.total_notes:,} notes"
     )
 
-    queries = step_1_generate_queries(statement=statement, logger=logger)
+    factcheckable, queries = step_1_generate_queries(statement=statement, logger=logger)
+
+    if not factcheckable:
+        reply = step_compose_no_factcheck_reply(statement=statement, style=style)
+        return {
+            "statement": statement,
+            "queries": [],
+            "retrieved_tweets": [],
+            "selected_notes": [],
+            "reply": reply,
+        }
 
     excluded = [exclude_tweet_id] if exclude_tweet_id else []
 
@@ -94,11 +109,15 @@ def run_landscape_agent(
             logger=logger,
         )
 
-    reply = step_compose_reply(
-        statement=statement,
-        notes=selected_notes,
-        style=style,
-    )
+    if not selected_notes:
+        logger.log_info("No relevant notes after filtering — using no-factcheck fallback")
+        reply = step_compose_no_factcheck_reply(statement=statement, style=style)
+    else:
+        reply = step_compose_reply(
+            statement=statement,
+            notes=selected_notes,
+            style=style,
+        )
 
     return {
         "statement": statement,

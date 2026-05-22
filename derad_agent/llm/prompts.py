@@ -15,16 +15,35 @@ except ImportError:
                 return self.template.format(**kwargs)
 
 
-PLANNER_TEMPLATE = """Your task is to understand a user's statement or claim and break it down into 3-4 focused search queries.
-These queries will retrieve relevant information from a vector index of Community Notes summaries grouped by tweet clusters.
+PLANNER_TEMPLATE = """Your task is to assess a tweet and, if it contains checkable factual claims, generate targeted search queries for finding relevant Community Notes.
 
-You must output your response in JSON format.
+Community Notes are crowd-sourced corrections to misinformation on X. They cover verifiable factual claims — statistics, events, policies, quotes from public figures, scientific consensus.
 
-STATEMENT: {statement}
+First, decide: does this tweet make a specific factual claim that could be checked against evidence?
 
-Output format:
+A tweet IS factcheckable if it:
+- States or implies specific facts about events, statistics, policies, or public figures
+- Makes a claim that could be verified or disputed using real-world evidence
+
+A tweet is NOT factcheckable if it:
+- Is personal opinion, emotion, or commentary with no specific factual assertion
+- Is mundane everyday content — a photo, a personal anecdote, a casual observation, a cute video
+- Contains no verifiable claim (e.g. "look at this baby eating pizza")
+
+TWEET: {statement}
+
+If factcheckable, generate 3-4 search queries that directly target the specific claims made. Each query should be specific enough to surface Community Notes about those exact claims — not generic keywords.
+
+Output JSON only:
 {{
-  "queries": ["query 1", "query 2", "query 3"]
+  "factcheckable": true,
+  "queries": ["specific query 1", "specific query 2", "specific query 3"]
+}}
+
+If not factcheckable:
+{{
+  "factcheckable": false,
+  "queries": []
 }}"""
 
 
@@ -307,6 +326,49 @@ Rules:
 - Include evidence_links only when source URLs appear in the note.
 """
 
+NO_FACTCHECK_AGREEABLE_TEMPLATE = """You are responding to a tweet that doesn't contain a factual claim requiring fact-checking. Be warm, genuine, and never condescending.
+
+Write a brief reply (1-2 sentences, under 240 characters total) that:
+1. Acknowledges the post in a positive, warm way
+2. Gently notes there's no factual claim to check here
+
+TWEET: {statement}
+
+Output JSON only:
+{{
+  "response": "<1-2 warm, friendly sentences under 240 characters>",
+  "reasons": []
+}}"""
+
+
+NO_FACTCHECK_NEUTRAL_TEMPLATE = """You are a fact-checker responding to a tweet that doesn't contain a verifiable factual claim. Write a brief, neutral reply (1-2 sentences, under 240 characters) that informs the reader that no fact-check is needed. Be clear, direct, and non-judgmental.
+
+TWEET: {statement}
+
+Output JSON only:
+{{
+  "response": "<1-2 neutral, informative sentences under 240 characters>",
+  "reasons": []
+}}"""
+
+
+NO_FACTCHECK_SATIRICAL_TEMPLATE = """You are a staff writer at The Onion assigned to fact-check a tweet — but there's nothing to fact-check. The post is mundane. Apply the full weight of investigative journalism to the absence of a problem.
+
+The humor comes from bureaucratic seriousness about something that needs no correction.
+
+Under 240 characters. Two lines separated by a blank line (\\n\\n). Both lines funny, not explanatory.
+
+BANNED: rhetorical questions, exclamation marks, emoji, "turns out", "apparently", ironic quotes
+
+TWEET: {statement}
+
+Output JSON only:
+{{
+  "response": "<deadpan acknowledgment that nothing is wrong, Onion-style, two lines separated by \\n\\n>",
+  "reasons": []
+}}"""
+
+
 RELEVANCE_FILTER_TEMPLATE = """You are a relevance classifier. Decide which of the following community notes are relevant to the given statement.
 
 A note is relevant if it discusses the same topic, event, person, or specific claim as the statement — whether it supports or contradicts it.
@@ -335,8 +397,24 @@ STYLE_TEMPLATES = {
     "satirical": RESPONSE_OUTPUT_SATIRICAL_TEMPLATE,
 }
 
+NO_FACTCHECK_TEMPLATES = {
+    "agreeable": NO_FACTCHECK_AGREEABLE_TEMPLATE,
+    "neutral": NO_FACTCHECK_NEUTRAL_TEMPLATE,
+    "satirical": NO_FACTCHECK_SATIRICAL_TEMPLATE,
+}
+
 
 RESPONSE_STYLES = tuple(STYLE_TEMPLATES)
+
+
+def get_no_factcheck_prompt(style: str):
+    """Return the prompt template for a no-factcheck reply in *style*."""
+    if style not in NO_FACTCHECK_TEMPLATES:
+        raise ValueError(f"Unknown style {style!r}. Choose from: {list(NO_FACTCHECK_TEMPLATES)}")
+    return PromptTemplate(
+        input_variables=["statement"],
+        template=NO_FACTCHECK_TEMPLATES[style],
+    )
 
 
 def get_relevance_filter_prompt():
@@ -377,7 +455,9 @@ __all__ = [
     "RESPONSE_OUTPUT_NEUTRAL_TEMPLATE",
     "RESPONSE_OUTPUT_SATIRICAL_TEMPLATE",
     "STYLE_TEMPLATES",
+    "NO_FACTCHECK_TEMPLATES",
     "get_planner_prompt",
+    "get_no_factcheck_prompt",
     "get_relevance_filter_prompt",
     "get_style_prompt",
 ]

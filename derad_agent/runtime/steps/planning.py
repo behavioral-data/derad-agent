@@ -1,6 +1,6 @@
-"""Step 1: Single-pass query generation (planning)."""
+"""Step 1: Factcheckability assessment + query generation (planning)."""
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from derad_agent.llm.config import get_llm
 from derad_agent.llm.prompts import get_planner_prompt
@@ -14,13 +14,17 @@ def step_1_generate_queries(
     statement: str,
     logger: RuntimeLogger,
     preset_queries: Optional[List[str]] = None,
-) -> List[str]:
-    """Generate 1-6 search queries from the input statement."""
-    logger.log_step('planner', "Generating queries")
+) -> Tuple[bool, List[str]]:
+    """Assess factcheckability and generate 1-6 search queries.
+
+    Returns ``(factcheckable, queries)``. If ``factcheckable`` is False, the
+    caller should skip retrieval and compose a no-factcheck reply instead.
+    """
+    logger.log_step('planner', "Assessing claim + generating queries")
 
     if preset_queries:
         logger.log_info(f"Using {len(preset_queries)} preset queries (planner disabled)")
-        return validate_search_queries(preset_queries, min_queries=1, max_queries=6)
+        return True, validate_search_queries(preset_queries, min_queries=1, max_queries=6)
 
     prompt = get_planner_prompt()
     input_vars = {"statement": statement}
@@ -40,24 +44,29 @@ def step_1_generate_queries(
         raw_output = extract_text_from_response(raw_output_obj)
     except Exception as e:
         logger.log_warning(f"Planner LLM call failed (content filter or API error): {e}")
-        return [statement]
+        return True, [statement]
 
     logger.log_debug(f"Response received: {len(raw_output)} chars")
 
     try:
         parsed = parse_json_response(raw_output)
+        factcheckable = bool(parsed.get("factcheckable", True))
+        if not factcheckable:
+            logger.log_info("Planner: tweet is not factcheckable — skipping retrieval")
+            return False, []
         queries = parsed.get("queries", [])
         if queries:
             queries = validate_search_queries(queries, min_queries=1, max_queries=6)
             logger.log_info(f"Generated {len(queries)} valid queries")
         else:
-            logger.log_warning("No queries found in planner output (empty list), using fallback")
+            logger.log_warning("No queries in planner output, using statement as fallback")
             queries = [statement]
     except Exception as e:
         logger.log_warning(f"Failed to parse JSON planner output: {e}")
         logger.log_warning(f"Raw planner output:\n{raw_output[:1000]}")
         queries = [statement]
+        factcheckable = True
 
-    return queries
+    return factcheckable, queries
 
 

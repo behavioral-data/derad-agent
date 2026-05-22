@@ -118,7 +118,7 @@ def test_run_landscape_agent_end_to_end(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         "derad_agent.runtime.landscape_agent.step_1_generate_queries",
-        lambda **kwargs: ["q1"],
+        lambda **kwargs: (True, ["q1"]),
     )
 
     captured = {}
