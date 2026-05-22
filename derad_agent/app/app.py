@@ -86,22 +86,25 @@ _INFO_STORE: dict[str, dict] = {}
 _INFO_STORE_LOCK = threading.Lock()
 _INFO_STORE_TTL = 86400  # 24 h memory cache; Tables holds tokens permanently
 
-_info_table_client = None
+_INFO_TABLE_UNINIT = object()  # sentinel: init not yet attempted
+_info_table_client = _INFO_TABLE_UNINIT
 _info_table_init_lock = threading.Lock()
 
 
 def _get_info_table():
     """Return an Azure Table client for InfoTokens, or None if Tables not configured."""
     global _info_table_client
-    if _info_table_client is not None:
-        return _info_table_client
+    if _info_table_client is not _INFO_TABLE_UNINIT:
+        return _info_table_client  # None means init was tried and failed
     with _info_table_init_lock:
-        if _info_table_client is not None:
+        if _info_table_client is not _INFO_TABLE_UNINIT:
             return _info_table_client
         if os.getenv("DERAD_EVENTS_BACKEND", "memory").lower() != "tables":
+            _info_table_client = None
             return None
         endpoint = os.getenv("DERAD_TABLES_ENDPOINT")
         if not endpoint:
+            _info_table_client = None
             return None
         try:
             from azure.core.exceptions import ResourceExistsError
@@ -116,6 +119,7 @@ def _get_info_table():
             _info_table_client = svc.get_table_client("InfoTokens")
         except Exception:
             logger.exception("InfoTokens table init failed; tokens will be in-memory only")
+            _info_table_client = None
     return _info_table_client
 
 
@@ -174,8 +178,12 @@ def _get_info_params(token: str) -> dict | None:
         with _INFO_STORE_LOCK:
             _INFO_STORE[token] = params
         return params
-    except Exception:
-        logger.debug("Info token %s not found in Azure Tables", token)
+    except Exception as exc:
+        from azure.core.exceptions import ResourceNotFoundError
+        if isinstance(exc, ResourceNotFoundError):
+            logger.debug("Info token %s not found in Azure Tables", token)
+        else:
+            logger.warning("Azure Tables lookup failed for token %s: %s", token, exc)
         return None
 
 
@@ -190,7 +198,9 @@ def _update_info_token(token: str, **fields) -> None:
         if table is None:
             return
         try:
-            table.update_entity({"PartitionKey": "info", "RowKey": token, **fields}, mode="merge")
+            # upsert (merge) so this is safe even if the initial persist thread
+            # hasn't completed yet — whichever thread wins, the other merges in.
+            table.upsert_entity({"PartitionKey": "info", "RowKey": token, **fields})
         except Exception:
             logger.exception("Failed to update info token %s in Azure Tables", token)
 

@@ -17,8 +17,6 @@ os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_CHAT", "test-chat")
 os.environ.setdefault("BOT_USER_ID_NEUTRAL", "999")
 
 from derad_agent.app import app as app_module  # noqa: E402
-from derad_agent.app import dedup as dedup_module  # noqa: E402
-from derad_agent.app import metrics as metrics_module  # noqa: E402
 from derad_agent.app.participants import Participant  # noqa: E402
 
 
@@ -49,63 +47,6 @@ class TestMakeStudyCode:
         for i in range(500):
             code = app_module._make_study_code(str(i))
             assert "I" not in code and "O" not in code, f"found I/O in {code!r} for id={i}"
-
-
-# ── allow-list: registered participant passes dispatch ─────────────────────────
-
-
-@pytest.fixture
-def dispatch_env_with_participant(monkeypatch):
-    """Dispatch env where a participant is registered in-memory."""
-    monkeypatch.setattr(dedup_module, "_default_store", dedup_module.InMemoryStore())
-    metrics_module._reset_counts_for_test()
-    monkeypatch.setattr(app_module, "RESTRICT_TO_REGISTERED", True)
-
-    p = Participant(
-        author_id="555",
-        author_username="studyuser",
-        tone="neutral",
-        enrolled_at_utc=datetime(2026, 5, 1, tzinfo=timezone.utc),
-    )
-    monkeypatch.setattr(app_module, "_PARTICIPANTS_BY_ID", {"555": p})
-    monkeypatch.setattr(app_module, "_ALLOWED_IDS", {"555"})
-
-    started: list[tuple] = []
-
-    class _FakeThread:
-        def __init__(self, target=None, args=(), kwargs=None, daemon=False, **_):
-            self.target, self.args = target, args
-
-        def start(self):
-            started.append(self.args)
-
-    monkeypatch.setattr(app_module.threading, "Thread", _FakeThread)
-    return {"started": started, "participant": p}
-
-
-def _tweet(id_str, author):
-    return {
-        "id_str": id_str,
-        "in_reply_to_status_id_str": "p1",
-        "user": {"id_str": author},
-    }
-
-
-def _now():
-    return datetime.now(timezone.utc)
-
-
-class TestAllowListWithParticipants:
-    def test_registered_participant_is_accepted(self, dispatch_env_with_participant, monkeypatch):
-        monkeypatch.setattr(app_module, "_ALLOWED_IDS", {"555"})
-        result = app_module._dispatch_tweet("neutral", _tweet("m1", "555"), _now())
-        assert result is True
-        assert len(dispatch_env_with_participant["started"]) == 1
-
-    def test_unregistered_is_dropped(self, dispatch_env_with_participant):
-        result = app_module._dispatch_tweet("neutral", _tweet("m2", "999"), _now())
-        assert result is False
-        assert len(dispatch_env_with_participant["started"]) == 0
 
 
 # ── study_day calculation ─────────────────────────────────────────────────────

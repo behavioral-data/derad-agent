@@ -8,6 +8,7 @@ in the supplied note_ids.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from html import unescape
@@ -18,6 +19,7 @@ from derad_agent.llm.prompts import get_style_prompt
 
 from ._helpers import extract_text_from_response, parse_json_response
 
+logger = logging.getLogger(__name__)
 
 _URL_RE = re.compile(r"https?://[^\s<>\"]+")
 _TAG_RE = re.compile(r"</?[A-Z_]+>")

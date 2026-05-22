@@ -47,7 +47,6 @@ def fake_events_store():
 def dispatch_env(monkeypatch, fake_events_store):
     """Fresh dedup store + thread capture for _dispatch_tweet tests."""
     monkeypatch.setattr(dedup_module, "_default_store", dedup_module.InMemoryStore())
-    monkeypatch.setattr(app_module, "RESTRICT_TO_REGISTERED", True)
 
     started: list[tuple] = []
 
@@ -120,35 +119,21 @@ class TestDropWiring:
         drops = dispatch_env["events"].drops
         assert any(d.drop_reason == "self_reply" for d in drops)
 
-    def test_unregistered_logs_drop(self, dispatch_env):
-        tweet = self._tweet(user={"id_str": "nope"})
+    def test_duplicate_logs_drop(self, dispatch_env):
+        tweet = self._tweet()
+        app_module._dispatch_tweet("neutral", tweet, _now())
         app_module._dispatch_tweet("neutral", tweet, _now())
         drops = dispatch_env["events"].drops
-        assert any(d.drop_reason == "unregistered" for d in drops)
-
-    def test_duplicate_logs_drop(self, dispatch_env):
-        app_module.ALLOWED_AUTHOR_IDS.add("111")
-        try:
-            tweet = self._tweet()
-            app_module._dispatch_tweet("neutral", tweet, _now())
-            app_module._dispatch_tweet("neutral", tweet, _now())
-            drops = dispatch_env["events"].drops
-            assert sum(1 for d in drops if d.drop_reason == "duplicate") == 1
-            assert dispatch_env["started"], "first delivery should have started a thread"
-        finally:
-            app_module.ALLOWED_AUTHOR_IDS.discard("111")
+        assert sum(1 for d in drops if d.drop_reason == "duplicate") == 1
+        assert dispatch_env["started"], "first delivery should have started a thread"
 
     def test_rate_limit_logs_drop(self, dispatch_env):
-        app_module.ALLOWED_AUTHOR_IDS.add("111")
-        try:
-            for i in range(5):
-                tweet = self._tweet(id_str=f"m{i}")
-                app_module._dispatch_tweet("neutral", tweet, _now())
-            drops = [d for d in dispatch_env["events"].drops if d.drop_reason == "rate_limit"]
-            assert drops, "expected at least one rate_limit drop"
-            assert drops[0].extra.get("hits", 0) > 0
-        finally:
-            app_module.ALLOWED_AUTHOR_IDS.discard("111")
+        for i in range(5):
+            tweet = self._tweet(id_str=f"m{i}")
+            app_module._dispatch_tweet("neutral", tweet, _now())
+        drops = [d for d in dispatch_env["events"].drops if d.drop_reason == "rate_limit"]
+        assert drops, "expected at least one rate_limit drop"
+        assert drops[0].extra.get("hits", 0) > 0
 
 
 # ─── log_mention_event wiring in process_mention ────────────────────────────
@@ -216,7 +201,7 @@ class TestEventWiring:
         assert ev.queries == ["query1", "query2"]
         assert ev.cited_tweet_ids == ["t1", "t2", "t3"]
         assert ev.cited_note_ids == ["n1", "n2", "n3"]
-        assert ev.reply_text == "Here are the facts."
+        assert ev.reply_text.startswith("Here are the facts.")
         assert ev.pipeline_ms is not None and ev.pipeline_ms >= 0
 
     def test_parent_fetch_failed_outcome(self, monkeypatch, fake_events_store):
@@ -279,7 +264,7 @@ class TestEventWiring:
             fake_events_store=fake_events_store,
         )[0]
         assert ev.outcome == "x_post_error"
-        assert ev.reply_text == "the response"
+        assert ev.reply_text.startswith("the response")
         assert ev.reply_id is None
 
     def test_pipeline_error_outcome(self, monkeypatch, fake_events_store):

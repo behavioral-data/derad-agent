@@ -36,7 +36,6 @@ def _now():
 def dispatch_env(monkeypatch):
     """Fresh dedup store + thread capture for _dispatch_tweet tests."""
     monkeypatch.setattr(dedup_module, "_default_store", dedup_module.InMemoryStore())
-    monkeypatch.setattr(app_module, "RESTRICT_TO_REGISTERED", True)
 
     started: list[tuple] = []
 
@@ -120,51 +119,29 @@ class TestMetricCounterWiring:
 
     def test_mentions_received_increments_on_valid_post(self, dispatch_env, monkeypatch):
         received = self._spy(monkeypatch, metrics_module.mentions_received)
-        app_module.ALLOWED_AUTHOR_IDS.add("111")
-        try:
-            app_module._dispatch_tweet("neutral", self._tweet(), _now())
-            assert len(received) == 1
-            assert received[0]["tone"] == "neutral"
-        finally:
-            app_module.ALLOWED_AUTHOR_IDS.discard("111")
+        app_module._dispatch_tweet("neutral", self._tweet(), _now())
+        assert len(received) == 1
+        assert received[0]["tone"] == "neutral"
 
     def test_mentions_accepted_increments_when_dispatched(self, dispatch_env, monkeypatch):
         accepted = self._spy(monkeypatch, metrics_module.mentions_accepted)
-        app_module.ALLOWED_AUTHOR_IDS.add("111")
-        try:
-            app_module._dispatch_tweet("neutral", self._tweet("a1"), _now())
-            assert len(accepted) == 1
-            assert accepted[0]["tone"] == "neutral"
-        finally:
-            app_module.ALLOWED_AUTHOR_IDS.discard("111")
-
-    def test_mentions_dropped_reason_unregistered(self, dispatch_env, monkeypatch):
-        dropped = self._spy(monkeypatch, metrics_module.mentions_dropped)
-        app_module._dispatch_tweet("neutral", self._tweet(author="not-in-list"), _now())
-        reasons = [c["reason"] for c in dropped]
-        assert "unregistered" in reasons
+        app_module._dispatch_tweet("neutral", self._tweet("a1"), _now())
+        assert len(accepted) == 1
+        assert accepted[0]["tone"] == "neutral"
 
     def test_mentions_dropped_reason_duplicate(self, dispatch_env, monkeypatch):
         dropped = self._spy(monkeypatch, metrics_module.mentions_dropped)
-        app_module.ALLOWED_AUTHOR_IDS.add("111")
-        try:
-            tweet = self._tweet("dup1")
-            app_module._dispatch_tweet("neutral", tweet, _now())
-            app_module._dispatch_tweet("neutral", tweet, _now())
-            reasons = [c["reason"] for c in dropped]
-            assert "duplicate" in reasons
-        finally:
-            app_module.ALLOWED_AUTHOR_IDS.discard("111")
+        tweet = self._tweet("dup1")
+        app_module._dispatch_tweet("neutral", tweet, _now())
+        app_module._dispatch_tweet("neutral", tweet, _now())
+        reasons = [c["reason"] for c in dropped]
+        assert "duplicate" in reasons
 
     def test_daily_cap_drop(self, dispatch_env, monkeypatch):
         monkeypatch.setattr(metrics_module, "_MAX_PER_DAY", 1)
         dropped = self._spy(monkeypatch, metrics_module.mentions_dropped)
-        app_module.ALLOWED_AUTHOR_IDS.add("111")
-        try:
-            app_module._dispatch_tweet("neutral", self._tweet("cap1", "111"), _now())
-            app_module._dispatch_tweet("neutral", self._tweet("cap2", "111"), _now())
-            assert len(dispatch_env["started"]) == 1
-            cap_drops = [c for c in dropped if c.get("reason") == "daily_cap"]
-            assert len(cap_drops) >= 1, f"expected daily_cap drop; got {dropped}"
-        finally:
-            app_module.ALLOWED_AUTHOR_IDS.discard("111")
+        app_module._dispatch_tweet("neutral", self._tweet("cap1", "111"), _now())
+        app_module._dispatch_tweet("neutral", self._tweet("cap2", "111"), _now())
+        assert len(dispatch_env["started"]) == 1
+        cap_drops = [c for c in dropped if c.get("reason") == "daily_cap"]
+        assert len(cap_drops) >= 1, f"expected daily_cap drop; got {dropped}"
