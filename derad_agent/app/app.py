@@ -69,22 +69,15 @@ BOT_USER_ID_BY_TONE = {
 
 POST_SOURCES_TWEET = _parse_bool_env("DERAD_POST_SOURCES_TWEET")
 DRY_RUN = _parse_bool_env("DERAD_DRY_RUN")
-RESTRICT_TO_REGISTERED = _parse_bool_env("DERAD_RESTRICT_TO_REGISTERED", default=True)
-# Dev/test escape hatch — production allow-list comes from the Participants table.
-ALLOWED_AUTHOR_IDS = {
-    a.strip() for a in os.getenv("DERAD_ALLOWED_AUTHOR_IDS", "").split(",") if a.strip()
-}
 RATE_LIMIT_PER_SEC = int(os.getenv("DERAD_RATE_LIMIT_PER_SEC", "3"))
 TWEET_LIMIT = 280
 
-# Load participants at startup so allow-list checks and study metadata lookups are
-# pure in-memory. Restart the app to pick up newly registered participants.
+# Participant metadata loaded for study tracking only — no longer gates bot access.
 _participants_store = _participants.get_store()
 _PARTICIPANTS_BY_ID: dict[str, _participants.Participant] = {
     p.author_id: p for p in _participants_store.list_all()
 }
-_ALLOWED_IDS: set[str] = set(_PARTICIPANTS_BY_ID) | ALLOWED_AUTHOR_IDS
-logger.info("Loaded %d registered participants", len(_PARTICIPANTS_BY_ID))
+logger.info("Loaded %d registered participants (metadata only)", len(_PARTICIPANTS_BY_ID))
 
 
 # Info-URL store: token → {tone, reply_text, reasons, parent_id}
@@ -423,11 +416,6 @@ def _dispatch_tweet(tone: str, tweet: dict, received_at_utc: datetime) -> bool:
     if _is_self_reply(tweet, tone):
         logger.info("Skipping self-reply %s (tone=%s)", mention_id, tone)
         _drop("self_reply", mention_id=mention_id, author_id=author_id)
-        return False
-
-    if RESTRICT_TO_REGISTERED and author_id not in _ALLOWED_IDS:
-        logger.info("Skipping mention %s from unregistered author %s", mention_id, author_id)
-        _drop("unregistered", mention_id=mention_id, author_id=author_id)
         return False
 
     store = get_store()
