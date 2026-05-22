@@ -175,6 +175,7 @@ def _get_info_params(token: str) -> dict | None:
             "reply_text": entity.get("reply_text", ""),
             "reasons": json.loads(entity.get("reasons_json", "[]")),
             "parent_id": entity.get("parent_id", ""),
+            "reply_id": entity.get("reply_id", ""),
             "_ts": time.monotonic(),
         }
         with _INFO_STORE_LOCK:
@@ -183,6 +184,24 @@ def _get_info_params(token: str) -> dict | None:
     except Exception:
         logger.debug("Info token %s not found in Azure Tables", token)
         return None
+
+
+def _update_info_token(token: str, **fields) -> None:
+    """Merge extra fields into an existing token (e.g. reply_id after posting)."""
+    with _INFO_STORE_LOCK:
+        if token in _INFO_STORE:
+            _INFO_STORE[token].update(fields)
+
+    def _persist_update():
+        table = _get_info_table()
+        if table is None:
+            return
+        try:
+            table.update_entity({"PartitionKey": "info", "RowKey": token, **fields}, mode="merge")
+        except Exception:
+            logger.exception("Failed to update info token %s in Azure Tables", token)
+
+    threading.Thread(target=_persist_update, daemon=True, name=f"info-update-{token}").start()
 
 
 def _evict_info_store() -> None:
@@ -355,6 +374,7 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             _finalize("x_post_error")
             return
         ev.reply_id = reply_id
+        _update_info_token(token, reply_id=reply_id)
         ev.reply_posted_utc = events.utcnow()
 
         ev.study_code = _make_study_code(reply_id)
@@ -475,6 +495,7 @@ def info_short(token: str):
         reasons=params.get("reasons", []),
         tone=params.get("tone", ""),
         parent_id=params.get("parent_id", ""),
+        reply_tweet_id=params.get("reply_id", ""),
     ), 200
 
 

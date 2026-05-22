@@ -22,28 +22,31 @@
   {% if headline %}
   {# ── Short URL mode: bot reply + evidence reasons ── #}
 
-  {% if parent_id %}
   <section class="info-section info-section-first">
-    <span class="eyebrow">Original Post</span>
+    <span class="eyebrow">Conversation</span>
     <div class="info-tweet-embed">
+      {% if parent_id %}
       <blockquote class="twitter-tweet" data-conversation="none">
         <a href="https://twitter.com/i/web/status/{{ parent_id }}"></a>
       </blockquote>
-    </div>
-  </section>
-  {% endif %}
-
-  {% set parts = headline.split('\n\n') %}
-  <section class="info-section{% if not parent_id %} info-section-first{% endif %}">
-    <span class="eyebrow">Bot Reply</span>
-    <blockquote class="info-reply">
-      {% if parts | length > 1 %}
-      <p class="info-reply-lead">{{ parts[0] }}</p>
-      <p class="info-reply-body">{{ parts[1:] | join(' ') }}</p>
-      {% else %}
-      <p class="info-reply-body">{{ headline }}</p>
       {% endif %}
-    </blockquote>
+      {% if reply_tweet_id %}
+      <blockquote class="twitter-tweet"{% if parent_id %} data-conversation="none"{% endif %}>
+        <a href="https://twitter.com/i/web/status/{{ reply_tweet_id }}"></a>
+      </blockquote>
+      {% else %}
+      {# Fallback: bot hasn't posted yet or reply_id not stored — show text #}
+      {% set parts = headline.split('\n\n') %}
+      <blockquote class="info-reply">
+        {% if parts | length > 1 %}
+        <p class="info-reply-lead">{{ parts[0] }}</p>
+        <p class="info-reply-body">{{ parts[1:] | join(' ') }}</p>
+        {% else %}
+        <p class="info-reply-body">{{ headline }}</p>
+        {% endif %}
+      </blockquote>
+      {% endif %}
+    </div>
   </section>
 
   {% if reasons %}
