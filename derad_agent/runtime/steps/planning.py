@@ -1,5 +1,6 @@
 """Step 1: Factcheckability assessment + query generation (planning)."""
 
+import os
 from typing import List, Optional, Tuple
 
 from derad_agent.llm.config import get_llm
@@ -8,6 +9,9 @@ from derad_agent.shared.logging import RuntimeLogger
 from derad_agent.shared.validation import validate_search_queries
 
 from ._helpers import extract_text_from_response, parse_json_response
+
+_PLANNER_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT_PLANNER", "claude-sonnet-4-6")
+_PLANNER_PROVIDER = os.getenv("DERAD_PLANNER_PROVIDER", "claude")
 
 
 def step_1_generate_queries(
@@ -32,8 +36,8 @@ def step_1_generate_queries(
     llm_instance = get_llm(
         temperature=None,
         max_tokens=2000,
-        reasoning_effort="low",
-        text_verbosity="medium",
+        deployment=_PLANNER_DEPLOYMENT,
+        provider=_PLANNER_PROVIDER,
     )
     chain = prompt | llm_instance
 

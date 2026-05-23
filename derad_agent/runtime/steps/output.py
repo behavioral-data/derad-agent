@@ -141,7 +141,7 @@ def step_compose_reply(
     llm = get_llm(
         temperature=None,
         max_tokens=1400,
-        reasoning_effort="low",
+        reasoning_effort="medium",
         text_verbosity="medium",
         provider=provider,
     )
@@ -167,7 +167,7 @@ def step_compose_reply(
         repair_llm = get_llm(
             temperature=None,
             max_tokens=1400,
-            reasoning_effort="low",
+            reasoning_effort="medium",
             text_verbosity="low",
             provider=provider,
         )
@@ -209,7 +209,7 @@ def step_compose_no_factcheck_reply(
     llm = get_llm(
         temperature=None,
         max_tokens=200,
-        reasoning_effort="low",
+        reasoning_effort="medium",
         text_verbosity="low",
         provider=provider,
     )

@@ -12,49 +12,40 @@ When --author-id is omitted the X API is called to look it up from --username.
 
 import argparse
 import logging
-import random
 import sys
 from datetime import datetime, timezone
 
-from derad_agent.app.participants import Participant, get_store
-from derad_agent.llm.config import get_x_client
-
-VALID_TONES = {"agreeable", "neutral", "satirical"}
+from derad_agent.app.participants import (
+    VALID_TONES,
+    Participant,
+    ParticipantLookupError,
+    get_store,
+    lookup_author_id,
+    pick_balanced_tone,
+)
+# Re-exported so existing test monkeypatches on this module keep working.
+from derad_agent.llm.config import get_x_client  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
 
 def _lookup_author_id(username: str, tone_for_client: str = "neutral") -> str:
     """Resolve @username → X numeric user ID via the X API."""
-    clean = username.lstrip("@")
+    # Look up get_x_client from this module's namespace at call time so tests
+    # that monkeypatch it on this module keep intercepting the call.
+    client = get_x_client(tone=tone_for_client)
     try:
-        response = get_x_client(tone=tone_for_client).users.get_by_username(username=clean)
-    except Exception as exc:
-        logger.error("X API call failed looking up @%s: %s", clean, exc)
+        return lookup_author_id(username, tone_for_client=tone_for_client, client=client)
+    except ParticipantLookupError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
-
-    data = getattr(response, "data", None) or {}
-    user_id = data.get("id") if isinstance(data, dict) else getattr(data, "id", None)
-    if not user_id:
-        print(f"ERROR: @{clean} not found on X (or API returned no data).", file=sys.stderr)
-        raise SystemExit(1)
-    return str(user_id)
 
 
 def _pick_tone(requested: str) -> str:
     """Resolve 'random' to the least-used tone across existing registrations."""
     if requested != "random":
         return requested
-
-    store = get_store()
-    counts = {t: 0 for t in VALID_TONES}
-    for p in store.list_all():
-        if p.tone in counts:
-            counts[p.tone] += 1
-
-    min_count = min(counts.values())
-    candidates = [t for t, n in counts.items() if n == min_count]
-    return random.choice(candidates)
+    return pick_balanced_tone()
 
 
 def main() -> None:

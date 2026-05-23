@@ -1,15 +1,14 @@
-"""Tests for derad_agent.app.metrics: daily kill switch and counter wiring.
+"""Tests for derad_agent.app.metrics counter wiring and the per-user daily cap.
 
-These tests cover:
-  - daily_cap_reached() logic in isolation (unit)
-  - _dispatch_tweet dropping with reason='daily_cap' when the limit is hit
-  - mentions_received / mentions_accepted / mentions_dropped counter call sites
+The cap itself lives in app._dispatch_tweet (it counts via dedup.hit_and_count
+rather than a separate in-memory counter), so its tests sit alongside the
+mention-counter wiring rather than in metrics.py.
 """
 
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 import pytest
 
@@ -21,6 +20,7 @@ os.environ.setdefault("AZURE_OPENAI_ENDPOINT", "https://test.example/")
 os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_EMBED", "test-embed")
 os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_CHAT", "test-chat")
 os.environ.setdefault("BOT_USER_ID_NEUTRAL", "999")
+os.environ.setdefault("BOT_USER_ID_AGREEABLE", "1000")
 
 from derad_agent.app import app as app_module  # noqa: E402
 from derad_agent.app import dedup as dedup_module  # noqa: E402
@@ -50,64 +50,10 @@ def dispatch_env(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Unit tests — daily_cap_reached() in isolation
-# ---------------------------------------------------------------------------
-
-class TestDailyCapUnit:
-    def setup_method(self):
-        metrics_module._reset_counts_for_test()
-
-    def test_no_cap_when_max_zero(self, monkeypatch):
-        monkeypatch.setattr(metrics_module, "_MAX_PER_DAY", 0)
-        for _ in range(10):
-            assert metrics_module.daily_cap_reached("neutral") is False
-
-    def test_cap_allows_up_to_limit(self, monkeypatch):
-        monkeypatch.setattr(metrics_module, "_MAX_PER_DAY", 3)
-        assert metrics_module.daily_cap_reached("neutral") is False  # 1
-        assert metrics_module.daily_cap_reached("neutral") is False  # 2
-        assert metrics_module.daily_cap_reached("neutral") is False  # 3 (at limit)
-        assert metrics_module.daily_cap_reached("neutral") is True   # 4 (over)
-
-    def test_cap_keeps_blocking_once_hit(self, monkeypatch):
-        monkeypatch.setattr(metrics_module, "_MAX_PER_DAY", 1)
-        metrics_module.daily_cap_reached("neutral")
-        assert metrics_module.daily_cap_reached("neutral") is True
-        assert metrics_module.daily_cap_reached("neutral") is True
-
-    def test_per_tone_independence(self, monkeypatch):
-        monkeypatch.setattr(metrics_module, "_MAX_PER_DAY", 1)
-        metrics_module.daily_cap_reached("agreeable")
-        assert metrics_module.daily_cap_reached("agreeable") is True
-        assert metrics_module.daily_cap_reached("neutral") is False
-
-    def test_resets_on_date_rollover(self, monkeypatch):
-        monkeypatch.setattr(metrics_module, "_MAX_PER_DAY", 1)
-        day1 = date(2026, 5, 18)
-        monkeypatch.setattr(metrics_module, "_utc_today", lambda: day1)
-        metrics_module.daily_cap_reached("neutral")
-        assert metrics_module.daily_cap_reached("neutral") is True
-
-        day2 = date(2026, 5, 19)
-        monkeypatch.setattr(metrics_module, "_utc_today", lambda: day2)
-        assert metrics_module.daily_cap_reached("neutral") is False
-
-    def test_no_reset_same_day(self, monkeypatch):
-        monkeypatch.setattr(metrics_module, "_MAX_PER_DAY", 1)
-        today = date(2026, 5, 18)
-        monkeypatch.setattr(metrics_module, "_utc_today", lambda: today)
-        metrics_module.daily_cap_reached("neutral")
-        assert metrics_module.daily_cap_reached("neutral") is True
-
-
-# ---------------------------------------------------------------------------
 # Integration tests — counter wiring through _dispatch_tweet
 # ---------------------------------------------------------------------------
 
 class TestMetricCounterWiring:
-    def setup_method(self):
-        metrics_module._reset_counts_for_test()
-
     def _spy(self, monkeypatch, counter):
         calls: list[dict] = []
         monkeypatch.setattr(counter, "add", lambda _n, attrs: calls.append(dict(attrs)))
@@ -136,11 +82,97 @@ class TestMetricCounterWiring:
         reasons = [c["reason"] for c in dropped]
         assert "duplicate" in reasons
 
-    def test_daily_cap_drop(self, dispatch_env, monkeypatch):
-        monkeypatch.setattr(metrics_module, "_MAX_PER_DAY", 1)
-        dropped = self._spy(monkeypatch, metrics_module.mentions_dropped)
-        app_module._dispatch_tweet("neutral", self._tweet("cap1", "111"), _now())
-        app_module._dispatch_tweet("neutral", self._tweet("cap2", "111"), _now())
-        assert len(dispatch_env["started"]) == 1
-        cap_drops = [c for c in dropped if c.get("reason") == "daily_cap"]
-        assert len(cap_drops) >= 1, f"expected daily_cap drop; got {dropped}"
+
+# ---------------------------------------------------------------------------
+# Per-user daily cap (in _dispatch_tweet, backed by dedup.hit_and_count)
+# ---------------------------------------------------------------------------
+
+class TestUserDailyCap:
+    def test_blocks_after_cap_reached(self, dispatch_env, monkeypatch):
+        # Cap = 2. Same author, distinct mention_ids → first two accepted, third dropped.
+        monkeypatch.setattr(app_module, "USER_DAILY_CAP", 2)
+        author = "user-a"
+        for i in range(2):
+            assert app_module._dispatch_tweet(
+                "neutral",
+                {"id_str": f"m{i}", "in_reply_to_status_id_str": "p1", "user": {"id_str": author}},
+                _now(),
+            ) is True
+        # Third mention from same author: dropped.
+        assert app_module._dispatch_tweet(
+            "neutral",
+            {"id_str": "m2", "in_reply_to_status_id_str": "p1", "user": {"id_str": author}},
+            _now(),
+        ) is False
+        assert len(dispatch_env["started"]) == 2
+
+    def test_cap_is_per_user_not_global(self, dispatch_env, monkeypatch):
+        monkeypatch.setattr(app_module, "USER_DAILY_CAP", 1)
+        # User A: 1 accepted, 2nd dropped
+        assert app_module._dispatch_tweet(
+            "neutral",
+            {"id_str": "a1", "in_reply_to_status_id_str": "p1", "user": {"id_str": "user-a"}},
+            _now(),
+        ) is True
+        assert app_module._dispatch_tweet(
+            "neutral",
+            {"id_str": "a2", "in_reply_to_status_id_str": "p1", "user": {"id_str": "user-a"}},
+            _now(),
+        ) is False
+        # User B: still has full budget
+        assert app_module._dispatch_tweet(
+            "neutral",
+            {"id_str": "b1", "in_reply_to_status_id_str": "p1", "user": {"id_str": "user-b"}},
+            _now(),
+        ) is True
+
+    def test_cap_covers_all_bots(self, dispatch_env, monkeypatch):
+        # User hits cap on agreeable; further calls to neutral or satirical also dropped.
+        monkeypatch.setattr(app_module, "USER_DAILY_CAP", 1)
+        author = "user-multi"
+        assert app_module._dispatch_tweet(
+            "agreeable",
+            {"id_str": "x1", "in_reply_to_status_id_str": "p1", "user": {"id_str": author}},
+            _now(),
+        ) is True
+        # Same author on a different tone — still counts against the same daily bucket.
+        assert app_module._dispatch_tweet(
+            "neutral",
+            {"id_str": "x2", "in_reply_to_status_id_str": "p1", "user": {"id_str": author}},
+            _now(),
+        ) is False
+
+    def test_disabled_when_cap_zero(self, dispatch_env, monkeypatch):
+        monkeypatch.setattr(app_module, "USER_DAILY_CAP", 0)
+        # Bypass the per-second burst limit so we can drive 5 mentions through quickly.
+        monkeypatch.setattr(app_module, "RATE_LIMIT_PER_SEC", 1000)
+        author = "user-unlimited"
+        for i in range(5):
+            assert app_module._dispatch_tweet(
+                "neutral",
+                {"id_str": f"u{i}", "in_reply_to_status_id_str": "p1", "user": {"id_str": author}},
+                _now(),
+            ) is True
+        assert len(dispatch_env["started"]) == 5
+
+    def test_drop_reason_and_extras(self, dispatch_env, monkeypatch):
+        monkeypatch.setattr(app_module, "USER_DAILY_CAP", 1)
+        dropped: list[dict] = []
+        monkeypatch.setattr(
+            metrics_module.mentions_dropped,
+            "add",
+            lambda _n, attrs: dropped.append(dict(attrs)),
+        )
+        author = "user-cap"
+        app_module._dispatch_tweet(
+            "neutral",
+            {"id_str": "c1", "in_reply_to_status_id_str": "p1", "user": {"id_str": author}},
+            _now(),
+        )
+        app_module._dispatch_tweet(
+            "neutral",
+            {"id_str": "c2", "in_reply_to_status_id_str": "p1", "user": {"id_str": author}},
+            _now(),
+        )
+        cap_drops = [d for d in dropped if d.get("reason") == "daily_cap"]
+        assert len(cap_drops) == 1

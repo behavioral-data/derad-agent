@@ -114,13 +114,11 @@ section("Phase 2 · App startup (participant metadata loaded, no allow-list)")
 from derad_agent.app import app as app_module
 from derad_agent.app import dedup as dedup_module
 from derad_agent.app import events as events_module
-from derad_agent.app import metrics as metrics_module
 
 # Reset dedup + events store.
 dedup_module._default_store = dedup_module.InMemoryStore()
 e_store = events_module.InMemoryEventsStore()
 events_module.reset_store(e_store)
-metrics_module._reset_counts_for_test()
 
 assert_true("participant in _PARTICIPANTS_BY_ID", "test_author_123" in app_module._PARTICIPANTS_BY_ID)
 print(f"  {_CYAN}participants loaded (metadata only): {len(app_module._PARTICIPANTS_BY_ID)}{_RESET}")
@@ -155,7 +153,6 @@ assert_true("no 'unregistered' drop reason recorded", "unregistered" not in drop
 
 # Registered author: fresh dedup so previous dispatch doesn't block
 dedup_module._default_store = dedup_module.InMemoryStore()
-metrics_module._reset_counts_for_test()
 
 registered_tweet = {
     "id_str": "m_registered",
@@ -178,7 +175,6 @@ section("Phase 4 · Mention processing → study_code + study_day")
 e_store2 = events_module.InMemoryEventsStore()
 events_module.reset_store(e_store2)
 dedup_module._default_store = dedup_module.InMemoryStore()
-metrics_module._reset_counts_for_test()
 
 MENTION_TWEET = {
     "id_str": "mention_001",

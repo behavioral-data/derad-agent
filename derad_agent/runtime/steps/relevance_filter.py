@@ -40,7 +40,7 @@ def step_filter_notes_by_relevance(
     # max_tokens must cover the full keep_note_ids list: ~8 tokens per 19-digit ID.
     # 200 notes × 8 tokens = 1600, plus JSON overhead → 2048 is safe.
     prompt = get_relevance_filter_prompt()
-    llm = get_llm(reasoning_effort="low", text_verbosity="low", max_tokens=2048)
+    llm = get_llm(max_tokens=2048, provider="claude")
     chain = prompt | llm
 
     try:

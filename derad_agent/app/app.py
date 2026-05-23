@@ -70,6 +70,7 @@ BOT_USER_ID_BY_TONE = {
 POST_SOURCES_TWEET = _parse_bool_env("DERAD_POST_SOURCES_TWEET")
 DRY_RUN = _parse_bool_env("DERAD_DRY_RUN")
 RATE_LIMIT_PER_SEC = int(os.getenv("DERAD_RATE_LIMIT_PER_SEC", "3"))
+USER_DAILY_CAP = int(os.getenv("DERAD_USER_DAILY_CAP", "20"))  # mentions/UTC-day/user; 0 disables
 TWEET_LIMIT = 280
 
 # Participant metadata loaded for study tracking only — no longer gates bot access.
@@ -522,9 +523,19 @@ def _dispatch_tweet(tone: str, tweet: dict, received_at_utc: datetime) -> bool:
         _drop("rate_limit", mention_id=mention_id, author_id=author_id, extra={"hits": hits})
         return False
 
-    if metrics.daily_cap_reached(tone):
-        _drop("daily_cap", mention_id=mention_id, author_id=author_id)
-        return False
+    if USER_DAILY_CAP > 0:
+        day = datetime.now(timezone.utc).date().isoformat()
+        day_hits = store.hit_and_count(f"author_day:{author_id}:{day}", window_seconds=86400)
+        if day_hits > USER_DAILY_CAP:
+            logger.info(
+                "User daily cap reached for author %s on %s (hits=%d, cap=%d)",
+                author_id, day, day_hits, USER_DAILY_CAP,
+            )
+            _drop(
+                "daily_cap", mention_id=mention_id, author_id=author_id,
+                extra={"day_hits": day_hits, "cap": USER_DAILY_CAP},
+            )
+            return False
 
     logger.info(
         "Accepted mention %s (tone=%s, author=%s, parent=%s)",
@@ -640,6 +651,110 @@ def api_activity():
         },
     }
     return jsonify(payload), 200
+
+
+@app.route("/api/replies", methods=["GET"])
+def api_replies():
+    """Recent bot replies, newest first. One row per posted reply.
+
+    Each row carries enough context to render in the dashboard *and* to link
+    to the live tweet on X. `reply_url` is built server-side from the bot
+    handle for the event's tone + reply_id so the client doesn't need to
+    duplicate the handle map.
+
+    Query params: ?limit=N (default 200, max 1000).
+    """
+    try:
+        limit = max(1, min(int(request.args.get("limit", "200")), 1000))
+    except ValueError:
+        limit = 200
+
+    raw = events.get_store().list_recent(limit)
+    out: list[dict] = []
+    for e in raw:
+        reply_id = e.get("reply_id")
+        if not reply_id:
+            continue  # not a successful reply — skip
+        tone = (e.get("tone") or "").lower()
+        bot_handle = BOT_HANDLE_BY_TONE.get(tone) or ""
+        reply_url = (
+            f"https://twitter.com/{bot_handle}/status/{reply_id}"
+            if bot_handle else ""
+        )
+        out.append({
+            "reply_id": reply_id,
+            "reply_url": reply_url,
+            "bot_handle": bot_handle,
+            "tone": tone,
+            "received_at_utc": e.get("received_at_utc"),
+            "author_id": e.get("author_id"),
+            "author_username": e.get("author_username"),
+            "study_code": e.get("study_code"),
+            "study_day": e.get("study_day"),
+            "reply_text": e.get("reply_text"),
+            "parent_text": e.get("parent_text"),
+        })
+    return jsonify({"replies": out}), 200
+
+
+def _serialize_participant(p: _participants.Participant) -> dict:
+    return {
+        "author_id": p.author_id,
+        "author_username": p.author_username,
+        "tone": p.tone,
+        "enrolled_at_utc": p.enrolled_at_utc.isoformat() if p.enrolled_at_utc else None,
+        "notes": p.notes,
+    }
+
+
+@app.route("/api/participants", methods=["GET"])
+def api_participants_list():
+    parts = _participants.get_store().list_all()
+    parts.sort(key=lambda p: p.enrolled_at_utc or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    return jsonify({"participants": [_serialize_participant(p) for p in parts]}), 200
+
+
+@app.route("/api/participants", methods=["POST"])
+def api_participants_create():
+    """Register a participant by @handle. Body: {username, notes?}.
+
+    Looks up the X numeric user ID and persists the handle. Bot tone is
+    assigned manually outside this system, so no tone is stored here.
+    Updates the in-process cache so events from the newly-registered
+    participant in *this worker* are tagged immediately; other gunicorn
+    workers pick up the registration from Azure Tables when they next
+    look up the author.
+    """
+    payload = request.get_json(silent=True) or {}
+    username_raw = (payload.get("username") or "").strip()
+    notes = (payload.get("notes") or "").strip()
+
+    if not username_raw:
+        return jsonify({"error": "username is required"}), 400
+
+    clean_username = username_raw.lstrip("@")
+
+    try:
+        author_id = _participants.lookup_author_id(clean_username)
+    except _participants.ParticipantLookupError as exc:
+        return jsonify({"error": str(exc)}), 422
+
+    registered_at = datetime.now(timezone.utc)
+
+    p = _participants.Participant(
+        author_id=author_id,
+        author_username=clean_username,
+        tone="",
+        enrolled_at_utc=registered_at,
+        notes=notes,
+    )
+    _participants.get_store().register(p)
+    _PARTICIPANTS_BY_ID[author_id] = p
+    logger.info(
+        "Registered participant via dashboard: @%s id=%s",
+        clean_username, author_id,
+    )
+    return jsonify({"participant": _serialize_participant(p)}), 201
 
 
 _SSE_TTL = int(os.getenv("DERAD_SSE_TTL", "1800"))  # 30 min default; browser auto-reconnects

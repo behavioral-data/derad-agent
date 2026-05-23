@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -23,6 +24,12 @@ logger = logging.getLogger(__name__)
 
 _TABLE_NAME = "Participants"
 _PARTITION = "participants"
+
+VALID_TONES = ("agreeable", "neutral", "satirical")
+
+
+class ParticipantLookupError(Exception):
+    """Raised when an X handle cannot be resolved to a numeric user ID."""
 
 
 @dataclass
@@ -165,3 +172,48 @@ def reset_store(new: Optional[ParticipantsStore] = None) -> None:
     """Test hook: replace the singleton."""
     global _default_store
     _default_store = new
+
+
+# ── Helpers shared between the CLI and the dashboard API ─────────────────────
+
+def lookup_author_id(
+    username: str,
+    *,
+    tone_for_client: str = "neutral",
+    client=None,
+) -> str:
+    """Resolve an @username to its X numeric user ID.
+
+    Pass `client` to reuse an existing X client (e.g. one a test has patched);
+    otherwise one is built via derad_agent.llm.config.get_x_client. Raises
+    ParticipantLookupError if the handle cannot be resolved.
+    """
+    clean = username.lstrip("@").strip()
+    if not clean:
+        raise ParticipantLookupError("username is empty")
+    if client is None:
+        from derad_agent.llm.config import get_x_client
+        client = get_x_client(tone=tone_for_client)
+    try:
+        response = client.users.get_by_username(username=clean)
+    except Exception as exc:
+        logger.warning("X API lookup failed for @%s: %s", clean, exc)
+        raise ParticipantLookupError(f"X API lookup failed for @{clean}: {exc}") from exc
+
+    data = getattr(response, "data", None) or {}
+    user_id = data.get("id") if isinstance(data, dict) else getattr(data, "id", None)
+    if not user_id:
+        raise ParticipantLookupError(f"@{clean} not found on X")
+    return str(user_id)
+
+
+def pick_balanced_tone(store: Optional[ParticipantsStore] = None) -> str:
+    """Return the least-used tone across current registrations, breaking ties randomly."""
+    s = store or get_store()
+    counts = {t: 0 for t in VALID_TONES}
+    for p in s.list_all():
+        if p.tone in counts:
+            counts[p.tone] += 1
+    min_count = min(counts.values())
+    candidates = [t for t, n in counts.items() if n == min_count]
+    return random.choice(candidates)
