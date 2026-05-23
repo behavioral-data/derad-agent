@@ -1,4 +1,4 @@
-"""Centralised Azure OpenAI configuration.
+"""Centralised LLM configuration.
 
 Loads credentials from ``derad_agent/llm/.env`` and exposes factory
 helpers for embedding and chat models, plus path constants for index
@@ -36,17 +36,6 @@ from langchain_openai import AzureOpenAIEmbeddings as _EmbCls  # type: ignore
 
 # GPT-5 Responses API requires 2025-03-01-preview or later for reasoning controls
 _API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2025-03-01-preview")
-
-# Which LLM provider handles the final reply generation for each tone.
-# "openai"  → Azure OpenAI (deployment from AZURE_OPENAI_DEPLOYMENT_CHAT)
-# "grok"    → Azure AI Services (Grok), requires AZURE_AI_ENDPOINT
-# "claude"  → Azure AI Services (Anthropic), requires AZURE_CLAUDE_ENDPOINT
-STYLE_LLM_PROVIDERS: dict[str, str] = {
-    "agreeable": "claude",
-    "neutral":   "claude",
-    "satirical": "claude",
-}
-
 
 def _validate_env() -> None:
     """Warn early if critical env vars for embedding are missing."""
@@ -90,73 +79,26 @@ def get_llm(
     max_tokens: int = 2048,
     reasoning_effort: str = None,
     text_verbosity: str = None,
-    provider: str = "openai",
     deployment: str = None,
 ):
-    """Get a chat model (cached per unique argument combination).
-
-    provider="openai" — Azure OpenAI (default). Honors reasoning_effort and
-                        text_verbosity (GPT-5 Responses API).
-    provider="claude" — Azure AI Services (Anthropic). reasoning_effort and
-                        text_verbosity are silently ignored.
-    provider="grok"   — Azure AI Services (Grok). reasoning_effort and
-                        text_verbosity are silently ignored.
-
-    deployment: optional explicit deployment name. When set, overrides the
-    provider's default (AZURE_OPENAI_DEPLOYMENT_CHAT for openai,
-    AZURE_CLAUDE_DEPLOYMENT_CHAT for claude, AZURE_AI_DEPLOYMENT_CHAT for grok).
-    Use this to pin a specific step to a specific model.
-    """
-    if provider == "claude":
-        from langchain_anthropic import ChatAnthropic
-        claude_endpoint = _require_env("AZURE_CLAUDE_ENDPOINT")
-        model_name = deployment or os.getenv("AZURE_CLAUDE_DEPLOYMENT_CHAT", "claude-sonnet-4-6")
-        config: dict = {
-            "model_name": model_name,
-            "anthropic_api_url": claude_endpoint,
-            "api_key": _require_env("AZURE_CLAUDE_API_KEY"),
-            "max_tokens_to_sample": max_tokens,
-        }
-        if temperature is not None:
-            config["temperature"] = temperature
-        return ChatAnthropic(**config)
-
-    if provider == "grok":
-        from langchain_openai import ChatOpenAI
-        ai_endpoint = _require_env("AZURE_AI_ENDPOINT")
-        model_name = deployment or os.getenv("AZURE_AI_DEPLOYMENT_CHAT", "grok-4.3")
-        config: dict = {
-            "base_url": f"{ai_endpoint.rstrip('/')}/models",
-            "api_key": _require_env("AZURE_OPENAI_API_KEY"),
-            "model": model_name,
-            "max_tokens": max_tokens,
-        }
-        if temperature is not None:
-            config["temperature"] = temperature
-        return ChatOpenAI(**config)
-
-    from langchain_openai import AzureChatOpenAI
-
-    config = {
-        "azure_deployment": deployment or _require_env("AZURE_OPENAI_DEPLOYMENT_CHAT"),
-        "azure_endpoint": _require_env("AZURE_OPENAI_ENDPOINT"),
-        "api_key": _require_env("AZURE_OPENAI_API_KEY"),
-        "api_version": _API_VERSION,
-        "max_tokens": max_tokens,
+    """Get a Claude chat model via Azure AI Services (cached per unique argument combination)."""
+    from langchain_anthropic import ChatAnthropic
+    claude_endpoint = _require_env("AZURE_CLAUDE_ENDPOINT")
+    model_name = deployment or os.getenv("AZURE_CLAUDE_DEPLOYMENT_CHAT", "claude-sonnet-4-6")
+    config: dict = {
+        "model_name": model_name,
+        "anthropic_api_url": claude_endpoint,
+        "api_key": _require_env("AZURE_CLAUDE_API_KEY"),
+        "max_tokens_to_sample": max_tokens,
     }
     if temperature is not None:
         config["temperature"] = temperature
-    if reasoning_effort is not None:
-        config["reasoning"] = {"effort": reasoning_effort}
-    if text_verbosity is not None:
-        config["verbosity"] = text_verbosity
-
-    return AzureChatOpenAI(**config)
+    return ChatAnthropic(**config)
 
 
-@functools.lru_cache(maxsize=4)
-def get_x_client(tone="agreeable"):
-    """X client, cached per tone."""
+@functools.lru_cache(maxsize=1)
+def get_x_client():
+    """Cached X client for the single bot identity (Eddie)."""
     from xdk import Client
     from xdk.oauth1_auth import OAuth1
 
@@ -164,8 +106,8 @@ def get_x_client(tone="agreeable"):
         api_key=_require_env("X_API_KEY"),
         api_secret=_require_env("X_API_SECRET"),
         callback="oob",
-        access_token=_require_env(f"X_ACCESS_TOKEN_{tone.upper()}"),
-        access_token_secret=_require_env(f"X_ACCESS_TOKEN_SECRET_{tone.upper()}")
+        access_token=_require_env("X_ACCESS_TOKEN"),
+        access_token_secret=_require_env("X_ACCESS_TOKEN_SECRET"),
     )
     client = Client(auth=oauth1)
     return client
@@ -173,7 +115,6 @@ def get_x_client(tone="agreeable"):
 __all__ = [
     "NOTES_TSV_ROOT",
     "INDEX_ROOT",
-    "STYLE_LLM_PROVIDERS",
     "get_embedder",
     "get_llm",
 ]

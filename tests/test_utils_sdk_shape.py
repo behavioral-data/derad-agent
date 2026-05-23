@@ -25,7 +25,6 @@ os.environ.setdefault("SERVER_NAME", "test.local")
 os.environ.setdefault("AZURE_OPENAI_API_KEY", "test_key")
 os.environ.setdefault("AZURE_OPENAI_ENDPOINT", "https://test.example/")
 os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_EMBED", "test-embed")
-os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_CHAT", "test-chat")
 
 from derad_agent.app import utils as utils_module  # noqa: E402
 
@@ -53,9 +52,9 @@ def test_fetch_tweet_unwraps_real_xdk_response_shape(monkeypatch):
     }
     response = GetByIdResponse.model_validate(api_payload)
     stub = _stub_x_client_with_get_by_id(response)
-    monkeypatch.setattr(utils_module, "get_x_client", lambda tone="neutral": stub)
+    monkeypatch.setattr(utils_module, "get_x_client", lambda: stub)
 
-    snap = utils_module.fetch_tweet("100", tone="neutral")
+    snap = utils_module.fetch_tweet("100")
 
     # Currently fails: getattr(dict_instance, "text", None) is None, so
     # fetch_tweet returns None and the bot can never reply.
@@ -77,7 +76,7 @@ def test_post_reply_unwraps_real_xdk_create_response(monkeypatch):
     client = MagicMock()
     client.posts = MagicMock()
     client.posts.create = MagicMock(return_value=response)
-    monkeypatch.setattr(utils_module, "get_x_client", lambda tone="neutral": client)
+    monkeypatch.setattr(utils_module, "get_x_client", lambda: client)
 
-    new_id = utils_module.post_reply(parent_id="100", reply_text="hi", tone="neutral")
+    new_id = utils_module.post_reply(parent_id="100", reply_text="hi")
     assert new_id == "999"

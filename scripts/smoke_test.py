@@ -30,10 +30,10 @@ os.environ.setdefault("X_API_SECRET", "smoke-fake-secret")
 os.environ.setdefault("AZURE_OPENAI_API_KEY", "smoke-fake-key")
 os.environ.setdefault("AZURE_OPENAI_ENDPOINT", "https://smoke.example/")
 os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_EMBED", "smoke-embed")
-os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_CHAT", "smoke-chat")
-os.environ.setdefault("BOT_USER_ID_NEUTRAL", "bot_neutral_999")
-os.environ.setdefault("BOT_USER_ID_AGREEABLE", "bot_agreeable_998")
-os.environ.setdefault("BOT_USER_ID_SATIRICAL", "bot_satirical_997")
+os.environ.setdefault("BOT_HANDLE", "eddiexbot")
+os.environ.setdefault("BOT_USER_ID", "bot_eddie_999")
+os.environ.setdefault("X_ACCESS_TOKEN", "smoke-fake-access-token")
+os.environ.setdefault("X_ACCESS_TOKEN_SECRET", "smoke-fake-access-secret")
 
 # ── Imports (order matters) ───────────────────────────────────────────────────
 from datetime import datetime, timedelta, timezone
@@ -145,8 +145,16 @@ unregd_tweet = {
 }
 with patch.object(app_module.threading, "Thread", _SyncThread):
     with patch.object(app_module, "fetch_tweet", return_value=None):
-        result = app_module._dispatch_tweet("neutral", unregd_tweet, RECEIVED)
+        result = app_module._dispatch_tweet(unregd_tweet, RECEIVED)
 assert_eq("unregistered author → accepted (True)", result, True)
+
+# Unregistered users get a randomly-assigned tone; assert it landed in the event log.
+last_drop_or_event_tone = (e_store.events[-1].tone if e_store.events else None) or \
+    (e_store.drops[-1].tone if e_store.drops else None)
+assert_true(
+    "unregistered mention got a valid random tone",
+    last_drop_or_event_tone in ("agreeable", "neutral", "satirical"),
+)
 
 drop_reasons = [d.drop_reason for d in e_store.drops]
 assert_true("no 'unregistered' drop reason recorded", "unregistered" not in drop_reasons)
@@ -163,9 +171,12 @@ registered_tweet = {
 with patch.object(app_module.threading, "Thread", _SyncThread):
     with patch.object(app_module, "fetch_tweet", return_value=None):
         # fetch_tweet returning None triggers parent_fetch_failed outcome
-        result2 = app_module._dispatch_tweet("neutral", registered_tweet, RECEIVED)
+        result2 = app_module._dispatch_tweet(registered_tweet, RECEIVED)
 
 assert_eq("registered author → accepted (True)", result2, True)
+# Registered participant ("studyparticipant") was registered with tone="neutral".
+reg_ev = e_store.events[-1]
+assert_eq("registered author got their assigned tone", reg_ev.tone, "neutral")
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Phase 4 — Mention processing: study fields

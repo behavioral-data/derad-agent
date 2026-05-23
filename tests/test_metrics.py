@@ -18,9 +18,7 @@ os.environ.setdefault("SERVER_NAME", "test.local")
 os.environ.setdefault("AZURE_OPENAI_API_KEY", "test_key")
 os.environ.setdefault("AZURE_OPENAI_ENDPOINT", "https://test.example/")
 os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_EMBED", "test-embed")
-os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_CHAT", "test-chat")
-os.environ.setdefault("BOT_USER_ID_NEUTRAL", "999")
-os.environ.setdefault("BOT_USER_ID_AGREEABLE", "1000")
+os.environ.setdefault("BOT_USER_ID", "999")
 
 from derad_agent.app import app as app_module  # noqa: E402
 from derad_agent.app import dedup as dedup_module  # noqa: E402
@@ -33,8 +31,13 @@ def _now():
 
 @pytest.fixture
 def dispatch_env(monkeypatch):
-    """Fresh dedup store + thread capture for _dispatch_tweet tests."""
+    """Fresh dedup store + thread capture for _dispatch_tweet tests.
+
+    Pins _resolve_tone to a fixed tone so cap/dedup assertions don't depend
+    on randomness in the unregistered-user branch.
+    """
     monkeypatch.setattr(dedup_module, "_default_store", dedup_module.InMemoryStore())
+    monkeypatch.setattr(app_module, "_resolve_tone", lambda _author_id: "neutral")
 
     started: list[tuple] = []
 
@@ -64,21 +67,21 @@ class TestMetricCounterWiring:
 
     def test_mentions_received_increments_on_valid_post(self, dispatch_env, monkeypatch):
         received = self._spy(monkeypatch, metrics_module.mentions_received)
-        app_module._dispatch_tweet("neutral", self._tweet(), _now())
+        app_module._dispatch_tweet(self._tweet(), _now())
         assert len(received) == 1
         assert received[0]["tone"] == "neutral"
 
     def test_mentions_accepted_increments_when_dispatched(self, dispatch_env, monkeypatch):
         accepted = self._spy(monkeypatch, metrics_module.mentions_accepted)
-        app_module._dispatch_tweet("neutral", self._tweet("a1"), _now())
+        app_module._dispatch_tweet(self._tweet("a1"), _now())
         assert len(accepted) == 1
         assert accepted[0]["tone"] == "neutral"
 
     def test_mentions_dropped_reason_duplicate(self, dispatch_env, monkeypatch):
         dropped = self._spy(monkeypatch, metrics_module.mentions_dropped)
         tweet = self._tweet("dup1")
-        app_module._dispatch_tweet("neutral", tweet, _now())
-        app_module._dispatch_tweet("neutral", tweet, _now())
+        app_module._dispatch_tweet(tweet, _now())
+        app_module._dispatch_tweet(tweet, _now())
         reasons = [c["reason"] for c in dropped]
         assert "duplicate" in reasons
 
@@ -94,13 +97,11 @@ class TestUserDailyCap:
         author = "user-a"
         for i in range(2):
             assert app_module._dispatch_tweet(
-                "neutral",
                 {"id_str": f"m{i}", "in_reply_to_status_id_str": "p1", "user": {"id_str": author}},
                 _now(),
             ) is True
         # Third mention from same author: dropped.
         assert app_module._dispatch_tweet(
-            "neutral",
             {"id_str": "m2", "in_reply_to_status_id_str": "p1", "user": {"id_str": author}},
             _now(),
         ) is False
@@ -110,35 +111,55 @@ class TestUserDailyCap:
         monkeypatch.setattr(app_module, "USER_DAILY_CAP", 1)
         # User A: 1 accepted, 2nd dropped
         assert app_module._dispatch_tweet(
-            "neutral",
             {"id_str": "a1", "in_reply_to_status_id_str": "p1", "user": {"id_str": "user-a"}},
             _now(),
         ) is True
         assert app_module._dispatch_tweet(
-            "neutral",
             {"id_str": "a2", "in_reply_to_status_id_str": "p1", "user": {"id_str": "user-a"}},
             _now(),
         ) is False
         # User B: still has full budget
         assert app_module._dispatch_tweet(
-            "neutral",
             {"id_str": "b1", "in_reply_to_status_id_str": "p1", "user": {"id_str": "user-b"}},
             _now(),
         ) is True
 
-    def test_cap_covers_all_bots(self, dispatch_env, monkeypatch):
-        # User hits cap on agreeable; further calls to neutral or satirical also dropped.
-        monkeypatch.setattr(app_module, "USER_DAILY_CAP", 1)
-        author = "user-multi"
+    def test_cap_bucket_is_author_only_not_per_tone(self, monkeypatch):
+        """An unregistered author can get different random tones on consecutive
+        mentions; the daily cap must still bucket by author_id alone, never
+        f"author:{tone}". Verifies the cap survives random-tone selection."""
+        # Manually set up dispatch_env without pinning _resolve_tone, so tones
+        # really do vary per mention. Drive resolve_tone to flip between
+        # "agreeable" and "satirical" so we can assert the bucket is shared.
+        from derad_agent.app import dedup as dedup_mod
+        monkeypatch.setattr(dedup_mod, "_default_store", dedup_mod.InMemoryStore())
+
+        tones = iter(["agreeable", "satirical", "neutral"])
+        monkeypatch.setattr(app_module, "_resolve_tone", lambda _aid: next(tones))
+
+        class _FakeThread:
+            def __init__(self, target=None, args=(), kwargs=None, daemon=False, **_):
+                self.target, self.args = target, args
+            def start(self):
+                pass
+        monkeypatch.setattr(app_module.threading, "Thread", _FakeThread)
+
+        monkeypatch.setattr(app_module, "USER_DAILY_CAP", 2)
+        monkeypatch.setattr(app_module, "RATE_LIMIT_PER_SEC", 1000)
+        author = "user-rotating"
+        # First two with different tones — accepted.
         assert app_module._dispatch_tweet(
-            "agreeable",
-            {"id_str": "x1", "in_reply_to_status_id_str": "p1", "user": {"id_str": author}},
+            {"id_str": "r1", "in_reply_to_status_id_str": "p1", "user": {"id_str": author}},
             _now(),
         ) is True
-        # Same author on a different tone — still counts against the same daily bucket.
         assert app_module._dispatch_tweet(
-            "neutral",
-            {"id_str": "x2", "in_reply_to_status_id_str": "p1", "user": {"id_str": author}},
+            {"id_str": "r2", "in_reply_to_status_id_str": "p1", "user": {"id_str": author}},
+            _now(),
+        ) is True
+        # Third (even with yet another tone) hits the cap — proves the bucket
+        # is author-only, not (author, tone).
+        assert app_module._dispatch_tweet(
+            {"id_str": "r3", "in_reply_to_status_id_str": "p1", "user": {"id_str": author}},
             _now(),
         ) is False
 
@@ -149,7 +170,6 @@ class TestUserDailyCap:
         author = "user-unlimited"
         for i in range(5):
             assert app_module._dispatch_tweet(
-                "neutral",
                 {"id_str": f"u{i}", "in_reply_to_status_id_str": "p1", "user": {"id_str": author}},
                 _now(),
             ) is True
@@ -165,12 +185,10 @@ class TestUserDailyCap:
         )
         author = "user-cap"
         app_module._dispatch_tweet(
-            "neutral",
             {"id_str": "c1", "in_reply_to_status_id_str": "p1", "user": {"id_str": author}},
             _now(),
         )
         app_module._dispatch_tweet(
-            "neutral",
             {"id_str": "c2", "in_reply_to_status_id_str": "p1", "user": {"id_str": author}},
             _now(),
         )

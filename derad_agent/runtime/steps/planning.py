@@ -12,11 +12,7 @@ from ._helpers import extract_text_from_response, parse_json_response
 
 
 def _planner_deployment() -> str:
-    return os.getenv("AZURE_OPENAI_DEPLOYMENT_PLANNER", "claude-sonnet-4-6")
-
-
-def _planner_provider() -> str:
-    return os.getenv("DERAD_PLANNER_PROVIDER", "claude")
+    return os.getenv("DERAD_PLANNER_DEPLOYMENT", "claude-sonnet-4-6")
 
 
 def step_1_generate_queries(
@@ -42,7 +38,6 @@ def step_1_generate_queries(
         temperature=None,
         max_tokens=2000,
         deployment=_planner_deployment(),
-        provider=_planner_provider(),
     )
     chain = prompt | llm_instance
 

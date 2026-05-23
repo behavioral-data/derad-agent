@@ -22,8 +22,7 @@ os.environ.setdefault("SERVER_NAME", "test.local")
 os.environ.setdefault("AZURE_OPENAI_API_KEY", "test_key")
 os.environ.setdefault("AZURE_OPENAI_ENDPOINT", "https://test.example/")
 os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_EMBED", "test-embed")
-os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_CHAT", "test-chat")
-os.environ.setdefault("BOT_USER_ID_NEUTRAL", "999")
+os.environ.setdefault("BOT_USER_ID", "999")
 
 from derad_agent.app import app as app_module  # noqa: E402
 from derad_agent.app import dedup as dedup_module  # noqa: E402
@@ -44,8 +43,12 @@ def fake_events_store():
 
 @pytest.fixture
 def dispatch_env(monkeypatch, fake_events_store):
-    """Fresh dedup store + thread capture for _dispatch_tweet tests."""
+    """Fresh dedup store + thread capture for _dispatch_tweet tests.
+
+    Pins _resolve_tone so drop/event tests don't depend on random tone selection.
+    """
     monkeypatch.setattr(dedup_module, "_default_store", dedup_module.InMemoryStore())
+    monkeypatch.setattr(app_module, "_resolve_tone", lambda _author_id: "neutral")
 
     started: list[tuple] = []
 
@@ -106,22 +109,22 @@ class TestDropWiring:
     def test_no_parent_logs_drop(self, dispatch_env):
         tweet = self._tweet()
         del tweet["in_reply_to_status_id_str"]
-        app_module._dispatch_tweet("neutral", tweet, _now())
+        app_module._dispatch_tweet(tweet, _now())
         drops = dispatch_env["events"].drops
         assert len(drops) == 1
         assert drops[0].drop_reason == "no_parent"
 
     def test_self_reply_logs_drop(self, dispatch_env, monkeypatch):
-        monkeypatch.setitem(app_module.BOT_USER_ID_BY_TONE, "neutral", "999")
+        monkeypatch.setattr(app_module, "BOT_USER_ID", "999")
         tweet = self._tweet(user={"id_str": "999"})
-        app_module._dispatch_tweet("neutral", tweet, _now())
+        app_module._dispatch_tweet(tweet, _now())
         drops = dispatch_env["events"].drops
         assert any(d.drop_reason == "self_reply" for d in drops)
 
     def test_duplicate_logs_drop(self, dispatch_env):
         tweet = self._tweet()
-        app_module._dispatch_tweet("neutral", tweet, _now())
-        app_module._dispatch_tweet("neutral", tweet, _now())
+        app_module._dispatch_tweet(tweet, _now())
+        app_module._dispatch_tweet(tweet, _now())
         drops = dispatch_env["events"].drops
         assert sum(1 for d in drops if d.drop_reason == "duplicate") == 1
         assert dispatch_env["started"], "first delivery should have started a thread"
@@ -129,7 +132,7 @@ class TestDropWiring:
     def test_rate_limit_logs_drop(self, dispatch_env):
         for i in range(5):
             tweet = self._tweet(id_str=f"m{i}")
-            app_module._dispatch_tweet("neutral", tweet, _now())
+            app_module._dispatch_tweet(tweet, _now())
         drops = [d for d in dispatch_env["events"].drops if d.drop_reason == "rate_limit"]
         assert drops, "expected at least one rate_limit drop"
         assert drops[0].extra.get("hits", 0) > 0
@@ -148,7 +151,7 @@ class TestEventWiring:
         monkeypatch.setattr(app_module, "generate_reply", lambda **kw: generate_reply_result)
 
         call_count = {"n": 0}
-        def _post(parent_id, reply_text, tone):
+        def _post(parent_id, reply_text):
             call_count["n"] += 1
             return post_reply_returns[call_count["n"] - 1]
         monkeypatch.setattr(app_module, "post_reply", _post)

@@ -13,8 +13,7 @@ os.environ.setdefault("SERVER_NAME", "test.local")
 os.environ.setdefault("AZURE_OPENAI_API_KEY", "test_key")
 os.environ.setdefault("AZURE_OPENAI_ENDPOINT", "https://test.example/")
 os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_EMBED", "test-embed")
-os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_CHAT", "test-chat")
-os.environ.setdefault("BOT_USER_ID_NEUTRAL", "999")
+os.environ.setdefault("BOT_USER_ID", "999")
 
 from derad_agent.app import app as app_module  # noqa: E402
 from derad_agent.app import participants as participants_module  # noqa: E402
@@ -152,12 +151,12 @@ class TestApiReplies:
         r = replies[0]
         assert r["reply_id"] == "9001"
         assert r["author_username"] == "alice"
-        assert r["bot_handle"]  # populated from BOT_HANDLE_BY_TONE
+        assert r["bot_handle"]  # populated from BOT_HANDLE
         assert r["reply_url"].endswith("/status/9001")
         assert r["tone"] == "agreeable"
 
-    def test_unknown_tone_yields_empty_url(self, events_store, client, monkeypatch):
-        monkeypatch.setitem(app_module.BOT_HANDLE_BY_TONE, "agreeable", "")
+    def test_blank_bot_handle_yields_empty_url(self, events_store, client, monkeypatch):
+        monkeypatch.setattr(app_module, "BOT_HANDLE", "")
         events_store.write_event(self._make_event(
             reply_id="42", tone="agreeable", outcome="replied",
         ))

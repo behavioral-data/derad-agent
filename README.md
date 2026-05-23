@@ -11,7 +11,8 @@ claim → query planning → cosine retrieval → note selection → relevance f
 ## Prerequisites
 
 - Python 3.9+
-- Azure OpenAI credentials (embeddings + chat)
+- Azure OpenAI credentials (embeddings)
+- Azure AI Services credentials (Claude chat)
 
 ## Installation
 
@@ -22,7 +23,7 @@ pip install -e .
 
 ## Environment
 
-Copy the template and fill in your Azure OpenAI credentials:
+Copy the template and fill in your credentials:
 
 ```bash
 cp derad_agent/llm/.env.example derad_agent/llm/.env
@@ -30,10 +31,11 @@ cp derad_agent/llm/.env.example derad_agent/llm/.env
 
 | Variable | Purpose |
 |---|---|
-| `AZURE_OPENAI_API_KEY` | API key |
-| `AZURE_OPENAI_ENDPOINT` | Endpoint URL |
+| `AZURE_OPENAI_API_KEY` | Azure OpenAI API key (embeddings) |
+| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint URL (embeddings) |
 | `AZURE_OPENAI_DEPLOYMENT_EMBED` | Embedding model deployment name |
-| `AZURE_OPENAI_DEPLOYMENT_CHAT` | Chat model deployment name |
+| `AZURE_CLAUDE_ENDPOINT` | Azure AI Services endpoint (Claude chat) |
+| `AZURE_CLAUDE_API_KEY` | Azure AI Services API key (Claude chat) |
 
 Optional path overrides:
 
@@ -99,7 +101,7 @@ print(result["reply"]["response"])
 ```
 derad_agent/
 ├── cli/          Entry points: ask.py, embed_notes.py, ui.py
-├── llm/          Azure OpenAI config and prompt templates
+├── llm/          LLM config and prompt templates
 ├── runtime/      Pipeline orchestration and notes index
 │   └── steps/    Planning, relevance filter, and output steps
 └── shared/       Validation, text utils, logging

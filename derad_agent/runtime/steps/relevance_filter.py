@@ -43,7 +43,7 @@ def step_filter_notes_by_relevance(
     # silently truncating when dense topics return hundreds of candidates.
     max_tokens = max(512, min(8192, len(payload) * 12 + 256))
     prompt = get_relevance_filter_prompt()
-    llm = get_llm(max_tokens=max_tokens, provider="claude")
+    llm = get_llm(max_tokens=max_tokens)
     chain = prompt | llm
 
     try:

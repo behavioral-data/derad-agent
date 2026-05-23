@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from html import unescape
 from typing import Any, Dict, List, Optional, Sequence
 
-from derad_agent.llm.config import get_llm, STYLE_LLM_PROVIDERS
+from derad_agent.llm.config import get_llm
 from derad_agent.llm.prompts import get_style_prompt, get_no_factcheck_prompt
 
 from ._helpers import extract_text_from_response, parse_json_response
@@ -136,14 +136,12 @@ def step_compose_reply(
     candidates = _evidence_payload(notes)
     candidate_index = {str(c["note_id"]): c for c in candidates if c.get("note_id") is not None}
 
-    provider = STYLE_LLM_PROVIDERS.get(style, "openai")
     prompt = get_style_prompt(style)
     llm = get_llm(
         temperature=None,
         max_tokens=1400,
         reasoning_effort="medium",
         text_verbosity="medium",
-        provider=provider,
     )
     chain = prompt | llm
 
@@ -156,8 +154,8 @@ def step_compose_reply(
     try:
         formatted = prompt.format_messages(**invoke_vars)
         logger.info(
-            "compose_reply request — provider=%s style=%s notes=%d\n%s",
-            provider, style, len(candidates),
+            "compose_reply request — style=%s notes=%d\n%s",
+            style, len(candidates),
             "\n---\n".join(f"[{m.type}] {m.content}" for m in formatted),
         )
     except Exception:
@@ -179,7 +177,6 @@ def step_compose_reply(
             max_tokens=1400,
             reasoning_effort="medium",
             text_verbosity="low",
-            provider=provider,
         )
         repair_raw = repair_llm.invoke(repair_prompt)
         parsed = parse_json_response(extract_text_from_response(repair_raw))
@@ -214,14 +211,12 @@ def step_compose_no_factcheck_reply(
       - ``"no_claim"``: planner gate fired — tweet has no factcheckable claim.
       - ``"no_notes"``: search ran but no relevant Community Notes were found.
     """
-    provider = STYLE_LLM_PROVIDERS.get(style, "openai")
     prompt = get_no_factcheck_prompt(style, reason=reason)
     llm = get_llm(
         temperature=None,
         max_tokens=200,
         reasoning_effort="medium",
         text_verbosity="low",
-        provider=provider,
     )
     chain = prompt | llm
 
@@ -229,8 +224,8 @@ def step_compose_no_factcheck_reply(
         try:
             formatted = prompt.format_messages(statement=statement)
             logger.info(
-                "compose_no_factcheck_reply request — provider=%s style=%s reason=%s\n%s",
-                provider, style, reason,
+                "compose_no_factcheck_reply request — style=%s reason=%s\n%s",
+                style, reason,
                 "\n---\n".join(f"[{m.type}] {m.content}" for m in formatted),
             )
         except Exception:
