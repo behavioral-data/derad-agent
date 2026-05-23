@@ -167,7 +167,6 @@ class TestEventWiring:
         return fake_events_store.events[-1], ts
 
     def test_replied_outcome_captures_full_pipeline_state(self, monkeypatch, fake_events_store):
-        monkeypatch.setattr(app_module, "POST_SOURCES_TWEET", True)
         from derad_agent.app.utils import TweetSnapshot
         snap = TweetSnapshot(
             text="Mail-in voting causes fraud.",
@@ -187,7 +186,7 @@ class TestEventWiring:
         ev, ts_passed = self._run_process(
             fetch_snap=snap,
             generate_reply_result=gen,
-            post_reply_returns=["REPLY_ID", "SOURCES_ID"],
+            post_reply_returns=["REPLY_ID"],
             monkeypatch=monkeypatch,
             fake_events_store=fake_events_store,
             received_at_utc=ts,
@@ -195,7 +194,6 @@ class TestEventWiring:
         assert ev.outcome == "replied"
         assert ev.received_at_utc == ts_passed
         assert ev.reply_id == "REPLY_ID"
-        assert ev.sources_reply_id == "SOURCES_ID"
         assert ev.parent_text == "Mail-in voting causes fraud."
         assert ev.parent_author_id == "999"
         assert ev.parent_author_username == "parent_user"
@@ -230,26 +228,6 @@ class TestEventWiring:
         )[0]
         assert ev.outcome == "empty_reply"
         assert ev.reply_id is None
-
-    def test_replied_no_sources_when_sources_post_fails(self, monkeypatch, fake_events_store):
-        monkeypatch.setattr(app_module, "POST_SOURCES_TWEET", True)
-        from derad_agent.app.utils import TweetSnapshot
-        snap = TweetSnapshot(text="claim", author_id="999", author_username="u")
-        gen = {
-            "text": "main reply", "sources": ["https://a.example"],
-            "tweets": ["t1"], "notes": ["n1"],
-            "queries": ["q"], "all_cited_tweet_ids": ["t1"], "all_cited_note_ids": ["n1"],
-        }
-        ev = self._run_process(
-            fetch_snap=snap,
-            generate_reply_result=gen,
-            post_reply_returns=["REPLY_ID", None],
-            monkeypatch=monkeypatch,
-            fake_events_store=fake_events_store,
-        )[0]
-        assert ev.outcome == "replied_no_sources"
-        assert ev.reply_id == "REPLY_ID"
-        assert ev.sources_reply_id is None
 
     def test_x_post_error_outcome(self, monkeypatch, fake_events_store):
         from derad_agent.app.utils import TweetSnapshot

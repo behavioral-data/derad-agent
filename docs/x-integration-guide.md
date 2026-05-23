@@ -37,17 +37,20 @@ There is no `/mentions` webhook endpoint. The stream runs as a background thread
 
 ## How Tone Routing Works
 
-At startup, `streamer.py` syncs stream rules so each bot handle has exactly one tagged rule:
+At startup, `streamer.py` syncs a single stream rule from the configured `BOT_HANDLE`:
 
 ```json
 [
-  {"value": "@aggiexbot", "tag": "agreeable"},
-  {"value": "@nelliexbot", "tag": "neutral"},
-  {"value": "@eddiexbot",  "tag": "satirical"}
+  {"value": "@eddiexbot"}
 ]
 ```
 
-When a stream event arrives, `matching_rules[0].tag` identifies the target bot tone. The tweet is reshaped into the expected dict format and passed to `_dispatch_tweet(tone, tweet, received_at_utc)`.
+When a stream event arrives the tweet is reshaped into the expected dict format and passed to `_dispatch_tweet(tweet, received_at_utc)`. Inside `_dispatch_tweet`, tone is resolved by `_resolve_tone(author_id)`:
+
+- If the mention author is a **registered participant**, their assigned tone (agreeable / neutral / satirical, set at enrolment) is used.
+- Otherwise a tone is drawn uniformly at random per mention.
+
+The three tone prompts all share the same retrieval pipeline; only the final response template differs.
 
 ---
 
@@ -57,7 +60,7 @@ When a stream event arrives, `matching_rules[0].tag` identifies the target bot t
 
 - Tier: **Basic** or higher (Filtered Stream requires PPU or Basic access)
 - Permissions: **Read + Write** (needs to post replies)
-- App type: **Web App / Bot** (generates API key+secret and per-bot access tokens)
+- App type: **Web App / Bot** (generates API key+secret and the Eddie bot's access tokens)
 
 ### 2. No webhook registration needed
 
@@ -65,7 +68,7 @@ Filtered Stream is a pull-based API. The app connects to X, not the other way ar
 
 ### 3. Bearer token
 
-The Filtered Stream uses **Bearer token auth** (app-only). The bearer token is stored in Key Vault as `x-bearer-token`. Posting replies uses per-bot **OAuth 1.0a access tokens**.
+The Filtered Stream uses **Bearer token auth** (app-only). The bearer token is stored in Key Vault as `x-bearer-token`. Posting replies uses the Eddie bot's **OAuth 1.0a access tokens**.
 
 ---
 
@@ -85,18 +88,12 @@ az keyvault secret set --vault-name $KV --name x-api-secret        --value "<API
 # Bearer token — for Filtered Stream (app-only auth)
 az keyvault secret set --vault-name $KV --name x-bearer-token      --value "<BEARER_TOKEN>"
 
-# Per-bot OAuth 1.0a access tokens (one set per bot account)
-az keyvault secret set --vault-name $KV --name x-access-token-agreeable        --value "<TOKEN>"
-az keyvault secret set --vault-name $KV --name x-access-token-secret-agreeable --value "<SECRET>"
-az keyvault secret set --vault-name $KV --name x-access-token-neutral          --value "<TOKEN>"
-az keyvault secret set --vault-name $KV --name x-access-token-secret-neutral   --value "<SECRET>"
-az keyvault secret set --vault-name $KV --name x-access-token-satirical        --value "<TOKEN>"
-az keyvault secret set --vault-name $KV --name x-access-token-secret-satirical --value "<SECRET>"
+# Eddie bot OAuth 1.0a access tokens (single bot identity)
+az keyvault secret set --vault-name $KV --name x-access-token        --value "<TOKEN>"
+az keyvault secret set --vault-name $KV --name x-access-token-secret --value "<SECRET>"
 
-# Bot user IDs (numeric, not handles) — enables self-reply guard
-az keyvault secret set --vault-name $KV --name bot-user-id-agreeable --value "<NUMERIC_USER_ID>"
-az keyvault secret set --vault-name $KV --name bot-user-id-neutral   --value "<NUMERIC_USER_ID>"
-az keyvault secret set --vault-name $KV --name bot-user-id-satirical --value "<NUMERIC_USER_ID>"
+# Bot user ID (numeric, not handle) — enables self-reply guard
+az keyvault secret set --vault-name $KV --name bot-user-id --value "<NUMERIC_USER_ID>"
 ```
 
 After updating secrets, restart the App Service to pick them up:
@@ -104,6 +101,21 @@ After updating secrets, restart the App Service to pick them up:
 ```bash
 az webapp restart --name azapplikxqqfjcgk72 --resource-group rg-derad-agent
 ```
+
+### Migrating an existing vault (post single-bot refactor)
+
+The first `azd up` after the single-bot refactor will fail to start the App Service if the new secret names (`x-access-token`, `x-access-token-secret`, `bot-user-id`) aren't seeded yet — the old per-tone names (`*-agreeable`, `*-neutral`, `*-satirical`) are no longer referenced. Before redeploying:
+
+```bash
+KV="azkvlikxqqfjcgk72"
+
+# Copy the Eddie set into the new flat names.
+az keyvault secret set --vault-name $KV --name x-access-token        --value "$(az keyvault secret show --vault-name $KV --name x-access-token-satirical        --query value -o tsv)"
+az keyvault secret set --vault-name $KV --name x-access-token-secret --value "$(az keyvault secret show --vault-name $KV --name x-access-token-secret-satirical --query value -o tsv)"
+az keyvault secret set --vault-name $KV --name bot-user-id           --value "$(az keyvault secret show --vault-name $KV --name bot-user-id-satirical           --query value -o tsv)"
+```
+
+The old per-tone secrets are harmless to leave behind (nothing references them), but can be deleted with `az keyvault secret delete --vault-name $KV --name <old-secret>` once redeploy is verified healthy.
 
 ---
 
@@ -143,7 +155,7 @@ The Filtered Stream delivers v2 tweet objects. The streamer reshapes each event 
 }
 ```
 
-The tone is extracted from `matching_rules[0].tag`, not from the tweet payload.
+Tone is no longer carried on the stream event — it is resolved inside `_dispatch_tweet` from the mention author's participant record (random for unregistered users).
 
 ---
 
@@ -156,7 +168,7 @@ While X credentials are still `placeholder`, use dry-run mode:
 # DERAD_DRY_RUN=true skips the actual X reply post
 
 # In dry-run, the mention text itself is used as the statement (no parent fetch needed)
-# Trigger a test by sending a mention from an allowed account to any of the three bot handles
+# Trigger a test by sending a mention to @eddiexbot
 ```
 
 **To see the generated reply** (wait ~40 s after the mention is ingested):
@@ -180,19 +192,20 @@ You need the `Storage Table Data Reader` role on `azsalikxqqfjcgk72` — ask @ad
 
 ## Tone Routing Reference
 
-| Bot handle    | Tone      | KV secret for user ID   |
-| ------------- | --------- | ----------------------- |
-| `@aggiexbot`  | agreeable | `bot-user-id-agreeable` |
-| `@nelliexbot` | neutral   | `bot-user-id-neutral`   |
-| `@eddiexbot`  | satirical | `bot-user-id-satirical` |
+A single bot handle is configured via `BOT_HANDLE` (default `eddiexbot`) and its numeric user id via `BOT_USER_ID` (loaded from the `bot-user-id` KV secret). Tone (agreeable / neutral / satirical) is selected per mention inside `_resolve_tone`:
+
+| Mention author                | Tone used                                           |
+| ----------------------------- | --------------------------------------------------- |
+| Registered study participant  | The tone assigned at enrolment (sticky per author)  |
+| Unregistered / bystander      | Drawn uniformly at random per mention               |
 
 ---
 
 ## Checklist: Going Live
 
 - [ ] Create X developer app with Read + Write permissions
-- [ ] Generate API key/secret, bearer token, and per-bot access token pairs
-- [ ] Populate all KV secrets (bearer token, keys, per-bot tokens, user IDs)
+- [ ] Generate API key/secret, bearer token, and the Eddie bot's access token pair
+- [ ] Populate KV secrets (bearer token, keys, eddie access token + secret, bot user id)
 - [ ] Set `DERAD_DRY_RUN=false` in App Service
 - [ ] Restart App Service and verify `/healthz` returns `index_loaded: true`
 - [ ] Check App Service logs for "Filtered stream connected" — confirms the stream is live

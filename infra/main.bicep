@@ -24,10 +24,8 @@ param tags object = {
 @description('App Service Plan SKU. B2 (3.5 GB) is the v1 pick.')
 param appServicePlanSku string = 'B2'
 
-@description('Public bot handles wired into /info and the tweet href.')
-param botHandleAgreeable string = 'aggiexbot'
-param botHandleNeutral string = 'nelliexbot'
-param botHandleSatirical string = 'eddiexbot'
+@description('Public bot handle (Eddie) wired into /info and the tweet href.')
+param botHandle string = 'eddiexbot'
 
 @description('Email for cost and webhook alert notifications. Empty = rules are created but notify nobody.')
 param alertEmail string = ''
@@ -44,6 +42,8 @@ var saName  = 'azsa${resourceToken}'
 var kvName  = 'azkv${resourceToken}'
 var logName = 'azlog${resourceToken}'
 var aiName  = 'azai${resourceToken}'
+var caeName = 'azcae${resourceToken}'
+var cjobName = 'azcjob-eng${resourceToken}'
 
 // ── User-Assigned Managed Identity ──────────────────────────────────────────
 resource uami 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = {
@@ -217,7 +217,6 @@ resource appService 'Microsoft.Web/sites@2024-11-01' = {
         { name: 'SERVER_NAME', value: '${appName}.azurewebsites.net' }
         { name: 'PREFERRED_URL_SCHEME', value: 'https' }
         { name: 'DERAD_RATE_LIMIT_PER_SEC', value: '3' }
-        { name: 'DERAD_POST_SOURCES_TWEET', value: 'false' }
         { name: 'DERAD_MAX_MENTIONS_PER_DAY', value: '500' }
         { name: 'DERAD_INGEST_MODE', value: 'streaming' }
         { name: 'DERAD_STORE_BACKEND', value: 'tables' }
@@ -225,9 +224,7 @@ resource appService 'Microsoft.Web/sites@2024-11-01' = {
         { name: 'DERAD_PARTICIPANTS_BACKEND', value: 'tables' }
         { name: 'DERAD_TABLES_ENDPOINT', value: 'https://${storage.name}.table.core.windows.net' }
         { name: 'AZURE_CLIENT_ID', value: uami.properties.clientId }
-        { name: 'BOT_HANDLE_AGREEABLE', value: botHandleAgreeable }
-        { name: 'BOT_HANDLE_NEUTRAL', value: botHandleNeutral }
-        { name: 'BOT_HANDLE_SATIRICAL', value: botHandleSatirical }
+        { name: 'BOT_HANDLE', value: botHandle }
         { name: 'AZURE_OPENAI_API_VERSION', value: '2025-03-01-preview' }
         // Secrets — wired as Key Vault references. Seed the secrets in KV
         // before the first boot (see deployment runbook). The vault and role
@@ -240,15 +237,9 @@ resource appService 'Microsoft.Web/sites@2024-11-01' = {
         { name: 'X_API_KEY', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/x-api-key)' }
         { name: 'X_API_SECRET', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/x-api-secret)' }
         { name: 'X_BEARER_TOKEN', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/x-bearer-token)' }
-        { name: 'X_ACCESS_TOKEN_AGREEABLE', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/x-access-token-agreeable)' }
-        { name: 'X_ACCESS_TOKEN_SECRET_AGREEABLE', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/x-access-token-secret-agreeable)' }
-        { name: 'X_ACCESS_TOKEN_NEUTRAL', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/x-access-token-neutral)' }
-        { name: 'X_ACCESS_TOKEN_SECRET_NEUTRAL', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/x-access-token-secret-neutral)' }
-        { name: 'X_ACCESS_TOKEN_SATIRICAL', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/x-access-token-satirical)' }
-        { name: 'X_ACCESS_TOKEN_SECRET_SATIRICAL', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/x-access-token-secret-satirical)' }
-        { name: 'BOT_USER_ID_AGREEABLE', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/bot-user-id-agreeable)' }
-        { name: 'BOT_USER_ID_NEUTRAL', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/bot-user-id-neutral)' }
-        { name: 'BOT_USER_ID_SATIRICAL', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/bot-user-id-satirical)' }
+        { name: 'X_ACCESS_TOKEN', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/x-access-token)' }
+        { name: 'X_ACCESS_TOKEN_SECRET', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/x-access-token-secret)' }
+        { name: 'BOT_USER_ID', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/bot-user-id)' }
       ]
     }
   }
@@ -313,6 +304,119 @@ resource kvSecretsUserAssignment 'Microsoft.Authorization/roleAssignments@2022-0
     principalId: uami.properties.principalId
     principalType: 'ServicePrincipal'
   }
+}
+
+// ── Container Apps: scheduled engagement polling job ────────────────────────
+// Shared environment so future scheduled jobs land in the same workspace.
+// Logs forwarded to the existing Log Analytics workspace via shared key — the
+// only Container Apps-supported destination that doesn't require a separate
+// data-collection-rule resource. The shared key surfaces in deployment history
+// (Reader-visible) but is rotatable and only authorizes log ingestion.
+resource containerAppsEnv 'Microsoft.App/managedEnvironments@2024-03-01' = {
+  name: caeName
+  location: location
+  tags: tags
+  properties: {
+    appLogsConfiguration: {
+      destination: 'log-analytics'
+      logAnalyticsConfiguration: {
+        customerId: logAnalytics.properties.customerId
+        sharedKey: logAnalytics.listKeys().primarySharedKey
+      }
+    }
+  }
+}
+
+// Daily engagement cron at 12:00 UTC.
+// Runs both CLIs in one replica:
+//   - derad-poll-engagement  → EngagementSnapshots (one per reply at the 3-day mark)
+//   - derad-collect-replies  → BotReplyReplies     (bystander text at the same window)
+// Shell wrapper preserves both exit codes so a partial failure surfaces as a
+// non-zero replica (visible in the Container Apps run history + log alerts).
+// Same UAMI as App Service → AcrPull, Tables, and KV access already in place;
+// no extra role assignments needed.
+resource engagementCronJob 'Microsoft.App/jobs@2024-03-01' = {
+  name: cjobName
+  location: location
+  tags: tags
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${uami.id}': {}
+    }
+  }
+  properties: {
+    environmentId: containerAppsEnv.id
+    configuration: {
+      triggerType: 'Schedule'
+      // 30-minute cap. Polling N replies = N X-API GETs; at ~200ms each the
+      // realistic cap is ~9000 replies/run. 30 min is well above expected scale.
+      replicaTimeout: 1800
+      replicaRetryLimit: 1
+      scheduleTriggerConfig: {
+        cronExpression: '0 12 * * *'
+        parallelism: 1
+        replicaCompletionCount: 1
+      }
+      registries: [
+        {
+          server: acr.properties.loginServer
+          identity: uami.id
+        }
+      ]
+      secrets: [
+        {
+          name: 'x-api-key'
+          keyVaultUrl: '${keyVault.properties.vaultUri}secrets/x-api-key'
+          identity: uami.id
+        }
+        {
+          name: 'x-api-secret'
+          keyVaultUrl: '${keyVault.properties.vaultUri}secrets/x-api-secret'
+          identity: uami.id
+        }
+        {
+          name: 'x-access-token'
+          keyVaultUrl: '${keyVault.properties.vaultUri}secrets/x-access-token'
+          identity: uami.id
+        }
+        {
+          name: 'x-access-token-secret'
+          keyVaultUrl: '${keyVault.properties.vaultUri}secrets/x-access-token-secret'
+          identity: uami.id
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'engagement'
+          image: '${acr.properties.loginServer}/derad-agent:latest'
+          command: ['/bin/sh', '-c']
+          // Run both CLIs; exit non-zero iff either failed.
+          args: ['derad-poll-engagement; eng=$?; derad-collect-replies; col=$?; exit $((eng + col))']
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: [
+            { name: 'DERAD_EVENTS_BACKEND', value: 'tables' }
+            { name: 'DERAD_TABLES_ENDPOINT', value: 'https://${storage.name}.table.core.windows.net' }
+            { name: 'AZURE_CLIENT_ID', value: uami.properties.clientId }
+            { name: 'X_API_KEY', secretRef: 'x-api-key' }
+            { name: 'X_API_SECRET', secretRef: 'x-api-secret' }
+            { name: 'X_ACCESS_TOKEN', secretRef: 'x-access-token' }
+            { name: 'X_ACCESS_TOKEN_SECRET', secretRef: 'x-access-token-secret' }
+          ]
+        }
+      ]
+    }
+  }
+  dependsOn: [
+    acrPullAssignment
+    kvSecretsUserAssignment
+    tableDataContributorAssignment
+  ]
 }
 
 // ── Phase 6: Observability — action group, budget, and alert rules ──────────
@@ -456,3 +560,5 @@ output AZURE_USER_ASSIGNED_IDENTITY_NAME string = uami.name
 output AZURE_USER_ASSIGNED_IDENTITY_CLIENT_ID string = uami.properties.clientId
 output AZURE_USER_ASSIGNED_IDENTITY_PRINCIPAL_ID string = uami.properties.principalId
 output AZURE_CONTAINER_IMAGE_NAME string = '${acr.properties.loginServer}/derad-agent:latest'
+output AZURE_CONTAINER_APPS_ENV_NAME string = containerAppsEnv.name
+output AZURE_ENGAGEMENT_CRON_JOB_NAME string = engagementCronJob.name

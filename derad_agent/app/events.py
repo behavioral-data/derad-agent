@@ -68,13 +68,13 @@ class MentionEvent:
     cited_tweet_ids: list[str] = field(default_factory=list)
     reply_text: Optional[str] = None
     reply_id: Optional[str] = None
-    sources_reply_id: Optional[str] = None
 
     # Study tracking
     study_code: Optional[str] = None      # 4-letter code used in daily DM surveys
     participant_id: Optional[str] = None  # author_id, explicit FK to Participants table
     study_day: Optional[int] = None       # 1-based day number within the 5-day study
     bot_author_id: Optional[str] = None   # X user ID of the bot that replied
+    bot_handle: Optional[str] = None      # @handle of the bot that replied
 
     # Outcome
     outcome: str = "replied"  # 'replied' | 'pipeline_error' | 'x_post_error' | 'parent_fetch_failed' | 'empty_reply'
@@ -136,6 +136,8 @@ class EventsStore(Protocol):
     def write_engagement(self, snap: EngagementSnapshot) -> None: ...
     def write_reply_reply(self, reply: BotReplyReply) -> None: ...
     def iter_reply_ids(self) -> list[tuple[str, str, datetime | None, str | None, str | None]]: ...
+    def snapshotted_reply_ids(self) -> set[str]: ...
+    def collected_reply_ids(self) -> set[str]: ...
 
 
 # ── In-memory backend (tests + local dev) ───────────────────────────────────
@@ -174,6 +176,14 @@ class InMemoryEventsStore:
                 if ev.reply_id
             ]
 
+    def snapshotted_reply_ids(self) -> set[str]:
+        with self._lock:
+            return {s.reply_id for s in self.engagements}
+
+    def collected_reply_ids(self) -> set[str]:
+        with self._lock:
+            return {r.bot_reply_id for r in self.reply_replies}
+
     def list_recent(self, limit: int = 50) -> list[dict]:
         with self._lock:
             events = list(reversed(self.events[-limit:]))
@@ -191,6 +201,7 @@ class InMemoryEventsStore:
                 "study_code": e.study_code,
                 "reply_text": (e.reply_text or "")[:120],
                 "parent_text": (e.parent_text or "")[:120],
+                "bot_handle": e.bot_handle,
             }
             for e in events
         ]
@@ -294,7 +305,6 @@ class TablesEventsStore:
             "cited_tweet_ids_json": json.dumps(ev.cited_tweet_ids, ensure_ascii=False),
             "reply_text": self._truncate(ev.reply_text),
             "reply_id": ev.reply_id,
-            "sources_reply_id": ev.sources_reply_id,
             "received_at_utc": ev.received_at_utc,
             "pipeline_start_utc": ev.pipeline_start_utc,
             "reply_posted_utc": ev.reply_posted_utc,
@@ -307,6 +317,7 @@ class TablesEventsStore:
             "participant_id": ev.participant_id,
             "study_day": ev.study_day,
             "bot_author_id": ev.bot_author_id,
+            "bot_handle": ev.bot_handle,
         }
 
     def _drop_entity(self, drop: MentionDrop) -> dict[str, Any]:
@@ -381,10 +392,32 @@ class TablesEventsStore:
             logger.exception("iter_reply_ids failed")
         return result
 
+    def snapshotted_reply_ids(self) -> set[str]:
+        result: set[str] = set()
+        try:
+            for entity in self._engagements.list_entities(select=["reply_id"]):
+                rid = entity.get("reply_id")
+                if rid:
+                    result.add(rid)
+        except Exception:
+            logger.exception("snapshotted_reply_ids failed")
+        return result
+
+    def collected_reply_ids(self) -> set[str]:
+        result: set[str] = set()
+        try:
+            for entity in self._reply_replies.list_entities(select=["bot_reply_id"]):
+                rid = entity.get("bot_reply_id")
+                if rid:
+                    result.add(rid)
+        except Exception:
+            logger.exception("collected_reply_ids failed")
+        return result
+
     _EVENT_SELECT = [
         "RowKey", "mention_id", "author_id", "author_username", "tone", "outcome",
         "received_at_utc", "pipeline_ms", "study_day", "study_code",
-        "reply_text", "parent_text", "reply_id", "bot_author_id",
+        "reply_text", "parent_text", "reply_id", "bot_author_id", "bot_handle",
     ]
     _DROP_SELECT = [
         "RowKey", "mention_id", "author_id", "tone", "drop_reason", "received_at_utc",
@@ -520,16 +553,5 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-# Shared constants for the 3-day bystander measurement window.
-THREE_DAY_MIN_AGE = timedelta(days=3)
-MEASUREMENT_WINDOW = timedelta(days=1)
-
-
-def in_three_day_window(posted_at: Optional[datetime], now: datetime) -> bool:
-    """True if posted_at falls in the [3-day, 4-day) window relative to now."""
-    if posted_at is None:
-        return False
-    if posted_at.tzinfo is None:
-        posted_at = posted_at.replace(tzinfo=timezone.utc)
-    age = now - posted_at
-    return THREE_DAY_MIN_AGE <= age < THREE_DAY_MIN_AGE + MEASUREMENT_WINDOW
+# Minimum age before a bot reply is eligible for engagement/bystander collection.
+SNAPSHOT_MIN_AGE = timedelta(days=3)

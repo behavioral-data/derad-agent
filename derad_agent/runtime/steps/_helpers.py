@@ -18,10 +18,15 @@ _RE_JSON_CODEBLOCK = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 
 # -- Public helpers -------------------------------------------------------
 
+_SKIP_BLOCK_TYPES = frozenset({"reasoning", "thinking", "redacted_thinking"})
+
+
 def extract_text_from_response(raw_output_obj: Any) -> str:
     """Extract text content from an LLM response object.
 
-    Handles both the Chat Completions API and GPT-5 Responses API formats.
+    Skips reasoning / extended-thinking content blocks so JSON parsing only
+    sees the visible-output text. Handles Claude (thinking / redacted_thinking
+    blocks) and GPT-5 Responses (reasoning blocks).
     """
     if hasattr(raw_output_obj, 'content'):
         content = raw_output_obj.content
@@ -32,11 +37,11 @@ def extract_text_from_response(raw_output_obj: Any) -> str:
             for block in content:
                 if isinstance(block, dict):
                     block_type = block.get('type')
-                    if block_type == 'reasoning':
+                    if block_type in _SKIP_BLOCK_TYPES:
                         continue
                     if block_type == 'text' and 'text' in block:
                         text_parts.append(block['text'])
-                elif hasattr(block, 'type') and getattr(block, 'type') == 'reasoning':
+                elif hasattr(block, 'type') and getattr(block, 'type') in _SKIP_BLOCK_TYPES:
                     continue
                 elif hasattr(block, 'text'):
                     text_parts.append(block.text)

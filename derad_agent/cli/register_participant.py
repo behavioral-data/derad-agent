@@ -29,13 +29,13 @@ from derad_agent.llm.config import get_x_client  # noqa: F401
 logger = logging.getLogger(__name__)
 
 
-def _lookup_author_id(username: str, tone_for_client: str = "neutral") -> str:
+def _lookup_author_id(username: str) -> str:
     """Resolve @username → X numeric user ID via the X API."""
     # Look up get_x_client from this module's namespace at call time so tests
     # that monkeypatch it on this module keep intercepting the call.
-    client = get_x_client(tone=tone_for_client)
+    client = get_x_client()
     try:
-        return lookup_author_id(username, tone_for_client=tone_for_client, client=client)
+        return lookup_author_id(username, client=client)
     except ParticipantLookupError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

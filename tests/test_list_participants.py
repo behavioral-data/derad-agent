@@ -102,7 +102,7 @@ class TestBulkRegister:
         # Return different IDs per username
         call_count = 0
 
-        def _client(tone):
+        def _client():
             nonlocal call_count
             client = MagicMock()
             resp = MagicMock()
@@ -120,7 +120,7 @@ class TestBulkRegister:
     def test_dry_run_does_not_write(self, fresh_store, tmp_path, monkeypatch):
         csv_file = tmp_path / "p.csv"
         csv_file.write_text("username,tone,enrolled\nbob,agreeable,2026-05-20\n")
-        monkeypatch.setattr("derad_agent.cli.bulk_register.get_x_client", lambda t: _fake_client("555"))
+        monkeypatch.setattr("derad_agent.cli.bulk_register.get_x_client", lambda: _fake_client("555"))
         sys.argv = ["derad-bulk-register", str(csv_file), "--dry-run"]
         bulk_main()
         assert len(fresh_store.list_all()) == 0
@@ -137,7 +137,7 @@ class TestBulkRegister:
 
         call_count = [0]
 
-        def _client(tone):
+        def _client():
             client = MagicMock()
             resp = MagicMock()
             resp.data = {"id": f"new_{call_count[0]}", "username": "x"}
@@ -157,7 +157,7 @@ class TestBulkRegister:
         csv_file = tmp_path / "p.csv"
         csv_file.write_text("username,tone,enrolled\nbaduser,neutral,2026-05-20\n")
 
-        def _failing_client(tone):
+        def _failing_client():
             client = MagicMock()
             client.users.get_by_username.side_effect = RuntimeError("API down")
             return client

@@ -11,14 +11,8 @@
     "appServicePlanSku": {
       "value": "${APP_SERVICE_PLAN_SKU=B2}"
     },
-    "botHandleAgreeable": {
-      "value": "${BOT_HANDLE_AGREEABLE=aggie_bot}"
-    },
-    "botHandleNeutral": {
-      "value": "${BOT_HANDLE_NEUTRAL=nellie_bot}"
-    },
-    "botHandleSatirical": {
-      "value": "${BOT_HANDLE_SATIRICAL=eddie_bot}"
+    "botHandle": {
+      "value": "${BOT_HANDLE=eddie_bot}"
     }
   }
 }

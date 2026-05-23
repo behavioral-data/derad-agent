@@ -89,11 +89,18 @@ Hypothesis: Satirical AI fact-checks will decrease **antagonistic** affective po
 
 ## Bot Details
 
-We will have 3 bots, each of which has a different username. The bots will use the same underlying response generation architecture but each of them will use a different tone to reply.
+There is a single bot, **@eddie\_bot**. All participants and bystanders interact with the same bot account, but the bot replies in one of three tones:
 
-* Agreeable Tone: aggie\_bot ☺️
-* Neutral Tone: nellie\_bot 🧐
-* Satirical (“Edgy”) Tone: eddie\_bot 😎
+* Agreeable Tone ☺️
+* Neutral Tone 🧐
+* Satirical (“Edgy”) Tone 😎
+
+**Tone selection per mention:**
+
+* **Registered participants** receive replies in the tone assigned at enrolment (see Participant Task below). The tone is sticky — every mention from that participant gets the same tone, allowing within-subject tracking.
+* **Unregistered users** (bystanders or anyone outside the study who happens to mention the bot) get a tone drawn uniformly at random per mention.
+
+The three tone prompts share the same retrieval pipeline; only the final response template differs.
 
 ## Recruitment
 
@@ -104,8 +111,8 @@ We aim to recruit about 30 students from UW through a Google Form.
 We will ask participants to complete the following tasks:
 
 * Before starting the study, participants will be asked to fill out a pre-survey.
-* Participants will be assigned 1 bot to interact with throughout the study.
-* Over a 5 day period, participants will be sent a search query that finds posts about a particular topic with high engagement (e.g., posts about immigration with at least 20 replies). They will be required to identify 10 posts that they disagree with, and mention their assigned bot in reply to those posts.
+* Participants will be assigned 1 tone (agreeable / neutral / satirical) at enrolment. They mention the same bot — @eddie\_bot — and the bot replies in their assigned tone.
+* Over a 5 day period, participants will be sent a search query that finds posts about a particular topic with high engagement (e.g., posts about immigration with at least 20 replies). They will be required to identify 10 posts that they disagree with, and mention @eddie\_bot in reply to those posts.
 * One day after the bot replies to a post, participants will be asked to fill out a DM survey about the quality of discussion evoked by the bot.
 * Participants will be asked to fill out a post-survey at the conclusion of the study.
 

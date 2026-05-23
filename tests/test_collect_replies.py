@@ -48,7 +48,7 @@ class TestCollectOne:
         fake_client.tweets.search_recent.return_value = _make_response([tweet], [user])
         monkeypatch.setattr(
             "derad_agent.cli.collect_replies.get_x_client",
-            lambda tone: fake_client,
+            lambda: fake_client,
         )
 
         written_replies: list[BotReplyReply] = []
@@ -79,7 +79,7 @@ class TestCollectOne:
         fake_client.tweets.search_recent.return_value = _make_response([tweet])
         monkeypatch.setattr(
             "derad_agent.cli.collect_replies.get_x_client",
-            lambda tone: fake_client,
+            lambda: fake_client,
         )
         monkeypatch.setattr("derad_agent.cli.collect_replies.log_reply_reply", MagicMock())
 
@@ -92,7 +92,7 @@ class TestCollectOne:
         fake_client.tweets.search_recent.side_effect = RuntimeError("timeout")
         monkeypatch.setattr(
             "derad_agent.cli.collect_replies.get_x_client",
-            lambda tone: fake_client,
+            lambda: fake_client,
         )
 
         count = _collect_one("bot99", "neutral", mention_id=None, parent_id=None)
@@ -111,7 +111,7 @@ class TestCollectOne:
         fake_client.tweets.search_recent.side_effect = _search
         monkeypatch.setattr(
             "derad_agent.cli.collect_replies.get_x_client",
-            lambda tone: fake_client,
+            lambda: fake_client,
         )
 
         _collect_one("bot99", "neutral", mention_id=None, parent_id=None)
@@ -127,7 +127,7 @@ class TestCollectOne:
         )
         monkeypatch.setattr(
             "derad_agent.cli.collect_replies.get_x_client",
-            lambda tone: fake_client,
+            lambda: fake_client,
         )
 
         _collect_one("bot99", "neutral", mention_id=None, parent_id="parent123")

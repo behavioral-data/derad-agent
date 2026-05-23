@@ -4,10 +4,9 @@ Activated by DERAD_INGEST_MODE=streaming. Opens a persistent connection to
 GET /2/tweets/search/stream, receives matching tweets in real time, and
 dispatches them to the shared _dispatch_tweet pipeline.
 
-Rules are synced on startup: old rules are deleted and fresh rules are added,
-one per bot handle, tagged with the bot's tone for routing. If a tweet mentions
-multiple bots it may match multiple rules; the dedup store in _dispatch_tweet
-drops the duplicate dispatches cleanly.
+A single rule is synced on startup matching the configured BOT_HANDLE.
+Tone is resolved downstream in _dispatch_tweet from the participant table
+(or random for unregistered users), not from the stream rule.
 
 Reconnection uses exponential backoff capped at 5 minutes. A 429 response
 backs off 60 s before retrying.
@@ -53,17 +52,11 @@ def _token() -> str:
 
 
 def _bot_rules() -> list[dict]:
-    """Build one rule per configured bot handle, tagged with its tone."""
-    mapping = {
-        "agreeable": os.getenv("BOT_HANDLE_AGREEABLE", ""),
-        "neutral": os.getenv("BOT_HANDLE_NEUTRAL", ""),
-        "satirical": os.getenv("BOT_HANDLE_SATIRICAL", ""),
-    }
-    return [
-        {"value": f"@{handle.lstrip('@')}", "tag": tone}
-        for tone, handle in mapping.items()
-        if handle
-    ]
+    """Build a single stream rule matching the configured BOT_HANDLE."""
+    handle = os.getenv("BOT_HANDLE", "").lstrip("@")
+    if not handle:
+        return []
+    return [{"value": f"@{handle}"}]
 
 
 def _sync_rules(token: str) -> None:
@@ -76,7 +69,7 @@ def _sync_rules(token: str) -> None:
 
     new_rules = _bot_rules()
     if not new_rules:
-        logger.warning("No BOT_HANDLE_* env vars set — stream will receive no events")
+        logger.warning("BOT_HANDLE env var not set — stream will receive no events")
         return
 
     # Skip if existing rules already match desired rules exactly (avoid unnecessary churn).
@@ -104,7 +97,7 @@ def _sync_rules(token: str) -> None:
         timeout=30,
     )
     add_resp.raise_for_status()
-    logger.info("Installed %d stream rules: %s", len(new_rules), [r["tag"] for r in new_rules])
+    logger.info("Installed %d stream rule(s): %s", len(new_rules), [r["value"] for r in new_rules])
 
 
 def _reshape(data: dict, includes: dict) -> dict:
@@ -168,17 +161,8 @@ def _stream_loop(dispatch_fn: Callable, token: str) -> None:
                     if not isinstance(data, dict):
                         continue
 
-                    matching = event.get("matching_rules") or []
-                    tone = next(
-                        (r.get("tag") for r in matching if r.get("tag")),
-                        None,
-                    )
-                    if tone is None:
-                        logger.debug("Stream event with no tone tag; skipping")
-                        continue
-
                     tweet = _reshape(data, event.get("includes") or {})
-                    dispatch_fn(tone, tweet, datetime.now(timezone.utc))
+                    dispatch_fn(tweet, datetime.now(timezone.utc))
 
         except requests.exceptions.RequestException as exc:
             logger.warning("Stream lost: %s — reconnecting in %.0f s", exc, backoff)

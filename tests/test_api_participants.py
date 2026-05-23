@@ -75,38 +75,49 @@ class TestApiParticipantsCreate:
         _patch_x_lookup(monkeypatch, user_id="555")
         resp = client.post(
             "/api/participants",
-            json={"username": "@bob", "notes": "pilot"},
+            json={"username": "@bob", "tone": "neutral", "notes": "pilot"},
         )
         assert resp.status_code == 201, resp.get_json()
         body = resp.get_json()
         assert body["participant"]["author_id"] == "555"
         assert body["participant"]["author_username"] == "bob"
         assert body["participant"]["notes"] == "pilot"
-        # Tone is not assigned via the dashboard.
-        assert body["participant"]["tone"] == ""
+        assert body["participant"]["tone"] == "neutral"
         # Stored in the participants store
         stored = fresh_store.get("555")
         assert stored.author_username == "bob"
-        assert stored.tone == ""
+        assert stored.tone == "neutral"
         # And in the in-process cache
         assert "555" in app_module._PARTICIPANTS_BY_ID
 
-    def test_tone_in_body_is_ignored(self, fresh_store, client, monkeypatch):
+    def test_tone_stored_from_body(self, fresh_store, client, monkeypatch):
         _patch_x_lookup(monkeypatch, user_id="100")
         resp = client.post("/api/participants", json={"username": "carla", "tone": "agreeable"})
         assert resp.status_code == 201
-        assert resp.get_json()["participant"]["tone"] == ""
+        assert resp.get_json()["participant"]["tone"] == "agreeable"
 
     def test_missing_username(self, fresh_store, client):
         resp = client.post("/api/participants", json={})
         assert resp.status_code == 400
         assert "username" in resp.get_json()["error"]
 
+    def test_missing_tone_returns_400(self, fresh_store, client, monkeypatch):
+        _patch_x_lookup(monkeypatch, user_id="200")
+        resp = client.post("/api/participants", json={"username": "dave"})
+        assert resp.status_code == 400
+        assert "tone" in resp.get_json()["error"]
+
+    def test_invalid_tone_returns_400(self, fresh_store, client, monkeypatch):
+        _patch_x_lookup(monkeypatch, user_id="201")
+        resp = client.post("/api/participants", json={"username": "eve", "tone": "hostile"})
+        assert resp.status_code == 400
+        assert "hostile" in resp.get_json()["error"]
+
     def test_lookup_failure_returns_422(self, fresh_store, client, monkeypatch):
         def _boom(username, **kw):
             raise participants_module.ParticipantLookupError(f"@{username} not found on X")
         monkeypatch.setattr(participants_module, "lookup_author_id", _boom)
-        resp = client.post("/api/participants", json={"username": "ghost"})
+        resp = client.post("/api/participants", json={"username": "ghost", "tone": "neutral"})
         assert resp.status_code == 422
         assert "not found" in resp.get_json()["error"]
 

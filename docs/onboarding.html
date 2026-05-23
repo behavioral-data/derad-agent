@@ -18,11 +18,11 @@
   <section>
     <h2>What this system does</h2>
     <p>
-      The DeRad Agent monitors mentions of three X (Twitter) bot accounts
-      (<strong>@aggiexbot</strong>, <strong>@nelliexbot</strong>, <strong>@eddiexbot</strong>)
-      via the X Filtered Stream API. When a registered study participant mentions a bot while
-      replying to a post containing a claim, the agent fetches the parent post, searches
-      Community Notes for relevant evidence, generates a tone-matched reply using an LLM,
+      The DeRad Agent monitors mentions of a single X (Twitter) bot account
+      (<strong>@eddiexbot</strong>) via the X Filtered Stream API. When a user mentions the bot
+      while replying to a post containing a claim, the agent fetches the parent post, searches
+      Community Notes for relevant evidence, picks a reply tone (the registered participant's
+      assigned tone, or a random tone for unregistered users), generates the reply with an LLM,
       and posts it. All events are stored in Azure Table Storage.
     </p>
     <div class="grid-3" style="margin-top: var(--grid-2)">

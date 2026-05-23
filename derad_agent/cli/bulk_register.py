@@ -114,7 +114,7 @@ def main() -> None:
         # Look up X numeric user ID
         print(f"  [{i}/{len(rows)}] @{username} …", end=" ", flush=True)
         try:
-            response = get_x_client(tone=tone).users.get_by_username(username=username)
+            response = get_x_client().users.get_by_username(username=username)
             data = getattr(response, "data", None) or {}
             author_id = (data.get("id") if isinstance(data, dict)
                          else getattr(data, "id", None))

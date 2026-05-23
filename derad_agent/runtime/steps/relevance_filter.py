@@ -39,9 +39,11 @@ def step_filter_notes_by_relevance(
 
     # max_tokens must cover the full keep_note_ids list. Each ~19-digit ID is
     # ~8 tokens, plus quotes, commas, and JSON wrapper. Budget 12 tokens/note
-    # + 256 overhead, clamped to [512, 8192]. Scales with input rather than
-    # silently truncating when dense topics return hundreds of candidates.
-    max_tokens = max(512, min(8192, len(payload) * 12 + 256))
+    # + 256 overhead. Bucket to fixed sizes so lru_cache reuses instances across
+    # calls with similar payload sizes rather than creating a new LLM per call.
+    _raw = max(512, min(8192, len(payload) * 12 + 256))
+    _buckets = (512, 1024, 2048, 4096, 8192)
+    max_tokens = next(b for b in _buckets if b >= _raw)
     prompt = get_relevance_filter_prompt()
     llm = get_llm(max_tokens=max_tokens)
     chain = prompt | llm

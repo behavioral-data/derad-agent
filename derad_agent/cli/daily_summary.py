@@ -13,7 +13,6 @@ import argparse
 import logging
 import os
 from datetime import date, datetime, timedelta, timezone
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -61,15 +60,7 @@ def _get_events_for_date(target_date: date) -> list[dict]:
     return rows
 
 
-_BOT_HANDLE_BY_TONE = {
-    "agreeable": os.getenv("BOT_HANDLE_AGREEABLE", "aggiexbot"),
-    "neutral": os.getenv("BOT_HANDLE_NEUTRAL", "nelliexbot"),
-    "satirical": os.getenv("BOT_HANDLE_SATIRICAL", "eddiexbot"),
-}
-
-
-def _bot_handle(tone: Optional[str]) -> str:
-    return _BOT_HANDLE_BY_TONE.get(tone or "", "unknown_bot")
+_BOT_HANDLE = os.getenv("BOT_HANDLE", "eddiexbot")
 
 
 def main() -> None:
@@ -105,16 +96,15 @@ def main() -> None:
         username = replies[0].get("author_username") or participant_id
         tone = replies[0].get("tone")
         study_day = replies[0].get("study_day")
-        print(f"@{username} (id={participant_id}, bot={_bot_handle(tone)}, day={study_day})")
+        print(f"@{username} (id={participant_id}, bot=@{_BOT_HANDLE}, tone={tone}, day={study_day})")
         print("-" * 60)
         for r in sorted(replies, key=lambda x: x.get("study_code", "")):
-            bot_handle = _bot_handle(r.get("tone"))
             reply_id = r.get("reply_id", "")
             parent_id = r.get("parent_id", "")
             code = r.get("study_code", "????")
             outcome = r.get("outcome", "")
             post_url = (
-                f"https://x.com/{bot_handle}/status/{reply_id}" if reply_id else "(no reply posted)"
+                f"https://x.com/{_BOT_HANDLE}/status/{reply_id}" if reply_id else "(no reply posted)"
             )
             original_url = (
                 f"https://x.com/i/web/status/{parent_id}" if parent_id else ""

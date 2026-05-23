@@ -179,7 +179,6 @@ def reset_store(new: Optional[ParticipantsStore] = None) -> None:
 def lookup_author_id(
     username: str,
     *,
-    tone_for_client: str = "neutral",
     client=None,
 ) -> str:
     """Resolve an @username to its X numeric user ID.
@@ -193,7 +192,7 @@ def lookup_author_id(
         raise ParticipantLookupError("username is empty")
     if client is None:
         from derad_agent.llm.config import get_x_client
-        client = get_x_client(tone=tone_for_client)
+        client = get_x_client()
     try:
         response = client.users.get_by_username(username=clean)
     except Exception as exc:

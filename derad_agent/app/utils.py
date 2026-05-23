@@ -58,7 +58,7 @@ class TweetSnapshot:
     quote_count: Optional[int] = None
 
 
-def fetch_tweet(tweet_id, *, tone: str = "neutral") -> Optional[TweetSnapshot]:
+def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
     """Fetch a tweet by id with author expansion. Returns None on failure.
 
     xdk's ``Tweet`` and ``Expansions`` are bare ``Any`` type aliases, so
@@ -68,7 +68,7 @@ def fetch_tweet(tweet_id, *, tone: str = "neutral") -> Optional[TweetSnapshot]:
     return None.
     """
     try:
-        response = get_x_client(tone=tone).posts.get_by_id(
+        response = get_x_client().posts.get_by_id(
             id=str(tweet_id),
             tweet_fields=["text", "author_id", "public_metrics"],
             expansions=["author_id"],
@@ -182,22 +182,22 @@ _X_TCO_LEN = 23
 _X_TWEET_LIMIT = 280
 
 
-def _x_weighted_length(text: str) -> int:
+def x_weighted_length(text: str) -> int:
     """Count characters the way X does: every URL is collapsed to 23 chars."""
     return len(_TCO_URL_RE.sub("x" * _X_TCO_LEN, text))
 
 
-def post_reply(parent_id, reply_text, tone) -> Optional[str]:
+def post_reply(parent_id, reply_text) -> Optional[str]:
     """Post a reply. Returns the new tweet id on success, None on failure.
 
     Uses the xdk ``CreateRequest`` body shape — passing loose kwargs to
     ``posts.create`` raises because the real signature takes a single ``body``.
     """
-    weighted = _x_weighted_length(reply_text)
+    weighted = x_weighted_length(reply_text)
     if weighted > _X_TWEET_LIMIT:
         logger.warning(
-            "post_reply refused: text %d weighted chars > %d (tone=%s, parent=%s)",
-            weighted, _X_TWEET_LIMIT, tone, parent_id,
+            "post_reply refused: text %d weighted chars > %d (parent=%s)",
+            weighted, _X_TWEET_LIMIT, parent_id,
         )
         return None
 
@@ -208,23 +208,23 @@ def post_reply(parent_id, reply_text, tone) -> Optional[str]:
         reply=CreateRequestReply(in_reply_to_tweet_id=str(parent_id)),
     )
     try:
-        response = get_x_client(tone=tone).posts.create(body=body)
+        response = get_x_client().posts.create(body=body)
     except requests.HTTPError as exc:
         status = exc.response.status_code if exc.response is not None else "?"
         body_text = (exc.response.text or "")[:500] if exc.response is not None else ""
         logger.warning(
-            "post_reply failed (tone=%s, parent=%s): HTTP %s %s",
-            tone, parent_id, status, body_text,
+            "post_reply failed (parent=%s): HTTP %s %s",
+            parent_id, status, body_text,
         )
         return None
 
     data = getattr(response, "data", None)
     reply_id = getattr(data, "id", None) if data is not None else None
     if not reply_id:
-        logger.warning("post_reply returned no id (tone=%s, parent=%s)", tone, parent_id)
+        logger.warning("post_reply returned no id (parent=%s)", parent_id)
         return None
     reply_id = str(reply_id)
-    logger.info("Created reply %s (tone=%s, parent=%s)", reply_id, tone, parent_id)
+    logger.info("Created reply %s (parent=%s)", reply_id, parent_id)
     return reply_id
 
 

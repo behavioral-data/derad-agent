@@ -74,7 +74,7 @@ class TestRegisterParticipantCLI:
         fake_client.users.get_by_username.return_value = _fake_user_response("77777")
         monkeypatch.setattr(
             "derad_agent.cli.register_participant.get_x_client",
-            lambda tone: fake_client,
+            lambda: fake_client,
         )
         _run(["--username", "lookedupuser", "--tone", "neutral"])
         p = fresh_store.get("77777")

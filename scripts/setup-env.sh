@@ -27,16 +27,9 @@ BEARER=$(pull x-bearer-token)
 API_KEY=$(pull x-api-key)
 API_SECRET=$(pull x-api-secret)
 
-TOKEN_AGREEABLE=$(pull x-access-token-agreeable)
-TOKEN_SECRET_AGREEABLE=$(pull x-access-token-secret-agreeable)
-TOKEN_NEUTRAL=$(pull x-access-token-neutral)
-TOKEN_SECRET_NEUTRAL=$(pull x-access-token-secret-neutral)
-TOKEN_SATIRICAL=$(pull x-access-token-satirical)
-TOKEN_SECRET_SATIRICAL=$(pull x-access-token-secret-satirical)
-
-BOT_ID_AGREEABLE=$(pull bot-user-id-agreeable)
-BOT_ID_NEUTRAL=$(pull bot-user-id-neutral)
-BOT_ID_SATIRICAL=$(pull bot-user-id-satirical)
+ACCESS_TOKEN=$(pull x-access-token)
+ACCESS_TOKEN_SECRET=$(pull x-access-token-secret)
+BOT_ID=$(pull bot-user-id)
 
 cat > "$ENV_FILE" <<EOF
 # Azure OpenAI Credentials (used for embeddings + fallback chat)
@@ -50,26 +43,16 @@ AZURE_OPENAI_API_VERSION=2025-03-01-preview
 AZURE_AI_ENDPOINT=https://derad-agent-project-resource.services.ai.azure.com
 AZURE_AI_DEPLOYMENT_CHAT=grok-4.3
 
-# X / Twitter credentials
+# X / Twitter credentials (single bot identity — Eddie)
 X_BEARER_TOKEN=$BEARER
 X_API_KEY=$API_KEY
 X_API_SECRET=$API_SECRET
+X_ACCESS_TOKEN=$ACCESS_TOKEN
+X_ACCESS_TOKEN_SECRET=$ACCESS_TOKEN_SECRET
 
-X_ACCESS_TOKEN_AGREEABLE=$TOKEN_AGREEABLE
-X_ACCESS_TOKEN_SECRET_AGREEABLE=$TOKEN_SECRET_AGREEABLE
-X_ACCESS_TOKEN_NEUTRAL=$TOKEN_NEUTRAL
-X_ACCESS_TOKEN_SECRET_NEUTRAL=$TOKEN_SECRET_NEUTRAL
-X_ACCESS_TOKEN_SATIRICAL=$TOKEN_SATIRICAL
-X_ACCESS_TOKEN_SECRET_SATIRICAL=$TOKEN_SECRET_SATIRICAL
-
-# Bot identities
-BOT_USER_ID_AGREEABLE=$BOT_ID_AGREEABLE
-BOT_USER_ID_NEUTRAL=$BOT_ID_NEUTRAL
-BOT_USER_ID_SATIRICAL=$BOT_ID_SATIRICAL
-
-BOT_HANDLE_AGREEABLE=aggiexbot
-BOT_HANDLE_NEUTRAL=nelliexbot
-BOT_HANDLE_SATIRICAL=eddiexbot
+# Bot identity
+BOT_USER_ID=$BOT_ID
+BOT_HANDLE=eddiexbot
 
 # Storage
 DERAD_TABLES_ENDPOINT=https://azsalikxqqfjcgk72.table.core.windows.net

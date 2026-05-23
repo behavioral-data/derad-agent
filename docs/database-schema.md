@@ -72,7 +72,6 @@ One row per mention that made it all the way through the pipeline (accepted by a
 | `cited_tweet_ids_json` | JSON string | Tweet IDs of the cited notes |
 | `reply_text` | string (≤32 KB) | Full text of the bot's reply |
 | `reply_id` | string? | X API ID of the posted reply tweet |
-| `sources_reply_id` | string? | ID of follow-up tweet with source links |
 | `received_at_utc` | datetime | When the stream received the mention |
 | `pipeline_start_utc` | datetime? | When processing started |
 | `reply_posted_utc` | datetime? | When the reply was posted to X |
@@ -97,7 +96,7 @@ One row per mention that was filtered out at a guard before entering the pipelin
 | `mention_id` | string? | X API mention ID (may be null for malformed payloads) |
 | `author_id` | string? | User ID of mention author |
 | `tone` | string? | Bot tone (if detectable) |
-| `drop_reason` | string | Why rejected: `duplicate`, `rate_limit`, `self_reply`, `unregistered`, `no_parent`, `invalid_payload` |
+| `drop_reason` | string | Why rejected: `duplicate`, `rate_limit`, `self_reply`, `no_parent`, `invalid_payload` |
 | `received_at_utc` | datetime | When the stream received the mention |
 | `extra_json` | JSON string | Additional context (varies by `drop_reason`) |
 
@@ -105,9 +104,9 @@ One row per mention that was filtered out at a guard before entering the pipelin
 
 ---
 
-### 4. `EngagementSnapshots` — periodic reply metrics
+### 4. `EngagementSnapshots` — 3-day reply metrics
 
-Multiple rows per bot reply tweet, one per polling snapshot. Collected ~3 days after posting by `derad-poll-engagement`.
+One row per bot reply tweet, captured ~3 days after posting by `derad-poll-engagement` (the measurement point used across the study for both engagement and bystander text).
 
 **PartitionKey**: `YYYY-MM`  
 **RowKey**: `{ISO_timestamp}_{reply_id}`
@@ -125,7 +124,7 @@ Multiple rows per bot reply tweet, one per polling snapshot. Collected ~3 days a
 | `parent_id` | string? | ID of the original post being fact-checked |
 
 **Source:** `derad_agent/app/events.py` — `EngagementSnapshot` dataclass  
-**Managed by:** `derad-poll-engagement` CLI (run manually ~3 days after each bot reply)
+**Managed by:** `derad-poll-engagement` CLI, invoked daily at 12:00 UTC by the `engagementCronJob` Container Apps Job (see `infra/main.bicep`). Each reply gets exactly one snapshot when it ages into the 3-day window.
 
 ---
 
@@ -149,7 +148,7 @@ Text of replies to bot posts collected for bystander NLP analysis. Written by `d
 | `tone` | string? | Which bot posted the reply that was responded to |
 
 **Source:** `derad_agent/app/events.py` — `BotReplyReply` dataclass  
-**Managed by:** `derad-collect-replies` CLI
+**Managed by:** `derad-collect-replies` CLI, run alongside `derad-poll-engagement` in the daily 12:00 UTC `engagementCronJob` Container Apps Job
 
 ---
 
@@ -192,15 +191,11 @@ Stores one row per mention hit per author. Used to enforce rolling time-window r
 X Filtered Stream (persistent SSE connection to api.twitter.com)
       │
       ▼
-Tone extracted from matching_rules[].tag
+Tone resolved: registered participants use their assigned tone;
+unregistered authors get a randomly-assigned tone (bot replies to everyone)
       │
       ▼
-Participant allow-list check (Participants table loaded at startup)
-      │
-      ├──[unregistered]─────────────────────────────► MentionDrops (drop_reason=unregistered)
-      │
-      ▼
-Other guards (self_reply, duplicate, rate_limit, daily_cap)
+Guards (self_reply, duplicate, rate_limit, daily_cap)
       │
       ├──[filtered]────────────────────────────────► MentionDrops (drop_reason=...)
       │
@@ -210,10 +205,12 @@ Pipeline (planning → search → reply generation)
       └──[any outcome]─────────────────────────────► MentionEvents (outcome=replied/error/...)
                                                         includes study_code, study_day, participant_id
 
-Daily researcher workflow (run each day of study):
+Researcher-run (each day of study):
   derad-daily-summary       → prints per-participant reply list with study codes (for DM composition)
-  derad-poll-engagement     → polls X API for bystander engagement metrics → EngagementSnapshots
-  derad-collect-replies     → fetches replies to bot posts → BotReplyReplies
+
+Scheduled (daily 12:00 UTC, Container Apps Job `engagementCronJob`):
+  derad-poll-engagement     → polls X public metrics on 3-day-old bot replies → EngagementSnapshots
+  derad-collect-replies     → fetches bystander replies to 3-day-old bot replies → BotReplyReplies
 ```
 
 ---

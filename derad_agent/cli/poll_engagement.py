@@ -1,7 +1,8 @@
 """Poll X public metrics for bot reply tweets and write EngagementSnapshots.
 
-Run on a schedule (e.g. daily cron) to track likes/retweets over time.
-Each run appends a new snapshot row per reply so you can see engagement grow.
+Designed for a daily cron. Each run polls every bot reply that is at least
+3 days old and has not yet been snapshotted. Runs that are missed or delayed
+are safe — any uncaptured replies are picked up on the next run.
 
 Usage:
     derad-poll-engagement
@@ -10,7 +11,7 @@ Usage:
 import logging
 from datetime import datetime, timezone
 
-from derad_agent.app.events import EngagementSnapshot, get_store, in_three_day_window, log_engagement_snapshot
+from derad_agent.app.events import EngagementSnapshot, SNAPSHOT_MIN_AGE, get_store, log_engagement_snapshot
 from derad_agent.llm.config import get_x_client
 
 logger = logging.getLogger(__name__)
@@ -20,7 +21,7 @@ def _poll_one(
     reply_id: str, tone: str, mention_id: str | None = None, parent_id: str | None = None
 ) -> None:
     try:
-        response = get_x_client(tone=tone).posts.get_by_id(
+        response = get_x_client().posts.get_by_id(
             id=reply_id,
             tweet_fields=["public_metrics"],
         )
@@ -56,15 +57,18 @@ def main() -> None:
     logging.basicConfig(level="INFO", format="%(asctime)s %(levelname)s %(message)s")
     store = get_store()
     now = datetime.now(timezone.utc)
+    already_done = store.snapshotted_reply_ids()
     candidates = [
         (reply_id, tone, mention_id, parent_id)
         for reply_id, tone, posted_at, mention_id, parent_id in store.iter_reply_ids()
-        if in_three_day_window(posted_at, now)
+        if posted_at is not None
+        and now - (posted_at if posted_at.tzinfo else posted_at.replace(tzinfo=timezone.utc)) >= SNAPSHOT_MIN_AGE
+        and reply_id not in already_done
     ]
     if not candidates:
-        logger.info("No reply IDs found in the 3-day measurement window — nothing to poll")
+        logger.info("No unsnapshotted bot replies aged ≥3 days — nothing to poll")
         return
-    logger.info("Polling 3-day engagement for %d replies", len(candidates))
+    logger.info("Polling engagement for %d replies", len(candidates))
     for reply_id, tone, mention_id, parent_id in candidates:
         _poll_one(reply_id, tone, mention_id=mention_id, parent_id=parent_id)
     logger.info("Done")

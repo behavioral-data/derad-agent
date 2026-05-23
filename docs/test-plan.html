@@ -197,8 +197,8 @@ EOF</code></pre>
       <div class="demo-block">
         <div class="demo-label">Step C2 — Send a test mention</div>
         <div class="panel">
-          <p>From the participant's X account, post a reply to any public tweet that mentions the neutral bot handle:</p>
-          <pre><code>@nelliexbot This new climate legislation seems really effective at reducing emissions.</code></pre>
+          <p>From the participant's X account, post a reply to any public tweet that mentions the Eddie bot:</p>
+          <pre><code>@eddiexbot This new climate legislation seems really effective at reducing emissions.</code></pre>
           <p style="margin-top: 8px; color: var(--text-muted);">The tweet must be a <strong>reply</strong> (not a quote tweet or standalone mention). The bot will only respond when <code class="inline-code">in_reply_to_status_id_str</code> is set.</p>
         </div>
       </div>
@@ -235,22 +235,22 @@ EOF</code></pre>
       <div class="section-head">
         <p class="eyebrow">Phase D · 3 days after C</p>
         <h2>Day-3 collection</h2>
-        <p>Run the two collection CLIs and the daily summary exactly 3–4 days after the bot reply was posted. These are the commands researchers run on a daily schedule.</p>
+        <p>Steps D1 and D2 run automatically each day at 12:00 UTC via the <code class="inline-code">engagementCronJob</code> Container Apps Job. The commands below are for manual ad-hoc runs (e.g. to backfill a missed day before it ages out of the window).</p>
       </div>
 
       <div class="demo-block">
-        <div class="demo-label">Step D1 — Poll engagement metrics</div>
+        <div class="demo-label">Step D1 — Poll engagement metrics (automated)</div>
         <div class="panel">
           <pre><code>derad-poll-engagement</code></pre>
-          <p style="margin-top: 8px; color: var(--text-muted);">Reads all <code class="inline-code">reply_id</code>s from MentionEvents whose <code class="inline-code">reply_posted_utc</code> is in the [3d, 4d) window. Fetches public metrics from X and writes an <strong>EngagementSnapshot</strong> row per reply.</p>
+          <p style="margin-top: 8px; color: var(--text-muted);">Reads all <code class="inline-code">reply_id</code>s from MentionEvents whose <code class="inline-code">reply_posted_utc</code> is in the [3d, 4d) window. Fetches public metrics from X and writes an <strong>EngagementSnapshot</strong> row per reply. The cron job invokes this daily.</p>
         </div>
       </div>
 
       <div class="demo-block">
-        <div class="demo-label">Step D2 — Collect bystander replies</div>
+        <div class="demo-label">Step D2 — Collect bystander replies (automated)</div>
         <div class="panel">
           <pre><code>derad-collect-replies</code></pre>
-          <p style="margin-top: 8px; color: var(--text-muted);">Searches the conversation thread for replies to each bot post in the 3-day window. Writes <strong>BotReplyReply</strong> rows for NLP analysis. Uses the same [3d, 4d) window so it runs alongside <code class="inline-code">derad-poll-engagement</code>.</p>
+          <p style="margin-top: 8px; color: var(--text-muted);">Searches the conversation thread for replies to each bot post in the 3-day window. Writes <strong>BotReplyReply</strong> rows for NLP analysis. Uses the same [3d, 4d) window so it runs alongside <code class="inline-code">derad-poll-engagement</code> in the daily cron.</p>
         </div>
       </div>
 
@@ -261,9 +261,9 @@ EOF</code></pre>
           <p style="margin-top: 8px; color: var(--text-muted);">Prints a table grouped by participant showing study codes and bot-reply URLs. Use this to compose the daily DM survey links.</p>
           <pre><code>=== Daily DM Summary for 2026-05-20 ===
 
-@studyparticipant (id=123456, bot=nelliexbot, day=6)
+@studyparticipant (id=123456, bot=@eddiexbot, tone=neutral, day=6)
 ------------------------------------------------------------
-  [BZCH] https://x.com/nelliexbot/status/1234567890
+  [BZCH] https://x.com/eddiexbot/status/1234567890
           (original: https://x.com/i/web/status/9876543210)
 
 Total: 1 replies across 1 participant(s)</code></pre>
@@ -332,7 +332,7 @@ Total: 1 replies across 1 participant(s)</code></pre>
         <div class="demo-label">Day-3 timing window</div>
         <div class="panel">
           <div class="callout callout-warning">
-            <code class="inline-code">derad-poll-engagement</code> and <code class="inline-code">derad-collect-replies</code> only pick up replies whose <code class="inline-code">reply_posted_utc</code> is in the <strong>[72h, 96h)</strong> window. Run them exactly once per day — earlier or later and they miss the window.
+            <code class="inline-code">derad-poll-engagement</code> and <code class="inline-code">derad-collect-replies</code> only pick up replies whose <code class="inline-code">reply_posted_utc</code> is in the <strong>[72h, 96h)</strong> window. The <code class="inline-code">engagementCronJob</code> Container Apps Job fires daily at 12:00 UTC — if it skips a day (job failure, image pull issue), replies posted in that 24-hour band are <strong>silently lost</strong>. Check the Container Apps run history if any day's snapshot counts look low.
           </div>
         </div>
       </div>

@@ -141,7 +141,6 @@ def step_compose_reply(
         temperature=None,
         max_tokens=1400,
         reasoning_effort="medium",
-        text_verbosity="medium",
     )
     chain = prompt | llm
 
@@ -176,7 +175,6 @@ def step_compose_reply(
             temperature=None,
             max_tokens=1400,
             reasoning_effort="medium",
-            text_verbosity="low",
         )
         repair_raw = repair_llm.invoke(repair_prompt)
         parsed = parse_json_response(extract_text_from_response(repair_raw))
@@ -216,7 +214,6 @@ def step_compose_no_factcheck_reply(
         temperature=None,
         max_tokens=200,
         reasoning_effort="medium",
-        text_verbosity="low",
     )
     chain = prompt | llm
 

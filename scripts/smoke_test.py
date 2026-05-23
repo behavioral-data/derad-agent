@@ -271,9 +271,9 @@ old_ev = events_module.MentionEvent(
 )
 e_store2.write_event(old_ev)
 
-# Verify the event falls in the 3-day window
-from derad_agent.app.events import in_three_day_window
-assert_true("old reply is in 3-day window", in_three_day_window(old_posted, now))
+# Verify the event is old enough to be eligible for snapshotting
+from derad_agent.app.events import SNAPSHOT_MIN_AGE
+assert_true("old reply is ≥3 days old", now - old_posted >= SNAPSHOT_MIN_AGE)
 
 # Mock X client returning fake metrics
 fake_metrics_response = MagicMock()

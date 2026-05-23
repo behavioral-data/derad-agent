@@ -193,18 +193,11 @@
               <td>X post ID of the reply tweet. Null on non-reply outcomes.</td>
             </tr>
             <tr>
-              <td><code class="inline-code">sources_reply_id</code></td>
-              <td>string | null</td>
-              <td><span class="chip chip-done">no</span></td>
-              <td>X post ID of the sources follow-up tweet (second tweet in the thread). Null unless <code class="inline-code">DERAD_POST_SOURCES_TWEET=true</code>.</td>
-            </tr>
-            <tr>
               <td><code class="inline-code">outcome</code></td>
               <td>string</td>
               <td><span class="chip chip-done">no</span></td>
               <td>Terminal pipeline state. One of:
                 <code class="inline-code">replied</code>,
-                <code class="inline-code">replied_no_sources</code>,
                 <code class="inline-code">empty_reply</code>,
                 <code class="inline-code">parent_fetch_failed</code>,
                 <code class="inline-code">x_post_error</code>,

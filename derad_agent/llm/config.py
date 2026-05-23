@@ -34,7 +34,6 @@ INDEX_ROOT = _path_from_env(
 
 from langchain_openai import AzureOpenAIEmbeddings as _EmbCls  # type: ignore
 
-# GPT-5 Responses API requires 2025-03-01-preview or later for reasoning controls
 _API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2025-03-01-preview")
 
 def _validate_env() -> None:
@@ -73,26 +72,61 @@ def get_embedder():
     )
 
 
+# Map reasoning_effort → Anthropic extended-thinking budget_tokens.
+# Minimum is 1024 (per Anthropic docs); larger budgets give the model more
+# room to deliberate before producing the visible response.
+_CLAUDE_THINKING_BUDGETS: dict[str, int] = {
+    "minimal": 1024,
+    "low":     1024,
+    "medium":  4096,
+    "high":    16384,
+}
+
+
 @functools.lru_cache(maxsize=16)
 def get_llm(
     temperature: float = None,
     max_tokens: int = 2048,
     reasoning_effort: str = None,
-    text_verbosity: str = None,
     deployment: str = None,
 ):
-    """Get a Claude chat model via Azure AI Services (cached per unique argument combination)."""
+    """Get a Claude chat model via Azure AI Services (cached per arg combo).
+
+    When ``reasoning_effort`` is set, Anthropic extended thinking is enabled
+    with a budget drawn from ``_CLAUDE_THINKING_BUDGETS``. The visible-output
+    cap stays at ``max_tokens``; the request's overall ``max_tokens`` is bumped
+    to ``max_tokens + budget_tokens`` because thinking tokens count against
+    the same limit (Anthropic requires ``budget_tokens < max_tokens``).
+
+    Extended thinking is incompatible with ``temperature != 1``; if a caller
+    sets one anyway we drop it rather than failing the request.
+    """
     from langchain_anthropic import ChatAnthropic
     claude_endpoint = _require_env("AZURE_CLAUDE_ENDPOINT")
     model_name = deployment or os.getenv("AZURE_CLAUDE_DEPLOYMENT_CHAT", "claude-sonnet-4-6")
+
     config: dict = {
         "model_name": model_name,
         "anthropic_api_url": claude_endpoint,
         "api_key": _require_env("AZURE_CLAUDE_API_KEY"),
-        "max_tokens_to_sample": max_tokens,
     }
-    if temperature is not None:
-        config["temperature"] = temperature
+
+    if reasoning_effort:
+        budget = _CLAUDE_THINKING_BUDGETS.get(reasoning_effort)
+        if budget is None:
+            raise ValueError(
+                f"Unknown reasoning_effort={reasoning_effort!r}. "
+                f"Choose from: {sorted(_CLAUDE_THINKING_BUDGETS)}"
+            )
+        config["max_tokens"] = max_tokens + budget
+        config["thinking"] = {"type": "enabled", "budget_tokens": budget}
+        # Anthropic requires temperature unset (effectively 1.0) when thinking
+        # is on; ignore any caller-supplied value.
+    else:
+        config["max_tokens"] = max_tokens
+        if temperature is not None:
+            config["temperature"] = temperature
+
     return ChatAnthropic(**config)
 
 

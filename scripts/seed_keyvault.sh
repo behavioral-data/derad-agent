@@ -26,12 +26,11 @@ set_secret "azure-openai-deployment-embed"  "text-embedding-3-small"
 set_secret "azure-openai-deployment-chat"   "gpt-5-mini"
 
 # ── X / Twitter credentials ──────────────────────────────────────────────────
-# Replace placeholders here before running in production, or update in KV after.
-for name in x-api-key x-api-secret \
-            x-access-token-agreeable x-access-token-secret-agreeable \
-            x-access-token-neutral   x-access-token-secret-neutral \
-            x-access-token-satirical x-access-token-secret-satirical \
-            bot-user-id-agreeable bot-user-id-neutral bot-user-id-satirical; do
+# Single bot identity (Eddie). Replace placeholders here before running in
+# production, or update in KV after.
+for name in x-api-key x-api-secret x-bearer-token \
+            x-access-token x-access-token-secret \
+            bot-user-id; do
   set_secret "$name" "placeholder"
 done
 

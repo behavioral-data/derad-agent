@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import secrets
 import threading
 import time
@@ -14,6 +15,7 @@ from derad_agent.app import events, metrics
 from derad_agent.app.dedup import get_store
 from derad_agent.app.events import MentionDrop, MentionEvent, log_mention_drop, log_mention_event
 from derad_agent.app import participants as _participants
+from derad_agent.app.participants import VALID_TONES
 from derad_agent.app.utils import (
     fetch_tweet,
     generate_notes_html,
@@ -21,6 +23,7 @@ from derad_agent.app.utils import (
     index_loaded,
     post_reply,
     preload_index_async,
+    x_weighted_length,
 )
 from derad_agent.app import streamer as _streamer
 from derad_agent.llm.config import _parse_bool_env, _require_env
@@ -55,19 +58,9 @@ app = Flask(__name__)
 app.config["SERVER_NAME"] = _require_env("SERVER_NAME")
 app.config["PREFERRED_URL_SCHEME"] = os.getenv("PREFERRED_URL_SCHEME", "https")
 
-BOT_HANDLE_BY_TONE = {
-    "agreeable": os.getenv("BOT_HANDLE_AGREEABLE", "aggiexbot"),
-    "neutral": os.getenv("BOT_HANDLE_NEUTRAL", "nelliexbot"),
-    "satirical": os.getenv("BOT_HANDLE_SATIRICAL", "eddiexbot"),
-}
+BOT_HANDLE = os.getenv("BOT_HANDLE", "eddiexbot")
+BOT_USER_ID = os.getenv("BOT_USER_ID") or None
 
-BOT_USER_ID_BY_TONE = {
-    "agreeable": os.getenv("BOT_USER_ID_AGREEABLE"),
-    "neutral": os.getenv("BOT_USER_ID_NEUTRAL"),
-    "satirical": os.getenv("BOT_USER_ID_SATIRICAL"),
-}
-
-POST_SOURCES_TWEET = _parse_bool_env("DERAD_POST_SOURCES_TWEET")
 DRY_RUN = _parse_bool_env("DERAD_DRY_RUN")
 RATE_LIMIT_PER_SEC = int(os.getenv("DERAD_RATE_LIMIT_PER_SEC", "3"))
 USER_DAILY_CAP = int(os.getenv("DERAD_USER_DAILY_CAP", "20"))  # mentions/UTC-day/user; 0 disables
@@ -131,6 +124,7 @@ def _make_info_token(
     *,
     parent_id: str = "",
     parent_author_username: str = "",
+    bot_handle: str = "",
 ) -> str:
     token = secrets.token_urlsafe(6)
     payload = {
@@ -139,6 +133,7 @@ def _make_info_token(
         "reasons": reasons,
         "parent_id": parent_id,
         "parent_author_username": parent_author_username,
+        "bot_handle": bot_handle,
         "_ts": time.monotonic(),
     }
     with _INFO_STORE_LOCK:
@@ -186,6 +181,7 @@ def _make_info_token(
                 "reasons_json": reasons_json,
                 "parent_id": parent_id,
                 "parent_author_username": parent_author_username,
+                "bot_handle": bot_handle,
                 "created_at": datetime.now(timezone.utc),
             })
         except Exception:
@@ -212,6 +208,7 @@ def _get_info_params(token: str) -> dict | None:
             "reasons": json.loads(entity.get("reasons_json", "[]")),
             "parent_id": entity.get("parent_id", ""),
             "parent_author_username": entity.get("parent_author_username", ""),
+            "bot_handle": entity.get("bot_handle", ""),
             "reply_id": entity.get("reply_id", ""),
             "_ts": time.monotonic(),
         }
@@ -301,7 +298,7 @@ def _make_study_code(reply_id: str) -> str:
     return "".join(code)
 
 
-def _is_self_reply(tweet: dict, tone: str) -> tuple[bool, str]:
+def _is_self_reply(tweet: dict) -> tuple[bool, str]:
     """Return ``(should_drop, reason)``.
 
     ``reason`` is ``"self_reply"`` when the mention author matches the bot's
@@ -309,27 +306,53 @@ def _is_self_reply(tweet: dict, tone: str) -> tuple[bool, str]:
     var is unset (we still fail closed but tag the drop so analytics can
     distinguish misconfiguration from genuine self-replies).
     """
-    bot_id = BOT_USER_ID_BY_TONE.get(tone)
-    if not bot_id:
+    if not BOT_USER_ID:
         logger.warning(
-            "BOT_USER_ID for tone=%s is unset — skipping mention as self-reply fail-closed",
-            tone,
+            "BOT_USER_ID is unset — skipping mention as self-reply fail-closed",
         )
         return True, "self_reply_unconfigured"
-    if (tweet.get("user") or {}).get("id_str") == bot_id:
+    if (tweet.get("user") or {}).get("id_str") == BOT_USER_ID:
         return True, "self_reply"
     return False, "self_reply"
 
 
-# Startup warning for missing BOT_USER_ID env vars — surfaces misconfiguration
+# Startup warning for missing BOT_USER_ID — surfaces misconfiguration
 # before the first mention silently fails closed.
-for _tone, _bot_id in BOT_USER_ID_BY_TONE.items():
-    if not _bot_id:
-        logger.warning(
-            "BOT_USER_ID_%s is unset at import time — all mentions for tone=%s "
-            "will be dropped with reason=self_reply_unconfigured",
-            _tone.upper(), _tone,
-        )
+if not BOT_USER_ID:
+    logger.warning(
+        "BOT_USER_ID is unset at import time — all mentions will be dropped "
+        "with reason=self_reply_unconfigured",
+    )
+
+
+def _lookup_participant(author_id: str) -> "_participants.Participant | None":
+    """Look up a participant with a write-through cache.
+
+    Checks the in-process dict first; on a miss, falls back to the persistent
+    store (catches participants registered by CLI tools or other workers) and
+    populates the cache for subsequent calls.
+    """
+    if not author_id:
+        return None
+    p = _PARTICIPANTS_BY_ID.get(author_id)
+    if p is not None:
+        return p
+    p = _participants_store.get(author_id)
+    if p is not None:
+        _PARTICIPANTS_BY_ID[author_id] = p
+    return p
+
+
+def _resolve_tone(author_id: str) -> str:
+    """Pick the reply tone for an incoming mention.
+
+    Registered participants use their assigned tone from the Participants table.
+    Unregistered users get a uniformly random tone per mention.
+    """
+    p = _lookup_participant(author_id)
+    if p and p.tone in VALID_TONES:
+        return p.tone
+    return random.choice(VALID_TONES)
 
 
 def _build_info_url(tone: str, tweet_ids, note_ids, reply_id: str = "") -> str:
@@ -350,30 +373,9 @@ _X_URL_LEN = 23
 def _append_url(text: str, url: str, limit: int = TWEET_LIMIT) -> str:
     """Append url on its own line, truncating text with ellipsis if needed to stay within limit."""
     budget = limit - _X_URL_LEN - 1  # -1 for the newline
-    if len(text) > budget:
+    if x_weighted_length(text) > budget:
         text = text[:budget - 1] + "…"
     return f"{text}\n{url}"
-
-
-def _build_sources_text(reply: dict, info_url: str) -> str:
-    parts = ["Sources:"]
-    parts.extend(reply["sources"] or [])
-    parts.append(f"More Info: {info_url}")
-    return "\n".join(parts)
-
-
-def _fit_sources_text(sources: list[str], info_url: str, limit: int = TWEET_LIMIT) -> str:
-    kept = list(sources or [])
-    while True:
-        text = _build_sources_text({"sources": kept}, info_url)
-        if len(text) <= limit or not kept:
-            if len(text) > limit:
-                logger.warning(
-                    "Sources tweet still %d chars after dropping all URLs — X will reject",
-                    len(text),
-                )
-            return text
-        kept.pop()
 
 
 def _author_username(tweet: dict) -> str | None:
@@ -399,7 +401,8 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         received_at_utc=received_at_utc,
         pipeline_start_utc=pipeline_start_utc,
         author_username=author_username,
-        bot_author_id=BOT_USER_ID_BY_TONE.get(tone),
+        bot_author_id=BOT_USER_ID,
+        bot_handle=BOT_HANDLE,
     )
 
     def _finalize(outcome: str, exc: BaseException | None = None) -> None:
@@ -420,7 +423,7 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             ev.parent_text = f"[dry-run] {statement}"
             logger.info("DRY_RUN: using mention text as statement: %r", statement)
         else:
-            snap = fetch_tweet(parent_id, tone=tone)
+            snap = fetch_tweet(parent_id)
             if snap is None or not snap.text:
                 logger.info("Parent tweet %s unreachable; skipping mention %s", parent_id, mention_id)
                 _finalize("parent_fetch_failed")
@@ -455,6 +458,7 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             reply.get("reasons_detail") or [],
             parent_id=parent_id,
             parent_author_username=ev.parent_author_username or "",
+            bot_handle=BOT_HANDLE,
         )
 
         with app.app_context():
@@ -471,7 +475,7 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             _finalize("dry_run")
             return
 
-        reply_id = post_reply(parent_id=mention_id, reply_text=reply_text, tone=tone)
+        reply_id = post_reply(parent_id=mention_id, reply_text=reply_text)
         if reply_id is None:
             _finalize("x_post_error")
             return
@@ -480,12 +484,12 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         ev.reply_posted_utc = events.utcnow()
 
         ev.study_code = _make_study_code(reply_id)
-        participant = _PARTICIPANTS_BY_ID.get(author_id)
+        participant = _lookup_participant(author_id)
         if participant:
             ev.participant_id = author_id
-            ev.study_day = (
+            ev.study_day = max(1, (
                 received_at_utc.date() - participant.enrolled_at_utc.date()
-            ).days + 1
+            ).days + 1)
 
         _finalize("replied")
 
@@ -494,8 +498,17 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         _finalize("pipeline_error", exc=exc)
 
 
-def _dispatch_tweet(tone: str, tweet: dict, received_at_utc: datetime) -> bool:
-    """Apply the guard chain and, if accepted, start a pipeline thread."""
+def _dispatch_tweet(tweet: dict, received_at_utc: datetime) -> bool:
+    """Apply the guard chain and, if accepted, start a pipeline thread.
+
+    Tone is resolved here from the mention author's participant record
+    (random for unregistered users) — see _resolve_tone.
+    """
+    mention_id = tweet.get("id_str")
+    parent_id = tweet.get("in_reply_to_status_id_str")
+    author_id = (tweet.get("user") or {}).get("id_str") or ""
+
+    tone = _resolve_tone(author_id)
     metrics.mentions_received.add(1, {"tone": tone})
 
     def _drop(reason: str, **drop_kwargs):
@@ -504,18 +517,14 @@ def _dispatch_tweet(tone: str, tweet: dict, received_at_utc: datetime) -> bool:
         ))
         metrics.mentions_dropped.add(1, {"tone": tone, "reason": reason})
 
-    mention_id = tweet.get("id_str")
-    parent_id = tweet.get("in_reply_to_status_id_str")
-    author_id = (tweet.get("user") or {}).get("id_str")
-
     if not mention_id or not parent_id:
         _drop("no_parent", mention_id=mention_id, author_id=author_id,
               extra={"has_mention_id": bool(mention_id), "has_parent_id": bool(parent_id)})
         return False
 
-    is_self, self_reason = _is_self_reply(tweet, tone)
+    is_self, self_reason = _is_self_reply(tweet)
     if is_self:
-        logger.info("Skipping self-reply %s (tone=%s reason=%s)", mention_id, tone, self_reason)
+        logger.info("Skipping self-reply %s (reason=%s)", mention_id, self_reason)
         _drop(self_reason, mention_id=mention_id, author_id=author_id)
         return False
 
@@ -572,7 +581,7 @@ def info():
     tweet_ids = request.args.getlist("tweet_id")
     note_ids = request.args.getlist("note_id")
     tone = request.args.get("tone", "neutral")
-    bot_handle = BOT_HANDLE_BY_TONE.get(tone, "i")
+    bot_handle = BOT_HANDLE or "i"
 
     if reply_id:
         safe_reply_id = escape(reply_id)
@@ -602,7 +611,7 @@ def info_short(token: str):
         headline=params.get("reply_text", ""),
         reasons=params.get("reasons", []),
         tone=tone,
-        bot_handle=BOT_HANDLE_BY_TONE.get(tone, ""),
+        bot_handle=params.get("bot_handle") or BOT_HANDLE,
         parent_id=params.get("parent_id", ""),
         parent_author_username=params.get("parent_author_username", ""),
         reply_tweet_id=params.get("reply_id", ""),
@@ -687,7 +696,7 @@ def api_replies():
         if not reply_id:
             continue  # not a successful reply — skip
         tone = (e.get("tone") or "").lower()
-        bot_handle = BOT_HANDLE_BY_TONE.get(tone) or ""
+        bot_handle = e.get("bot_handle") or BOT_HANDLE
         reply_url = (
             f"https://twitter.com/{bot_handle}/status/{reply_id}"
             if bot_handle else ""
@@ -727,21 +736,26 @@ def api_participants_list():
 
 @app.route("/api/participants", methods=["POST"])
 def api_participants_create():
-    """Register a participant by @handle. Body: {username, notes?}.
+    """Register a participant by @handle. Body: {username, tone, notes?}.
 
-    Looks up the X numeric user ID and persists the handle. Bot tone is
-    assigned manually outside this system, so no tone is stored here.
-    Updates the in-process cache so events from the newly-registered
-    participant in *this worker* are tagged immediately; other gunicorn
-    workers pick up the registration from Azure Tables when they next
-    look up the author.
+    Looks up the X numeric user ID, validates the tone condition, and persists
+    the record. Updates the in-process cache so events from this worker are
+    tagged immediately; other workers pick it up via the write-through fallback
+    in _lookup_participant on their next mention from this author.
     """
     payload = request.get_json(silent=True) or {}
     username_raw = (payload.get("username") or "").strip()
+    tone_raw = (payload.get("tone") or "").strip().lower()
     notes = (payload.get("notes") or "").strip()
 
     if not username_raw:
         return jsonify({"error": "username is required"}), 400
+
+    if not tone_raw:
+        return jsonify({"error": f"tone is required; valid values: {', '.join(VALID_TONES)}"}), 400
+
+    if tone_raw not in VALID_TONES:
+        return jsonify({"error": f"invalid tone {tone_raw!r}; valid values: {', '.join(VALID_TONES)}"}), 400
 
     clean_username = username_raw.lstrip("@")
 
@@ -755,15 +769,15 @@ def api_participants_create():
     p = _participants.Participant(
         author_id=author_id,
         author_username=clean_username,
-        tone="",
+        tone=tone_raw,
         enrolled_at_utc=registered_at,
         notes=notes,
     )
     _participants.get_store().register(p)
     _PARTICIPANTS_BY_ID[author_id] = p
     logger.info(
-        "Registered participant via dashboard: @%s id=%s",
-        clean_username, author_id,
+        "Registered participant via dashboard: @%s id=%s tone=%s",
+        clean_username, author_id, tone_raw,
     )
     return jsonify({"participant": _serialize_participant(p)}), 201
 

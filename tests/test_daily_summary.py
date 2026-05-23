@@ -4,25 +4,13 @@ from __future__ import annotations
 
 import os
 from datetime import date
-from io import StringIO
-from unittest.mock import patch
 
-import pytest
-
-from derad_agent.cli.daily_summary import _bot_handle, _get_events_for_date, main
+from derad_agent.cli.daily_summary import _BOT_HANDLE, _get_events_for_date, main
 
 
 class TestBotHandle:
-    def test_known_tones(self):
-        assert _bot_handle("agreeable") == os.getenv("BOT_HANDLE_AGREEABLE", "aggiexbot")
-        assert _bot_handle("neutral") == os.getenv("BOT_HANDLE_NEUTRAL", "nelliexbot")
-        assert _bot_handle("satirical") == os.getenv("BOT_HANDLE_SATIRICAL", "eddiexbot")
-
-    def test_unknown_tone_returns_unknown_bot(self):
-        assert _bot_handle("nonsense") == "unknown_bot"
-
-    def test_none_tone_returns_unknown_bot(self):
-        assert _bot_handle(None) == "unknown_bot"
+    def test_uses_env_handle(self):
+        assert _BOT_HANDLE == os.getenv("BOT_HANDLE", "eddiexbot")
 
 
 class TestGetEventsForDate:
@@ -84,5 +72,4 @@ class TestDailySummaryMain:
         sys.argv = ["derad-daily-summary", "--date", "2026-05-19"]
         main()
         out = capsys.readouterr().out
-        bot_handle = os.getenv("BOT_HANDLE_NEUTRAL", "nelliexbot")
-        assert f"https://x.com/{bot_handle}/status/r1" in out
+        assert f"https://x.com/{_BOT_HANDLE}/status/r1" in out
