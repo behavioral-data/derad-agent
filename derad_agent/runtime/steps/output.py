@@ -153,6 +153,16 @@ def step_compose_reply(
         "current_date": datetime.now(timezone.utc).strftime("%B %d, %Y"),
     }
 
+    try:
+        formatted = prompt.format_messages(**invoke_vars)
+        logger.info(
+            "compose_reply request — provider=%s style=%s notes=%d\n%s",
+            provider, style, len(candidates),
+            "\n---\n".join(f"[{m.type}] {m.content}" for m in formatted),
+        )
+    except Exception:
+        pass
+
     raw = chain.invoke(invoke_vars)
     text = extract_text_from_response(raw)
     try:
@@ -216,6 +226,15 @@ def step_compose_no_factcheck_reply(
     chain = prompt | llm
 
     try:
+        try:
+            formatted = prompt.format_messages(statement=statement)
+            logger.info(
+                "compose_no_factcheck_reply request — provider=%s style=%s reason=%s\n%s",
+                provider, style, reason,
+                "\n---\n".join(f"[{m.type}] {m.content}" for m in formatted),
+            )
+        except Exception:
+            pass
         raw = chain.invoke({"statement": statement})
         text = extract_text_from_response(raw)
         parsed = parse_json_response(text)
