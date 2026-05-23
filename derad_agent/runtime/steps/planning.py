@@ -10,8 +10,13 @@ from derad_agent.shared.validation import validate_search_queries
 
 from ._helpers import extract_text_from_response, parse_json_response
 
-_PLANNER_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT_PLANNER", "claude-sonnet-4-6")
-_PLANNER_PROVIDER = os.getenv("DERAD_PLANNER_PROVIDER", "claude")
+
+def _planner_deployment() -> str:
+    return os.getenv("AZURE_OPENAI_DEPLOYMENT_PLANNER", "claude-sonnet-4-6")
+
+
+def _planner_provider() -> str:
+    return os.getenv("DERAD_PLANNER_PROVIDER", "claude")
 
 
 def step_1_generate_queries(
@@ -36,40 +41,46 @@ def step_1_generate_queries(
     llm_instance = get_llm(
         temperature=None,
         max_tokens=2000,
-        deployment=_PLANNER_DEPLOYMENT,
-        provider=_PLANNER_PROVIDER,
+        deployment=_planner_deployment(),
+        provider=_planner_provider(),
     )
     chain = prompt | llm_instance
 
     logger.log_debug(f"Prompt length: {len(prompt.format_prompt(**input_vars).to_string())} chars")
 
+    # API / content-filter failures: don't conflate with an explicit factcheckable=false.
+    # Fall through to retrieval with the raw statement; the no_notes path will handle
+    # the empty-evidence case if nothing comes back.
     try:
         raw_output_obj = chain.invoke(input_vars)
         raw_output = extract_text_from_response(raw_output_obj)
     except Exception as e:
-        logger.log_warning(f"Planner LLM call failed (content filter or API error): {e}")
-        return False, []
+        logger.log_warning(
+            f"Planner LLM call failed — falling back to raw-statement retrieval: {e}"
+        )
+        return True, [statement]
 
     logger.log_debug(f"Response received: {len(raw_output)} chars")
 
     try:
         parsed = parse_json_response(raw_output)
-        factcheckable = bool(parsed.get("factcheckable", False))
-        if not factcheckable:
-            logger.log_info("Planner: tweet is not factcheckable — skipping retrieval")
-            return False, []
-        queries = parsed.get("queries", [])
-        if queries:
-            queries = validate_search_queries(queries, min_queries=1, max_queries=6)
-            logger.log_info(f"Generated {len(queries)} valid queries")
-        else:
-            logger.log_warning("No queries in planner output, using statement as fallback")
-            queries = [statement]
     except Exception as e:
         logger.log_warning(f"Failed to parse JSON planner output: {e}")
         logger.log_warning(f"Raw planner output:\n{raw_output[:1000]}")
-        queries = []
-        factcheckable = False
+        return True, [statement]
+
+    factcheckable = bool(parsed.get("factcheckable", False))
+    if not factcheckable:
+        logger.log_info("Planner: tweet is not factcheckable — skipping retrieval")
+        return False, []
+
+    queries = parsed.get("queries", [])
+    if queries:
+        queries = validate_search_queries(queries, min_queries=1, max_queries=6)
+        logger.log_info(f"Generated {len(queries)} valid queries")
+    else:
+        logger.log_warning("No queries in planner output, using statement as fallback")
+        queries = [statement]
 
     return factcheckable, queries
 

@@ -25,6 +25,8 @@ def extract_text_from_response(raw_output_obj: Any) -> str:
     """
     if hasattr(raw_output_obj, 'content'):
         content = raw_output_obj.content
+        if content is None:
+            return ""
         if isinstance(content, list):
             text_parts = []
             for block in content:
@@ -39,10 +41,8 @@ def extract_text_from_response(raw_output_obj: Any) -> str:
                 elif hasattr(block, 'text'):
                     text_parts.append(block.text)
             return "\n".join(text_parts) if text_parts else str(content)
-        else:
-            return content
-    else:
-        return str(raw_output_obj)
+        return content if isinstance(content, str) else str(content)
+    return str(raw_output_obj)
 
 
 def parse_json_response(text: str) -> Dict[str, Any]:

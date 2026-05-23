@@ -95,13 +95,17 @@ def get_llm(
 ):
     """Get a chat model (cached per unique argument combination).
 
-    provider="grok"  — Azure AI Services (Grok); requires AZURE_AI_ENDPOINT.
-                       reasoning_effort and text_verbosity are silently ignored.
-    provider="openai" — Azure OpenAI (default).
+    provider="openai" — Azure OpenAI (default). Honors reasoning_effort and
+                        text_verbosity (GPT-5 Responses API).
+    provider="claude" — Azure AI Services (Anthropic). reasoning_effort and
+                        text_verbosity are silently ignored.
+    provider="grok"   — Azure AI Services (Grok). reasoning_effort and
+                        text_verbosity are silently ignored.
 
-    deployment: optional explicit Azure deployment name. When set, overrides
-    the AZURE_OPENAI_DEPLOYMENT_CHAT default (openai) or AZURE_AI_DEPLOYMENT_CHAT
-    (grok). Use this to pin a specific step to a specific model.
+    deployment: optional explicit deployment name. When set, overrides the
+    provider's default (AZURE_OPENAI_DEPLOYMENT_CHAT for openai,
+    AZURE_CLAUDE_DEPLOYMENT_CHAT for claude, AZURE_AI_DEPLOYMENT_CHAT for grok).
+    Use this to pin a specific step to a specific model.
     """
     if provider == "claude":
         from langchain_anthropic import ChatAnthropic

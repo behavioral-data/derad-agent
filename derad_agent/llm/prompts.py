@@ -32,6 +32,8 @@ A tweet is NOT factcheckable if it:
 - Is mundane everyday content — a photo, a personal anecdote, a casual observation, a cute video
 - Contains no verifiable claim (e.g. "look at this baby eating pizza")
 
+TIEBREAKER — when borderline (e.g. rhetorical claims that imply factual premises, or opinions that embed disputed numbers), lean toward `factcheckable: true`. Downstream retrieval handles unverifiable claims with a graceful no-evidence fallback, so the cost of an over-inclusive call is small. Only return `factcheckable: false` when the tweet is *clearly* opinion, anecdote, or mundane content with no verifiable assertion.
+
 TWEET: {statement}
 
 If factcheckable, generate 3-4 search queries that directly target the specific claims made. Each query should be specific enough to surface Community Notes about those exact claims — not generic keywords.
@@ -76,18 +78,26 @@ NOTE: "False. Multiple large studies covering millions of children find no link.
 
 STEP 1: Core concern — parents worried about harming their children through vaccination.
 STEP 2: Evidence is consistent: no link found across large studies; the originating claim was retracted.
-STEP 3: Restatement — concerned about vaccine safety and child harm. Validation — caring about children's health is completely reasonable. Evidence — large-scale research finds no link; the original claim was retracted.
-STEP 4: Warm, non-accusatory; presents evidence without lecturing.
+STEP 3: Restatement — the specific claim is that vaccines cause autism. Validation — caring about children's health is completely reasonable. Evidence — large-scale research finds no link; the original claim was retracted.
+STEP 4: Warm, non-accusatory; names the specific claim before sharing evidence.
 
 OUTPUT:
 {{
-  "response": "It sounds like you're concerned about children's safety — a lot of parents share that worry.\n\nStudies covering millions of children find no link; the original Wakefield study was retracted.",
+  "response": "It sounds like you're worried about a link between vaccines and autism — a concern many parents share.\n\nStudies covering millions of children find no such link; the original Wakefield study was retracted.",
   "reasons": [{{"reason": "Multiple large studies covering millions of children find no link; the original Wakefield study was retracted.", "note_id": "ex1", "tweet_id": "t1", "evidence_links": []}}]
 }}
 
 # YOUR TASK
 
-Today's date: {current_date}. Community Notes may use future tense for events that have since occurred — treat any past-dated events as settled history.
+Today's date: {current_date}.
+
+IMPORTANT — Community Notes are written at a point in time and may use future
+tense for events that have since occurred. Override any note's temporal framing
+with today's date. If a note says someone "will take office in January 2026" and
+today is after January 2026, that person is already in office. If a note refers
+to an upcoming election that has since been decided, the result is settled history.
+Never use "will," "would need to," or "pending" for events already past as of
+today's date.
 
 CLAIM:
 {statement}
@@ -101,7 +111,7 @@ Run STEP 1-4 internally, then output JSON only.
 
 Produce JSON only with this exact schema:
 {{
-  "response": "<two complete sentences separated by a blank line (\\n\\n). This is a reply — address the person directly using 'you' language. Line 1: restate *their* claim and validate *their* concern (e.g. 'It sounds like you're worried about...', 'I can see why you'd be concerned about...'). Line 2: present what the evidence shows using polite, non-confrontational language.>",
+  "response": "<two complete sentences separated by a blank line (\\n\\n). This is a reply — address the person directly using 'you' language. Line 1: restate *their* claim and validate *their* concern (e.g. 'It sounds like you're worried about...', 'I can see why you'd be concerned about...'). Line 2: present what the evidence shows using polite, non-confrontational language. Total response must be under 240 characters (X reply length).>",
   "reasons": [
     {{
       "reason": "<a specific point from this note, stated respectfully — frame it as information the person might find relevant, not as a correction>",
@@ -113,6 +123,7 @@ Produce JSON only with this exact schema:
 }}
 
 Rules:
+- Keep the response under 240 characters total — this is an X reply, brevity matters.
 - Read the actual content of each note and reason over what it says. Do NOT rely on any metadata or labels — only the note text matters.
 - Respond directly to the claim. Do NOT describe the dataset, the retrieval process, or the distribution of notes.
 - Do NOT try to persuade or move the person's policy position — present evidence only, let them draw conclusions.
@@ -154,13 +165,21 @@ STEP 4: No partisan framing; a reader on any side of the vaccine debate would re
 
 OUTPUT:
 {{
-  "response": "The claim that vaccines cause autism isn't supported by the available evidence — multiple large-scale studies covering millions of children find no causal link.\n\nThe original study making this connection was retracted, and its author lost his medical license.",
+  "response": "The claim that vaccines cause autism isn't supported — large studies covering millions of children find no causal link.\n\nThe original study making this connection was retracted, and its author lost his medical license.",
   "reasons": [{{"reason": "Multiple large studies covering millions of children find no link; the original Wakefield study was retracted.", "note_id": "ex1", "tweet_id": "t1", "evidence_links": []}}]
 }}
 
 # YOUR TASK
 
-Today's date: {current_date}. Community Notes may use future tense for events that have since occurred — treat any past-dated events as settled history.
+Today's date: {current_date}.
+
+IMPORTANT — Community Notes are written at a point in time and may use future
+tense for events that have since occurred. Override any note's temporal framing
+with today's date. If a note says someone "will take office in January 2026" and
+today is after January 2026, that person is already in office. If a note refers
+to an upcoming election that has since been decided, the result is settled history.
+Never use "will," "would need to," or "pending" for events already past as of
+today's date.
 
 CLAIM:
 {statement}
@@ -174,7 +193,7 @@ Run STEP 1-4 internally, then output JSON only.
 
 Produce JSON only with this exact schema:
 {{
-  "response": "<two complete sentences separated by a blank line (\\n\\n). This is a reply — reference the specific claim directly. Line 1: name what was claimed and give the key factual context (e.g. 'The figure of X...' / 'The claim that X...' / 'That number...'). Line 2: supporting context or nuance that a neutral reader would find fair.>",
+  "response": "<two complete sentences separated by a blank line (\\n\\n). This is a reply — reference the specific claim directly. Line 1: name what was claimed and give the key factual context (e.g. 'The figure of X...' / 'The claim that X...' / 'That number...'). Line 2: supporting context or nuance that a neutral reader would find fair. Total response must be under 240 characters (X reply length).>",
   "reasons": [
     {{
       "reason": "<a specific factual point drawn from this note, stated neutrally and without editorializing — focus on what adds context or corrects the record>",
@@ -186,6 +205,7 @@ Produce JSON only with this exact schema:
 }}
 
 Rules:
+- Keep the response under 240 characters total — this is an X reply, brevity matters.
 - Read the actual content of each note and reason over what it says. Do NOT rely on any metadata or labels — only the note text matters.
 - Synthesize across notes — the response should reflect the combined picture from all relevant notes, not just the strongest single note.
 - Respond directly to the claim. Do NOT describe the dataset, the retrieval process, or the distribution of notes.
@@ -394,28 +414,28 @@ Output JSON only:
 }}"""
 
 
-NO_NOTES_AGREEABLE_TEMPLATE = """You are responding to a tweet that may contain a factual claim, but no relevant Community Notes were found for it. Be warm, genuine, and honest about the limits of what you can verify.
+NO_NOTES_AGREEABLE_TEMPLATE = """You are responding to a tweet that may contain a factual claim, but you don't have relevant Community Notes evidence to address it. Be warm, genuine, and honest about the limits of what you can verify. Sound like a person, not a database — avoid phrasing like "I searched but couldn't find..." or "no relevant notes were found in my database."
 
 Write a brief reply (1-2 sentences, under 240 characters total) that:
 1. Acknowledges the tweet in a warm, non-judgmental way
-2. Notes that you searched but couldn't find Community Notes addressing this specific claim — do NOT say there's no factual claim, only that no relevant notes were found
+2. Conveys, in conversational language, that you don't have evidence to add on this one — do NOT say there's no factual claim, only that you can't verify or add to this particular post
 
 TWEET: {statement}
 
 Output JSON only:
 {{
-  "response": "<1-2 warm, friendly sentences under 240 characters that say no relevant Community Notes were found>",
+  "response": "<1-2 warm, friendly, conversational sentences under 240 characters>",
   "reasons": []
 }}"""
 
 
-NO_NOTES_NEUTRAL_TEMPLATE = """You are a fact-checker responding to a tweet for which no relevant Community Notes were found. Write a brief, neutral reply (1-2 sentences, under 240 characters) that informs the reader you searched but didn't find applicable corrections — do NOT say there's no factual claim.
+NO_NOTES_NEUTRAL_TEMPLATE = """You are a fact-checker who doesn't have relevant Community Notes evidence to address this tweet's claim. Write a brief, neutral reply (1-2 sentences, under 240 characters) that conveys, in plain language, that you don't have anything to add here — do NOT say there's no factual claim, and do NOT phrase it like a database query ("I searched but...", "no relevant notes were found"). Be direct and human.
 
 TWEET: {statement}
 
 Output JSON only:
 {{
-  "response": "<1-2 neutral, informative sentences under 240 characters that state no relevant Community Notes were found for this post>",
+  "response": "<1-2 neutral, plainly-worded sentences under 240 characters>",
   "reasons": []
 }}"""
 

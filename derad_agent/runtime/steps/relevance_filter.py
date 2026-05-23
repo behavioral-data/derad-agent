@@ -37,10 +37,13 @@ def step_filter_notes_by_relevance(
     if logger:
         logger.log_step("relevance_filter", f"Filtering {len(notes)} notes for relevance")
 
-    # max_tokens must cover the full keep_note_ids list: ~8 tokens per 19-digit ID.
-    # 200 notes × 8 tokens = 1600, plus JSON overhead → 2048 is safe.
+    # max_tokens must cover the full keep_note_ids list. Each ~19-digit ID is
+    # ~8 tokens, plus quotes, commas, and JSON wrapper. Budget 12 tokens/note
+    # + 256 overhead, clamped to [512, 8192]. Scales with input rather than
+    # silently truncating when dense topics return hundreds of candidates.
+    max_tokens = max(512, min(8192, len(payload) * 12 + 256))
     prompt = get_relevance_filter_prompt()
-    llm = get_llm(max_tokens=2048, provider="claude")
+    llm = get_llm(max_tokens=max_tokens, provider="claude")
     chain = prompt | llm
 
     try:
