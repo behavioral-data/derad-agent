@@ -8,8 +8,8 @@ A single rule is synced on startup matching the configured BOT_HANDLE.
 Tone is resolved downstream in _dispatch_tweet from the participant table
 (or random for unregistered users), not from the stream rule.
 
-Reconnection uses exponential backoff capped at 5 minutes. A 429 response
-backs off 60 s before retrying.
+Reconnection uses exponential backoff capped at 30 minutes. A 429 response
+backs off at least 120 s before retrying.
 """
 from __future__ import annotations
 
@@ -132,16 +132,16 @@ def _stream_loop(dispatch_fn: Callable, token: str) -> None:
                 headers=headers,
                 params=_STREAM_PARAMS,
                 stream=True,
-                timeout=(10, 30),
+                timeout=(10, 90),
             ) as resp:
                 if resp.status_code == 429:
-                    # X rate-limits repeated connection attempts; use the same
-                    # exponential backoff as other failures, floored at 60 s.
-                    wait = max(backoff, 60.0)
+                    # X rate-limits repeated connection attempts; back off at
+                    # least 120 s and grow exponentially up to 30 minutes.
+                    wait = max(backoff, 120.0)
                     logger.warning("Stream rate-limited (429); backing off %.0f s", wait)
                     _connected.clear()
                     time.sleep(wait)
-                    backoff = min(wait * 2, 300)
+                    backoff = min(wait * 2, 1800)
                     continue
                 resp.raise_for_status()
                 backoff = 1.0
@@ -171,7 +171,7 @@ def _stream_loop(dispatch_fn: Callable, token: str) -> None:
         _connected.clear()
 
         time.sleep(backoff)
-        backoff = min(backoff * 2, 300)
+        backoff = min(backoff * 2, 1800)
 
 
 def start_streamer(dispatch_fn: Callable) -> None:
