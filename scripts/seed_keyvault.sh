@@ -25,6 +25,16 @@ set_secret "azure-openai-endpoint"          "https://derad-agent-project-resourc
 set_secret "azure-openai-deployment-embed"  "text-embedding-3-small"
 set_secret "azure-openai-deployment-chat"   "gpt-5-mini"
 
+# ── Azure AI Foundry (Claude chat) ───────────────────────────────────────────
+CLAUDE_KEY=$(az cognitiveservices account keys list \
+  --name derad-2-resource \
+  --resource-group rg-advaitmb-2226 \
+  --query key1 -o tsv)
+
+set_secret "azure-claude-api-key"           "$CLAUDE_KEY"
+set_secret "azure-claude-endpoint"          "https://derad-2-resource.services.ai.azure.com/"
+set_secret "azure-claude-deployment-chat"   "claude-sonnet-4-6"
+
 # ── X / Twitter credentials ──────────────────────────────────────────────────
 # Single bot identity (Eddie). Replace placeholders here before running in
 # production, or update in KV after.
