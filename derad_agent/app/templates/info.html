@@ -26,12 +26,20 @@
     <div class="info-tweet-col">
       {% if parent_id %}
       <blockquote class="twitter-tweet" data-conversation="none">
-        <a href="https://twitter.com/i/web/status/{{ parent_id }}"></a>
+        {% if parent_author_username %}
+        <a href="https://twitter.com/{{ parent_author_username }}/status/{{ parent_id }}"></a>
+        {% else %}
+        <a href="https://twitter.com/i/status/{{ parent_id }}"></a>
+        {% endif %}
       </blockquote>
       {% endif %}
       {% if reply_tweet_id %}
       <blockquote class="twitter-tweet" data-conversation="none">
-        <a href="https://twitter.com/i/web/status/{{ reply_tweet_id }}"></a>
+        {% if bot_handle %}
+        <a href="https://twitter.com/{{ bot_handle }}/status/{{ reply_tweet_id }}"></a>
+        {% else %}
+        <a href="https://twitter.com/i/status/{{ reply_tweet_id }}"></a>
+        {% endif %}
       </blockquote>
       {% else %}
       {# Fallback if reply not yet posted #}

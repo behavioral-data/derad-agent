@@ -81,10 +81,6 @@ Observations:
 1. The replies need to be conversational while keeping the quality of the joke / factcheck. Lets come up with a plan on hoe to do that
 2. In the thrid tweet, the tweet is a random tweet about a baby's reaction to trying pizza, and it doesn not really need a fact check. there is nothing to fact check. at this point, the bot should keep its tone and reply with saying something like there is nothing to fact check. when coming up with queries, we need to have a gate which checks whether this is something we can even fact check. if its not, we should take steps to reply with a non a factcheck kinda repsonse. Also we need to make sure the queries we come up with need to be queries that are are deisgned to bring up community notes that will actaually giev us information to fact check. 
 
-
-
-
-
 ## Research Question
 
 How does the tone of an AI fact-check affect (1) engagement with the fact-check and (2) affective polarization in those exposed to the fact-check?

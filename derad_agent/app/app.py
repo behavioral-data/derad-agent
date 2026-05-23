@@ -124,13 +124,21 @@ def _get_info_table():
     return _info_table_client
 
 
-def _make_info_token(tone: str, reply_text: str, reasons: list, *, parent_id: str = "") -> str:
+def _make_info_token(
+    tone: str,
+    reply_text: str,
+    reasons: list,
+    *,
+    parent_id: str = "",
+    parent_author_username: str = "",
+) -> str:
     token = secrets.token_urlsafe(6)
     payload = {
         "tone": tone,
         "reply_text": reply_text,
         "reasons": reasons,
         "parent_id": parent_id,
+        "parent_author_username": parent_author_username,
         "_ts": time.monotonic(),
     }
     with _INFO_STORE_LOCK:
@@ -177,6 +185,7 @@ def _make_info_token(tone: str, reply_text: str, reasons: list, *, parent_id: st
                 "reply_text": reply_text,
                 "reasons_json": reasons_json,
                 "parent_id": parent_id,
+                "parent_author_username": parent_author_username,
                 "created_at": datetime.now(timezone.utc),
             })
         except Exception:
@@ -202,6 +211,7 @@ def _get_info_params(token: str) -> dict | None:
             "reply_text": entity.get("reply_text", ""),
             "reasons": json.loads(entity.get("reasons_json", "[]")),
             "parent_id": entity.get("parent_id", ""),
+            "parent_author_username": entity.get("parent_author_username", ""),
             "reply_id": entity.get("reply_id", ""),
             "_ts": time.monotonic(),
         }
@@ -439,7 +449,13 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         # reply was grounded in Community Notes.
         ev.reply_type = "factcheck" if reply.get("reasons_detail") else "no_factcheck"
 
-        token = _make_info_token(tone, reply["text"], reply.get("reasons_detail") or [], parent_id=parent_id)
+        token = _make_info_token(
+            tone,
+            reply["text"],
+            reply.get("reasons_detail") or [],
+            parent_id=parent_id,
+            parent_author_username=ev.parent_author_username or "",
+        )
         with app.app_context():
             info_url = url_for("info_short", token=token, _external=True)
         reply_text = _append_url(reply["text"], info_url)
@@ -588,12 +604,15 @@ def info_short(token: str):
     params = _get_info_params(token)
     if params is None:
         return render_template("info.html"), 404
+    tone = params.get("tone", "")
     return render_template(
         "info.html",
         headline=params.get("reply_text", ""),
         reasons=params.get("reasons", []),
-        tone=params.get("tone", ""),
+        tone=tone,
+        bot_handle=BOT_HANDLE_BY_TONE.get(tone, ""),
         parent_id=params.get("parent_id", ""),
+        parent_author_username=params.get("parent_author_username", ""),
         reply_tweet_id=params.get("reply_id", ""),
     ), 200
 

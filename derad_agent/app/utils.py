@@ -177,12 +177,30 @@ def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5):
     }
 
 
+_TCO_URL_RE = re.compile(r'https?://\S+')
+_X_TCO_LEN = 23
+_X_TWEET_LIMIT = 280
+
+
+def _x_weighted_length(text: str) -> int:
+    """Count characters the way X does: every URL is collapsed to 23 chars."""
+    return len(_TCO_URL_RE.sub("x" * _X_TCO_LEN, text))
+
+
 def post_reply(parent_id, reply_text, tone) -> Optional[str]:
     """Post a reply. Returns the new tweet id on success, None on failure.
 
     Uses the xdk ``CreateRequest`` body shape — passing loose kwargs to
     ``posts.create`` raises because the real signature takes a single ``body``.
     """
+    weighted = _x_weighted_length(reply_text)
+    if weighted > _X_TWEET_LIMIT:
+        logger.warning(
+            "post_reply refused: text %d weighted chars > %d (tone=%s, parent=%s)",
+            weighted, _X_TWEET_LIMIT, tone, parent_id,
+        )
+        return None
+
     from xdk.posts.models import CreateRequest, CreateRequestReply
 
     body = CreateRequest(
