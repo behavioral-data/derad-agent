@@ -81,7 +81,7 @@
     /* ── Add-participant form ── */
     .add-part-form {
       display: grid;
-      grid-template-columns: 1.4fr 2fr auto;
+      grid-template-columns: 1.4fr 1fr 2fr auto;
       gap: 8px;
       align-items: stretch;
       margin: 8px 0 18px;
@@ -316,11 +316,17 @@
       <div class="section-head">
         <p class="eyebrow">05 · Participants</p>
         <h2>Add Participant</h2>
-        <p>Enter an X handle (with or without <code class="inline-code">@</code>). The X user ID is looked up automatically. Bot assignment is handled manually outside this dashboard.</p>
+        <p>Enter an X handle (with or without <code class="inline-code">@</code>). The X user ID is looked up automatically. Pick a tone, or use <em>Balanced</em> to assign the least-used condition for cohort balance.</p>
       </div>
 
       <form class="add-part-form" id="add-part-form" autocomplete="off">
         <input type="text" id="ap-username" name="username" placeholder="@handle" required>
+        <select id="ap-tone" name="tone">
+          <option value="random" selected>Balanced (random)</option>
+          <option value="agreeable">Agreeable</option>
+          <option value="neutral">Neutral</option>
+          <option value="satirical">Satirical</option>
+        </select>
         <input type="text" id="ap-notes" name="notes" placeholder="notes (optional)">
         <button type="submit" id="ap-submit">Add</button>
       </form>
@@ -331,13 +337,14 @@
           <thead>
             <tr>
               <th>Handle</th>
+              <th>Tone</th>
               <th>X User ID</th>
               <th>Registered (UTC)</th>
               <th>Notes</th>
             </tr>
           </thead>
           <tbody id="participants-tbody">
-            <tr><td colspan="4" style="color:var(--gray-500);">Loading…</td></tr>
+            <tr><td colspan="5" style="color:var(--gray-500);">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -533,15 +540,22 @@
   setInterval(fetchActivity, 5000);
 
   // ── Participants ───────────────────────────────────────────────────────────
+  function toneChip(tone) {
+    const t = (tone || '').toLowerCase();
+    const cls = ['agreeable', 'neutral', 'satirical'].includes(t) ? t : 'unknown';
+    return `<span class="bot-chip tone-${cls}">${esc(t) || '—'}</span>`;
+  }
+
   function renderParticipants(rows) {
     const tbody = document.getElementById('participants-tbody');
     if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--gray-500);">No participants yet.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--gray-500);">No participants yet.</td></tr>';
       return;
     }
     tbody.innerHTML = rows.map(p => `
       <tr>
         <td>@${esc(p.author_username)}</td>
+        <td>${toneChip(p.tone)}</td>
         <td><code class="inline-code">${esc(p.author_id)}</code></td>
         <td style="white-space:nowrap;">${fmtTime(p.enrolled_at_utc)}</td>
         <td>${esc(p.notes) || '—'}</td>
@@ -564,6 +578,7 @@
   document.getElementById('add-part-form').addEventListener('submit', ev => {
     ev.preventDefault();
     const username = document.getElementById('ap-username').value.trim();
+    const tone     = document.getElementById('ap-tone').value;
     const notes    = document.getElementById('ap-notes').value.trim();
     if (!username) { setApMsg('Handle is required.', 'err'); return; }
 
@@ -574,7 +589,7 @@
     fetch('/api/participants', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, notes }),
+      body: JSON.stringify({ username, tone, notes }),
     })
       .then(async r => {
         const data = await r.json().catch(() => ({}));
@@ -583,9 +598,11 @@
       })
       .then(data => {
         const p = data.participant;
-        setApMsg(`Added @${p.author_username} (id=${p.author_id}).`, 'ok');
+        const toneNote = tone === 'random' ? ` — assigned ${p.tone} (balanced)` : ` — tone ${p.tone}`;
+        setApMsg(`Added @${p.author_username} (id=${p.author_id})${toneNote}.`, 'ok');
         document.getElementById('ap-username').value = '';
         document.getElementById('ap-notes').value = '';
+        document.getElementById('ap-tone').value = 'random';
         fetchParticipants();
         fetchActivity();  // refresh sidebar counts
       })

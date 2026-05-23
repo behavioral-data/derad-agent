@@ -752,10 +752,12 @@ def api_participants_create():
         return jsonify({"error": "username is required"}), 400
 
     if not tone_raw:
-        return jsonify({"error": f"tone is required; valid values: {', '.join(VALID_TONES)}"}), 400
+        return jsonify({"error": f"tone is required; valid values: {', '.join(VALID_TONES)}, random"}), 400
 
-    if tone_raw not in VALID_TONES:
-        return jsonify({"error": f"invalid tone {tone_raw!r}; valid values: {', '.join(VALID_TONES)}"}), 400
+    if tone_raw == "random":
+        tone_raw = _participants.pick_balanced_tone()
+    elif tone_raw not in VALID_TONES:
+        return jsonify({"error": f"invalid tone {tone_raw!r}; valid values: {', '.join(VALID_TONES)}, random"}), 400
 
     clean_username = username_raw.lstrip("@")
 
