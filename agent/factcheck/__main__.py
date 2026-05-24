@@ -36,11 +36,20 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Render all three tones from the same frozen object (invariance demo).",
     )
+    parser.add_argument(
+        "--image",
+        action="append",
+        default=[],
+        help="URL of an image to include (repeat for multiple). Triggers Stage 1.5.",
+    )
     args = parser.parse_args(argv)
 
-    print(f"Claim: {args.claim}\n", file=sys.stderr)
+    print(f"Claim: {args.claim}", file=sys.stderr)
+    if args.image:
+        print(f"Images: {args.image}", file=sys.stderr)
+    print("", file=sys.stderr)
 
-    frozen = run_pipeline(args.claim)
+    frozen = run_pipeline(args.claim, image_urls=args.image or None)
     print(
         f"Verdict: {frozen.verdict_label}\n"
         f"Frozen: data/freezes/{frozen.invocation_id}.json\n",

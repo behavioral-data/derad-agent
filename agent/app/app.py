@@ -433,7 +433,13 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         if DRY_RUN:
             logger.info("DRY_RUN: parent_text=%r", statement)
 
-        reply = generate_reply(statement=statement, exclude_tweet_id=parent_id, tone=tone)
+        parent_image_urls = list(snap.image_urls or [])
+        reply = generate_reply(
+            statement=statement,
+            exclude_tweet_id=parent_id,
+            tone=tone,
+            image_urls=parent_image_urls,
+        )
         ev.queries = reply.get("queries") or []
         ev.cited_tweet_ids = reply.get("all_cited_tweet_ids") or []
         ev.cited_note_ids = reply.get("all_cited_note_ids") or []

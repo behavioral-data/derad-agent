@@ -20,6 +20,9 @@ class TweetSnapshot:
     retweet_count: Optional[int] = None
     reply_count: Optional[int] = None
     quote_count: Optional[int] = None
+    # Image URLs attached to the tweet (photos only; videos/GIFs skipped).
+    # X API populates url for photos and preview_image_url for video/animated_gif.
+    image_urls: list = None  # type: ignore[assignment]
 
 
 def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
@@ -34,9 +37,10 @@ def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
     try:
         response = get_x_client().posts.get_by_id(
             id=str(tweet_id),
-            tweet_fields=["text", "author_id", "public_metrics"],
-            expansions=["author_id"],
+            tweet_fields=["text", "author_id", "public_metrics", "attachments"],
+            expansions=["author_id", "attachments.media_keys"],
             user_fields=["username"],
+            media_fields=["url", "preview_image_url", "type"],
         )
     except requests.HTTPError as exc:
         status = exc.response.status_code if exc.response is not None else "?"
@@ -62,6 +66,18 @@ def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
                 author_username = user.get("username")
                 break
 
+    image_urls: list[str] = []
+    media = includes.get("media") if isinstance(includes, dict) else None
+    if media:
+        for m in media:
+            if not isinstance(m, dict):
+                continue
+            # Use `url` for static photos; fall back to `preview_image_url` for
+            # video / animated_gif. The VLM only reads stills either way.
+            mu = m.get("url") or m.get("preview_image_url")
+            if mu:
+                image_urls.append(mu)
+
     return TweetSnapshot(
         text=text,
         author_id=str(author_id) if author_id is not None else None,
@@ -70,6 +86,7 @@ def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
         retweet_count=public_metrics.get("retweet_count"),
         reply_count=public_metrics.get("reply_count"),
         quote_count=public_metrics.get("quote_count"),
+        image_urls=image_urls,
     )
 
 
@@ -80,9 +97,10 @@ _APP_TO_FACTCHECK_TONE = {
 }
 
 
-def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5):
+def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5, image_urls=None):
     """Run the fact-check pipeline and render a reply in the requested tone.
 
+    `image_urls`, when provided, triggers Stage 1.5 multimodal extraction.
     Returns the dict shape the X app expects. Community-notes-specific fields
     (`tweets`, `notes`, `all_cited_*`, `reasons_detail`) are empty by design —
     they have no analog in the web-evidence pipeline. The /info page falls
@@ -100,7 +118,11 @@ def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5):
     target_tweet_id = str(exclude_tweet_id) if exclude_tweet_id is not None else ""
 
     try:
-        frozen = run_pipeline(statement, target_tweet_id=target_tweet_id)
+        frozen = run_pipeline(
+            statement,
+            target_tweet_id=target_tweet_id,
+            image_urls=list(image_urls) if image_urls else None,
+        )
     except Exception:
         logger.exception("Fact-check pipeline failed for statement head=%r", statement[:80])
         return {
