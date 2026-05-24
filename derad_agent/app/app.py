@@ -457,12 +457,9 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             parent_author_username=ev.parent_author_username or "",
         )
 
-        if reply.get("sources"):
-            with app.app_context():
-                info_url = url_for("info_short", token=token, _external=True)
-            reply_text = _append_url(reply["text"], info_url)
-        else:
-            reply_text = reply["text"]
+        with app.app_context():
+            info_url = url_for("info_short", token=token, _external=True)
+        reply_text = _append_url(reply["text"], info_url)
         ev.reply_text = reply_text
 
         if DRY_RUN:
