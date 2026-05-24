@@ -49,6 +49,11 @@ Hard rules:
 - Do not invent sources. Every URL you cite must appear in the input source_quality_table.
 - Do not emit a verdict label — that is computed structurally downstream.
 - Be conservative: if evidence is thin or only from low-quality/satirical/unknown tiers, mark propositions unaddressed/disputed rather than verified/refuted.
+- BUDGET (critical — downstream renderer must fit ≤270 chars across three tones, with a 23-char URL):
+    - `headline_finding`: ≤120 characters. ONE punchy sentence.
+    - `counter_fact`: ≤120 characters. ONE corrective sentence; null when not refuted.
+    - `tone_neutral_justification`: ≤220 characters. 1–2 sentences. Name the load-bearing source(s).
+    - `load_bearing_evidence_snippet`: ≤180 characters.
 """
 
 

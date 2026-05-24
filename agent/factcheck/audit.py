@@ -60,13 +60,19 @@ def audit(
     if not presentation_payload.headline_finding.strip():
         failures.append("presentation_payload.headline_finding is empty.")
 
-    central_props = (
-        [p for p in findings.verified_propositions if p.is_central]
-        + [p for p in findings.refuted_propositions if p.is_central]
-        + [p for p in findings.disputed_propositions if p.is_central]
-        + [p for p in findings.unaddressed_propositions if p.is_central]
-    )
-    if not central_props:
+    central_buckets = {
+        "verified": [p for p in findings.verified_propositions if p.is_central],
+        "refuted": [p for p in findings.refuted_propositions if p.is_central],
+        "disputed": [p for p in findings.disputed_propositions if p.is_central],
+        "unaddressed": [p for p in findings.unaddressed_propositions if p.is_central],
+    }
+    occupied = [name for name, props in central_buckets.items() if props]
+    if not occupied:
         failures.append("No central proposition emitted in consolidated_findings.")
+    elif len(occupied) > 1:
+        failures.append(
+            f"Central proposition appears in multiple buckets ({', '.join(occupied)}); "
+            "verdict rule would resolve ambiguously."
+        )
 
     return AuditResult(passed=not failures, failures=failures)

@@ -32,8 +32,9 @@ You receive: presentation_payload + tone_neutral_justification. NOTHING ELSE.
 
 Register: plain correction with source. Bode, Vraga & Tully (2020) style. Example: "This is not accurate. According to [source]…"
 
-Hard constraints:
+Hard constraints (these are the invariance contract; the manipulation check at pilot rejects renders that violate them):
 - Communicate the headline_finding faithfully.
+- Reproduce every proper noun (people, places, organizations, dates, publications) that appears in tone_neutral_justification or presentation_payload, verbatim. Do not generalize them (no "a satirical site" when the source said "World News Daily Report"; no "in 2015" when it said "March 2015").
 - Include at least one URL from primary_sources_to_cite, written as a plain http(s) link.
 - Do not introduce any facts that are not in presentation_payload or tone_neutral_justification.
 - Do not introduce any URL that is not in primary_sources_to_cite.
@@ -51,7 +52,7 @@ Same input contract, same hard constraints as the neutral renderer, but a differ
 
 You receive: presentation_payload + tone_neutral_justification. NOTHING ELSE.
 
-Hard constraints: faithful to headline_finding; MUST include at least one URL from primary_sources_to_cite verbatim as a plain http(s) link in the reply text (this is non-negotiable, even when softening the tone); no facts outside the inputs; no new URLs; no emojis/hashtags/@-mentions; ≤280 X-weighted chars; JSON with "text".
+Hard constraints: faithful to headline_finding; reproduce every proper noun (people, places, organizations, dates, publications) from tone_neutral_justification and presentation_payload VERBATIM — do not generalize (no "a satirical site" when the source said "World News Daily Report"); MUST include at least one URL from primary_sources_to_cite verbatim as a plain http(s) link in the reply text (this is non-negotiable, even when softening the tone); no facts outside the inputs; no new URLs; no emojis/hashtags/@-mentions; ≤270 X-weighted chars (X counts every URL as 23 chars; aim for ≤270 to leave headroom); JSON with "text".
 """
 
 
@@ -65,7 +66,7 @@ Strict boundary (refusal triggers): NO profanity. NO slurs. NO demographic, iden
 
 You receive: presentation_payload + tone_neutral_justification. NOTHING ELSE.
 
-Hard constraints: faithful to headline_finding; MUST include at least one URL from primary_sources_to_cite verbatim as a plain http(s) link in the reply text (this is non-negotiable); no facts outside the inputs; no new URLs; no emojis/hashtags/@-mentions; ≤280 X-weighted chars; JSON with "text".
+Hard constraints: faithful to headline_finding; reproduce every proper noun (people, places, organizations, dates, publications) from tone_neutral_justification and presentation_payload VERBATIM — do not generalize (target the named source by name); MUST include at least one URL from primary_sources_to_cite verbatim as a plain http(s) link in the reply text (this is non-negotiable); no facts outside the inputs; no new URLs; no emojis/hashtags/@-mentions; ≤270 X-weighted chars (X counts every URL as 23 chars; aim for ≤270 to leave headroom); JSON with "text".
 """
 
 
@@ -81,7 +82,7 @@ def x_weighted_length(text: str) -> int:
     return len(_URL_RE.sub("x" * _X_TCO_LEN, text))
 
 
-def render(view: RendererView, tone: Tone, *, max_retries: int = 1) -> str:
+def render(view: RendererView, tone: Tone, *, max_retries: int = 2) -> str:
     """Render a reply. Raises ValueError if invariance fails after retries."""
     if tone not in _TONE_SYSTEMS:
         raise ValueError(f"Unknown tone {tone!r}")

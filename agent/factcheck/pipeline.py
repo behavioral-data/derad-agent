@@ -67,13 +67,13 @@ def _build_evidence(query: str, hits) -> list[Evidence]:
 
 def _nei_verdict(reason: str) -> tuple[ConsolidatedFindings, PresentationPayload, str]:
     findings = ConsolidatedFindings(
-        unaddressed_propositions=[
+        unaddressed_propositions=(
             UnaddressedProposition(
                 proposition=reason,
                 reason="no evidence retrieved",
                 is_central=True,
-            )
-        ]
+            ),
+        )
     )
     payload = PresentationPayload(
         headline_finding="Not enough reliable evidence to verify this claim.",
