@@ -188,11 +188,13 @@ class FoundryBingSearchBackend:
 
     def search(self, query: str, top_k: int = 5) -> list[SearchHit]:
         self._ensure_client()
+        logger.info("Foundry search: query head=%r", query[:120])
         try:
             response = self._openai_client.responses.create(
                 tool_choice="required",
                 input=query,
                 extra_body={"agent_reference": self._agent_ref},
+                timeout=90,
             )
         except Exception:
             logger.exception("Foundry Bing search failed for query=%r", query)

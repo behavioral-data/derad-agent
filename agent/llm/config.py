@@ -72,10 +72,16 @@ def get_llm(
     claude_endpoint = _require_env("AZURE_CLAUDE_ENDPOINT")
     model_name = deployment or os.getenv("AZURE_CLAUDE_DEPLOYMENT_CHAT", "claude-sonnet-4-6")
 
+    # Cap per-request wall time. The Anthropic Python SDK default is 600s,
+    # which is unsuitable for a real-time bot — a single hung call would
+    # stall the pipeline (and the singleton-locked event store) far longer
+    # than the gunicorn graceful-timeout window.
     config: dict = {
         "model_name": model_name,
         "anthropic_api_url": claude_endpoint,
         "api_key": _require_env("AZURE_CLAUDE_API_KEY"),
+        "timeout": 120,
+        "max_retries": 1,
     }
 
     if reasoning_effort:
