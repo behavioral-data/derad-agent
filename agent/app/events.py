@@ -253,13 +253,27 @@ class TablesEventsStore:
         from azure.identity import DefaultAzureCredential
 
         cred = credential or DefaultAzureCredential()
-        self._service = TableServiceClient(endpoint=endpoint, credential=cred)
+        # Short timeouts on the table service client. The Azure SDK default is
+        # 300s, and the table-create loop below blocks app + streamer
+        # initialization on a SINGLE slow network round-trip.
+        self._service = TableServiceClient(
+            endpoint=endpoint,
+            credential=cred,
+            connection_timeout=10,
+            read_timeout=15,
+        )
         for name in (events_table, drops_table, engagements_table, reply_replies_table):
             try:
                 self._service.create_table(name)
                 logger.info("Created events table %s", name)
             except ResourceExistsError:
                 pass
+            except Exception:
+                # Tables already exist in production; any other failure here
+                # (timeout, transient throttle) shouldn't abort startup. The
+                # per-table client below works against a table whether or not
+                # we just verified existence here.
+                logger.warning("create_table(%s) failed — assuming the table exists.", name, exc_info=True)
         self._events = self._service.get_table_client(events_table)
         self._drops = self._service.get_table_client(drops_table)
         self._engagements = self._service.get_table_client(engagements_table)

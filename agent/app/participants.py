@@ -82,12 +82,19 @@ class TablesParticipantsStore:
         from azure.identity import DefaultAzureCredential
 
         cred = credential or DefaultAzureCredential()
-        svc = TableServiceClient(endpoint=endpoint, credential=cred)
+        svc = TableServiceClient(
+            endpoint=endpoint,
+            credential=cred,
+            connection_timeout=10,
+            read_timeout=15,
+        )
         try:
             svc.create_table(_TABLE_NAME)
             logger.info("Created table %s", _TABLE_NAME)
         except ResourceExistsError:
             pass
+        except Exception:
+            logger.warning("create_table(%s) failed — assuming it exists.", _TABLE_NAME, exc_info=True)
         self._tbl = svc.get_table_client(_TABLE_NAME)
 
     def register(self, p: Participant) -> None:
