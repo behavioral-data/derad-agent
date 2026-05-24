@@ -44,6 +44,18 @@ var logName = 'azlog${resourceToken}'
 var aiName  = 'azai${resourceToken}'
 var caeName = 'azcae${resourceToken}'
 var cjobName = 'azcjob-eng${resourceToken}'
+var fdyName  = 'azfdy${resourceToken}'
+
+// ── Foundry resources (manually provisioned; declared as existing) ───────────
+// These were created by `az` CLI; declared here so we can grant UAMI roles and
+// reference IDs. Bicep-ifying their creation is a follow-up.
+var foundryProjectName = 'derad-factcheck'
+var foundryBingConnectionName = 'derad-bing'
+var foundrySearchModel = 'gpt-41-mini-search'
+
+resource foundryAccount 'Microsoft.CognitiveServices/accounts@2025-04-01-preview' existing = {
+  name: fdyName
+}
 
 // ── User-Assigned Managed Identity ──────────────────────────────────────────
 resource uami 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = {
@@ -213,7 +225,10 @@ resource appService 'Microsoft.Web/sites@2024-11-01' = {
         { name: 'WEBSITES_PORT', value: '8000' }
         { name: 'WEBSITES_ENABLE_APP_SERVICE_STORAGE', value: 'false' }
         { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsights.properties.ConnectionString }
-        { name: 'DERAD_AGENT_INDEX_ROOT', value: '/app/indexes' }
+        // Safety: first deploy of the web-evidence pipeline runs DRY_RUN so the
+        // bot logs replies instead of posting. Flip to 'false' in the portal
+        // (or update Bicep) once smoke-tested.
+        { name: 'DERAD_DRY_RUN', value: 'true' }
         { name: 'SERVER_NAME', value: '${appName}.azurewebsites.net' }
         { name: 'PREFERRED_URL_SCHEME', value: 'https' }
         { name: 'DERAD_RATE_LIMIT_PER_SEC', value: '3' }
@@ -242,6 +257,11 @@ resource appService 'Microsoft.Web/sites@2024-11-01' = {
         { name: 'X_ACCESS_TOKEN', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/x-access-token)' }
         { name: 'X_ACCESS_TOKEN_SECRET', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/x-access-token-secret)' }
         { name: 'BOT_USER_ID', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/bot-user-id)' }
+        // Foundry + Bing Grounding (Stage 4 web search)
+        { name: 'FOUNDRY_PROJECT_ENDPOINT', value: 'https://${fdyName}.services.ai.azure.com/api/projects/${foundryProjectName}' }
+        { name: 'FOUNDRY_BING_CONNECTION_ID', value: '${foundryAccount.id}/projects/${foundryProjectName}/connections/${foundryBingConnectionName}' }
+        { name: 'FOUNDRY_SEARCH_MODEL', value: foundrySearchModel }
+        { name: 'FOUNDRY_SEARCH_AGENT_NAME', value: 'derad-bing-search' }
       ]
     }
   }
@@ -303,6 +323,32 @@ resource kvSecretsUserAssignment 'Microsoft.Authorization/roleAssignments@2022-0
   name: guid(keyVault.id, uami.id, kvSecretsUserRoleId)
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', kvSecretsUserRoleId)
+    principalId: uami.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Azure AI Developer on the Foundry account — lets the UAMI create/invoke
+// the search agent and read connection metadata.
+var azureAiDeveloperRoleId = '64702f94-c441-49e6-a78b-ef80e0188fee'
+resource foundryDeveloperAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: foundryAccount
+  name: guid(foundryAccount.id, uami.id, azureAiDeveloperRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', azureAiDeveloperRoleId)
+    principalId: uami.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Cognitive Services User on the Foundry account — lets the UAMI invoke the
+// gpt-4.1-mini deployment that backs the search agent.
+var cogServicesUserRoleId = 'a97b65f3-24c7-4388-baec-2e87135dc908'
+resource foundryUserAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: foundryAccount
+  name: guid(foundryAccount.id, uami.id, cogServicesUserRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', cogServicesUserRoleId)
     principalId: uami.properties.principalId
     principalType: 'ServicePrincipal'
   }

@@ -73,17 +73,71 @@ def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
     )
 
 
-def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5):
-    """Stub. The X trigger path calls into the fact-check pipeline here.
+_APP_TO_FACTCHECK_TONE = {
+    "agreeable": "agreeable",
+    "neutral": "neutral",
+    "satirical": "agonistic",  # design uses 'agonistic'; app's legacy label is 'satirical'
+}
 
-    The pipeline (agent.factcheck) will be wired in once Stage 4's Foundry
-    Bing-grounding backend lands. Until then this raises so the trigger
-    path fails loudly rather than posting empty replies. Tests monkeypatch
-    this symbol directly on the app module.
+
+def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5):
+    """Run the fact-check pipeline and render a reply in the requested tone.
+
+    Returns the dict shape the X app expects. Community-notes-specific fields
+    (`tweets`, `notes`, `all_cited_*`, `reasons_detail`) are empty by design —
+    they have no analog in the web-evidence pipeline. The /info page falls
+    back to showing just the rendered reply + cited URLs.
     """
-    raise NotImplementedError(
-        "generate_reply: fact-check pipeline not yet wired to agent.factcheck"
+    from agent.factcheck.freeze import view_for_renderer
+    from agent.factcheck.pipeline import run_pipeline
+    from agent.factcheck.render import render
+
+    factcheck_tone = _APP_TO_FACTCHECK_TONE.get(tone)
+    if factcheck_tone is None:
+        logger.warning("generate_reply: unknown tone %r — defaulting to neutral", tone)
+        factcheck_tone = "neutral"
+
+    target_tweet_id = str(exclude_tweet_id) if exclude_tweet_id is not None else ""
+
+    try:
+        frozen = run_pipeline(statement, target_tweet_id=target_tweet_id)
+    except Exception:
+        logger.exception("Fact-check pipeline failed for statement head=%r", statement[:80])
+        return {
+            "text": "", "sources": None, "tweets": None, "notes": None,
+            "queries": [], "all_cited_tweet_ids": [], "all_cited_note_ids": [],
+            "reasons_detail": [],
+        }
+
+    try:
+        text = render(view_for_renderer(frozen), factcheck_tone)
+    except Exception:
+        logger.exception("Render failed for invocation=%s", frozen.invocation_id)
+        return {
+            "text": "", "sources": None, "tweets": None, "notes": None,
+            "queries": [], "all_cited_tweet_ids": [], "all_cited_note_ids": [],
+            "reasons_detail": [],
+        }
+
+    sources = [
+        s.url for s in frozen.presentation_payload.primary_sources_to_cite
+    ][:max_sources] or None
+
+    logger.info(
+        "Fact-check produced verdict=%s for invocation=%s tone=%s",
+        frozen.verdict_label, frozen.invocation_id, factcheck_tone,
     )
+
+    return {
+        "text": text,
+        "sources": sources,
+        "tweets": None,
+        "notes": None,
+        "queries": [statement],
+        "all_cited_tweet_ids": [],
+        "all_cited_note_ids": [],
+        "reasons_detail": [],
+    }
 
 
 _TCO_URL_RE = re.compile(r'https?://\S+')

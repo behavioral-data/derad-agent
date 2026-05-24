@@ -40,7 +40,21 @@ def derive_verdict(
             return "Supported"
 
     central_disputed = next((p for p in findings.disputed_propositions if p.is_central), None)
-    if central_disputed is not None and central_disputed.weight_of_evidence_favors == "undetermined":
-        return "Conflicting"
+    if central_disputed is not None:
+        for_count = _count_reliable(
+            [s.url for s in central_disputed.sources_for], tier_by_url
+        )
+        against_count = _count_reliable(
+            [s.url for s in central_disputed.sources_against], tier_by_url
+        )
+        # Design §4.5.4: Conflicting requires the source-quality table to fail
+        # to resolve the dispute. If one side has ≥2 reliable sources and the
+        # other does not, the table has resolved it — promote to Refuted/Supported.
+        if for_count >= _RELIABLE_THRESHOLD and against_count >= _RELIABLE_THRESHOLD:
+            return "Conflicting"
+        if against_count >= _RELIABLE_THRESHOLD and for_count < _RELIABLE_THRESHOLD:
+            return "Refuted"
+        if for_count >= _RELIABLE_THRESHOLD and against_count < _RELIABLE_THRESHOLD:
+            return "Supported"
 
     return "NotEnoughEvidence"

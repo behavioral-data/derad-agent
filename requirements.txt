@@ -1,6 +1,7 @@
 langchain>=0.1.16
 langchain-anthropic>=1.4.0
 pydantic>=2.0
+azure-ai-projects>=2.0
 python-dotenv>=1.0.0
 rich>=13.0.0
 Flask>=3.1.3

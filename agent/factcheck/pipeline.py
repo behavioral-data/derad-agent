@@ -30,7 +30,7 @@ from .schema import (
     SourceQualityEntry,
     UnaddressedProposition,
 )
-from .search import SearchBackend, StubSearchBackend
+from .search import SearchBackend, build_default_backend
 from .sources import build_quality_table
 from .verdict import derive_verdict
 
@@ -92,7 +92,7 @@ def run_pipeline(
     freeze_root: Optional[Path] = None,
 ) -> FrozenVerdict:
     """Run the thin-slice pipeline end-to-end. Returns the frozen verdict."""
-    backend = backend or StubSearchBackend()
+    backend = backend or build_default_backend()
     invocation_id = str(uuid.uuid4())
     invocation_time = datetime.now(timezone.utc)
 

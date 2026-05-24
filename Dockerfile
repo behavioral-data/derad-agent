@@ -34,8 +34,7 @@ FROM python:3.11-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:${PATH}" \
-    PORT=8000 \
-    DERAD_AGENT_INDEX_ROOT=/app/indexes
+    PORT=8000
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl \
@@ -47,10 +46,6 @@ WORKDIR /app
 
 # Bring across the installed venv (carries agent + templates + static).
 COPY --from=builder --chown=app:app /opt/venv /opt/venv
-
-# Bake the notes index into the image. ~1.34 GB apparent size, ~1.8 GB final
-# image; trades image size for zero external mounts and a one-step cold start.
-COPY --chown=app:app indexes/notes_index /app/indexes/notes_index
 
 USER app
 
