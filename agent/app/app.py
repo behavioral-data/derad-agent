@@ -417,26 +417,21 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         metrics.pipeline_latency_ms.record(ev.pipeline_ms, {"tone": tone, "outcome": outcome})
 
     try:
+        snap = fetch_tweet(parent_id)
+        if snap is None or not snap.text:
+            logger.info("Parent tweet %s unreachable; skipping mention %s", parent_id, mention_id)
+            _finalize("parent_fetch_failed")
+            return
+        ev.parent_text = snap.text
+        ev.parent_author_id = snap.author_id
+        ev.parent_author_username = snap.author_username
+        ev.parent_like_count = snap.like_count
+        ev.parent_retweet_count = snap.retweet_count
+        ev.parent_reply_count = snap.reply_count
+        ev.parent_quote_count = snap.quote_count
+        statement = snap.text
         if DRY_RUN:
-            import re as _re
-            raw_text = tweet.get("text", "")
-            statement = _re.sub(r"@\w+\s*", "", raw_text).strip() or raw_text
-            ev.parent_text = f"[dry-run] {statement}"
-            logger.info("DRY_RUN: using mention text as statement: %r", statement)
-        else:
-            snap = fetch_tweet(parent_id)
-            if snap is None or not snap.text:
-                logger.info("Parent tweet %s unreachable; skipping mention %s", parent_id, mention_id)
-                _finalize("parent_fetch_failed")
-                return
-            ev.parent_text = snap.text
-            ev.parent_author_id = snap.author_id
-            ev.parent_author_username = snap.author_username
-            ev.parent_like_count = snap.like_count
-            ev.parent_retweet_count = snap.retweet_count
-            ev.parent_reply_count = snap.reply_count
-            ev.parent_quote_count = snap.quote_count
-            statement = snap.text
+            logger.info("DRY_RUN: parent_text=%r", statement)
 
         reply = generate_reply(statement=statement, exclude_tweet_id=parent_id, tone=tone)
         ev.queries = reply.get("queries") or []
