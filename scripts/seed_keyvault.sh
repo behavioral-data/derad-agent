@@ -23,7 +23,6 @@ OPENAI_KEY=$(az cognitiveservices account keys list \
 set_secret "azure-openai-api-key"           "$OPENAI_KEY"
 set_secret "azure-openai-endpoint"          "https://derad-agent-project-resource.cognitiveservices.azure.com/"
 set_secret "azure-openai-deployment-embed"  "text-embedding-3-small"
-set_secret "azure-openai-deployment-chat"   "gpt-5-mini"
 
 # ── Azure AI Foundry (Claude chat) ───────────────────────────────────────────
 CLAUDE_KEY=$(az cognitiveservices account keys list \
