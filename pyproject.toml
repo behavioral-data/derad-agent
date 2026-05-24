@@ -11,17 +11,17 @@ include = ["agent*"]
 
 [project]
 name = "derad-agent"
-version = "2.0.0"
-description = "Retrieve Community Notes at scale and respond to any claim with evidence-backed reasoning."
+version = "3.0.0"
+description = "Web-evidence fact-checking bot for X (research instrument)."
 authors = [{name = "Advait MB"}]
 requires-python = ">=3.9"
 readme = "README.md"
 dependencies = [
     "langchain>=0.1.16",
-    "langchain-openai>=1.0",
+    "langchain-anthropic>=1.4.0",
+    "pydantic>=2.0",
     "python-dotenv>=1.0.0",
     "rich>=13.0.0",
-    "numpy>=1.24",
     "Flask>=3.1.3",
     "xdk>=0.9.0",
     "gunicorn>=21.2.0",
@@ -31,8 +31,7 @@ dependencies = [
 ]
 
 [project.scripts]
-derad-embed-notes = "agent.cli.embed_notes:main"
-derad-ask = "agent.cli.ask:main"
+derad-factcheck = "agent.factcheck.__main__:main"
 derad-poll-engagement = "agent.cli.poll_engagement:main"
 derad-export = "agent.cli.export:main"
 derad-register-participant = "agent.cli.register_participant:main"

@@ -18,11 +18,8 @@ from agent.app import participants as _participants
 from agent.app.participants import VALID_TONES
 from agent.app.utils import (
     fetch_tweet,
-    generate_notes_html,
     generate_reply,
-    index_loaded,
     post_reply,
-    preload_index_async,
     x_weighted_length,
 )
 from agent.app import streamer as _streamer
@@ -43,12 +40,16 @@ except OSError:
     pass  # non-writable filesystem (e.g. read-only container layer) — stdout only
 for _noisy in ("azure.core", "azure.monitor", "azure.identity"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
+# Exporter export errors (e.g. network timeouts) log at ERROR — suppress them too
+logging.getLogger("azure.monitor.opentelemetry.exporter").setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
 
 if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING") and not os.getenv("PYTEST_CURRENT_TEST"):
     try:
         from azure.monitor.opentelemetry import configure_azure_monitor
-        configure_azure_monitor()
+        # Use a short timeout so a blocked network path fails fast instead of
+        # holding an exporter thread for the default 300 s.
+        configure_azure_monitor(connection_timeout=5, read_timeout=10)
         logger.info("Application Insights instrumentation enabled")
     except Exception:
         logger.exception("Application Insights init failed; continuing without telemetry")
@@ -593,11 +594,7 @@ def info():
         )
     else:
         reply_html = ""
-    if index_loaded():
-        notes_html = generate_notes_html(tweet_ids, note_ids, bot_handle=bot_handle)
-    else:
-        notes_html = ""
-    return render_template("info.html", reply=reply_html, notes=notes_html), 200
+    return render_template("info.html", reply=reply_html, notes=""), 200
 
 
 @app.route("/i/<token>", methods=["GET"])
@@ -620,7 +617,7 @@ def info_short(token: str):
 
 @app.route("/healthz", methods=["GET"])
 def healthz():
-    return jsonify({"ok": True, "index_loaded": index_loaded()}), 200
+    return jsonify({"ok": True}), 200
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -821,5 +818,4 @@ def stream_logs():
     return resp
 
 
-preload_index_async()
 _streamer.start_streamer(_dispatch_tweet)
