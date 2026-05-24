@@ -1,41 +1,47 @@
-import base64
 import hashlib
-import hmac
+import json
 import logging
 import os
+import secrets
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
-from flask import Flask, abort, jsonify, render_template, request, url_for
+from flask import Flask, Response, jsonify, render_template, request, stream_with_context, url_for
 from markupsafe import escape
 
 from derad_agent.app import events, metrics
 from derad_agent.app.dedup import get_store
 from derad_agent.app.events import MentionDrop, MentionEvent, log_mention_drop, log_mention_event
+from derad_agent.app import participants as _participants
 from derad_agent.app.utils import (
     fetch_tweet,
     generate_notes_html,
     generate_reply,
-    get_index,
     index_loaded,
     post_reply,
     preload_index_async,
 )
-from derad_agent.app import poller as _poller
-from derad_agent.llm.config import _require_env
+from derad_agent.app import streamer as _streamer
+from derad_agent.llm.config import _parse_bool_env, _require_env
 
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
+_LOG_FILE = os.getenv("DERAD_LOG_FILE", "/tmp/derad_stream.log")
+_log_fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+_root = logging.getLogger()
+_root.setLevel(os.getenv("LOG_LEVEL", "INFO"))
+_sh = logging.StreamHandler()
+_sh.setFormatter(_log_fmt)
+_root.addHandler(_sh)
+try:
+    _fh = logging.FileHandler(_LOG_FILE)
+    _fh.setFormatter(_log_fmt)
+    _root.addHandler(_fh)
+except OSError:
+    pass  # non-writable filesystem (e.g. read-only container layer) — stdout only
+for _noisy in ("azure.core", "azure.monitor", "azure.identity"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-# App Insights: if the connection string is set (App Service injects it via
-# Key Vault reference or app setting), wire up OpenTelemetry which auto-
-# instruments Flask + logging + requests. Silent no-op when unset, so tests
-# and local dev don't need an Azure backend. Also skipped under pytest so a
-# stray .env doesn't leak global OTel state across tests.
 if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING") and not os.getenv("PYTEST_CURRENT_TEST"):
     try:
         from azure.monitor.opentelemetry import configure_azure_monitor
@@ -46,88 +52,287 @@ if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING") and not os.getenv("PYTEST_
 
 app = Flask(__name__)
 
-CONSUMER_SECRET = _require_env("X_API_SECRET")
-
-# Required so url_for(_external=True) works from the background thread that
-# builds the /info link. Setting this at boot surfaces deploy misconfiguration
-# now instead of on the first successful reply.
 app.config["SERVER_NAME"] = _require_env("SERVER_NAME")
 app.config["PREFERRED_URL_SCHEME"] = os.getenv("PREFERRED_URL_SCHEME", "https")
 
 BOT_HANDLE_BY_TONE = {
-    "agreeable": os.getenv("BOT_HANDLE_AGREEABLE", "aggie_bot"),
-    "neutral": os.getenv("BOT_HANDLE_NEUTRAL", "nellie_bot"),
-    "satirical": os.getenv("BOT_HANDLE_SATIRICAL", "eddie_bot"),
+    "agreeable": os.getenv("BOT_HANDLE_AGREEABLE", "aggiexbot"),
+    "neutral": os.getenv("BOT_HANDLE_NEUTRAL", "nelliexbot"),
+    "satirical": os.getenv("BOT_HANDLE_SATIRICAL", "eddiexbot"),
 }
 
-# Self-reply loop guard: compare incoming tweet's author against the bot's own
-# user id (resolved from env to avoid an X API call on every worker boot).
 BOT_USER_ID_BY_TONE = {
     "agreeable": os.getenv("BOT_USER_ID_AGREEABLE"),
     "neutral": os.getenv("BOT_USER_ID_NEUTRAL"),
     "satirical": os.getenv("BOT_USER_ID_SATIRICAL"),
 }
 
-# Reverse lookup for /mentions routing. One X dev app under PPU caps webhooks
-# at 1 URL + 3 subscriptions, so all three bots' events land on the same
-# endpoint; we route by event.for_user_id → tone.
-TONE_BY_USER_ID = {
-    user_id: tone
-    for tone, user_id in BOT_USER_ID_BY_TONE.items()
-    if user_id
-}
-
-# Sources follow-up tweet defaults to OFF — URL posts cost $0.200 each on
-# X PPU (13× the $0.015 plain-text rate). Turn on per study arm.
-POST_SOURCES_TWEET = os.getenv("DERAD_POST_SOURCES_TWEET", "false").lower() == "true"
-DRY_RUN = os.getenv("DERAD_DRY_RUN", "false").lower() == "true"
-
-RESTRICT_TO_REGISTERED = os.getenv("DERAD_RESTRICT_TO_REGISTERED", "true").lower() == "true"
-ALLOWED_AUTHOR_IDS = {
-    a.strip() for a in os.getenv("DERAD_ALLOWED_AUTHOR_IDS", "").split(",") if a.strip()
-}
+POST_SOURCES_TWEET = _parse_bool_env("DERAD_POST_SOURCES_TWEET")
+DRY_RUN = _parse_bool_env("DERAD_DRY_RUN")
 RATE_LIMIT_PER_SEC = int(os.getenv("DERAD_RATE_LIMIT_PER_SEC", "3"))
+USER_DAILY_CAP = int(os.getenv("DERAD_USER_DAILY_CAP", "20"))  # mentions/UTC-day/user; 0 disables
 TWEET_LIMIT = 280
-INGEST_MODE = _poller.INGEST_MODE
+
+# Participant metadata loaded for study tracking only — no longer gates bot access.
+_participants_store = _participants.get_store()
+_PARTICIPANTS_BY_ID: dict[str, _participants.Participant] = {
+    p.author_id: p for p in _participants_store.list_all()
+}
+logger.info("Loaded %d registered participants (metadata only)", len(_PARTICIPANTS_BY_ID))
 
 
-def _crc_response(crc_token: str) -> dict:
-    digest = hmac.new(
-        CONSUMER_SECRET.encode("utf-8"),
-        crc_token.encode("utf-8"),
-        hashlib.sha256,
-    ).digest()
-    return {"response_token": "sha256=" + base64.b64encode(digest).decode("utf-8")}
+# Info-URL store: token → {tone, reply_text, reasons, parent_id}
+# In-memory cache for fast reads; Azure Tables for durable persistence across restarts.
+_INFO_STORE: dict[str, dict] = {}
+_INFO_STORE_LOCK = threading.Lock()
+_INFO_STORE_TTL = 86400  # 24 h memory cache; Tables holds tokens permanently
+
+_INFO_TABLE_UNINIT = object()  # sentinel: init not yet attempted
+_info_table_client = _INFO_TABLE_UNINIT
+_info_table_init_lock = threading.Lock()
 
 
-def _verify_signature(raw_body: bytes, header: str | None) -> bool:
-    if not header or not header.startswith("sha256="):
-        return False
-    expected = header[len("sha256="):]
-    digest = hmac.new(
-        CONSUMER_SECRET.encode("utf-8"),
-        raw_body,
-        hashlib.sha256,
-    ).digest()
-    computed = base64.b64encode(digest).decode("utf-8")
-    return hmac.compare_digest(expected, computed)
+def _get_info_table():
+    """Return an Azure Table client for InfoTokens, or None if Tables not configured."""
+    global _info_table_client
+    if _info_table_client is not _INFO_TABLE_UNINIT:
+        return _info_table_client  # None means init was tried and failed
+    with _info_table_init_lock:
+        if _info_table_client is not _INFO_TABLE_UNINIT:
+            return _info_table_client
+        if os.getenv("DERAD_EVENTS_BACKEND", "memory").lower() != "tables":
+            _info_table_client = None
+            return None
+        endpoint = os.getenv("DERAD_TABLES_ENDPOINT")
+        if not endpoint:
+            _info_table_client = None
+            return None
+        try:
+            from azure.core.exceptions import ResourceExistsError
+            from azure.data.tables import TableServiceClient
+            from azure.identity import DefaultAzureCredential
+            svc = TableServiceClient(endpoint=endpoint, credential=DefaultAzureCredential())
+            try:
+                svc.create_table("InfoTokens")
+                logger.info("Created InfoTokens table")
+            except ResourceExistsError:
+                pass
+            _info_table_client = svc.get_table_client("InfoTokens")
+        except Exception:
+            logger.exception("InfoTokens table init failed; tokens will be in-memory only")
+            _info_table_client = None
+    return _info_table_client
 
 
-def _is_self_reply(tweet: dict, tone: str) -> bool:
-    """Return True if the tweet should be skipped as a (possible) self-reply.
+def _make_info_token(
+    tone: str,
+    reply_text: str,
+    reasons: list,
+    *,
+    parent_id: str = "",
+    parent_author_username: str = "",
+) -> str:
+    token = secrets.token_urlsafe(6)
+    payload = {
+        "tone": tone,
+        "reply_text": reply_text,
+        "reasons": reasons,
+        "parent_id": parent_id,
+        "parent_author_username": parent_author_username,
+        "_ts": time.monotonic(),
+    }
+    with _INFO_STORE_LOCK:
+        _INFO_STORE[token] = payload
 
-    Fails closed: if BOT_USER_ID_<TONE> is unset, we cannot verify, so we treat
-    every mention as a potential self-reply and skip it. Misconfiguration is
-    visible in logs as a steady stream of skips instead of an unbounded chain.
+    def _persist():
+        table = _get_info_table()
+        if table is None:
+            return
+        # Azure Tables enforces a 64 KiB cap per string property. Verbose notes
+        # can blow past this and silently lose the persisted token. Stay well
+        # under the limit; truncate the longest field first, then bail out
+        # entirely if it's still too large.
+        reasons_json = json.dumps(reasons, ensure_ascii=False)
+        _LIMIT = 60_000
+        if len(reasons_json.encode("utf-8")) > _LIMIT:
+            logger.warning(
+                "reasons_json for token %s exceeds %d bytes; truncating note_text fields",
+                token, _LIMIT,
+            )
+            truncated = []
+            for r in reasons or []:
+                if isinstance(r, dict):
+                    r2 = dict(r)
+                    nt = r2.get("note_text")
+                    if isinstance(nt, str) and len(nt) > 500:
+                        r2["note_text"] = nt[:500]
+                    truncated.append(r2)
+                else:
+                    truncated.append(r)
+            reasons_json = json.dumps(truncated, ensure_ascii=False)
+            if len(reasons_json.encode("utf-8")) > _LIMIT:
+                logger.error(
+                    "reasons_json for token %s still exceeds %d bytes after truncation; "
+                    "persisting empty reasons list",
+                    token, _LIMIT,
+                )
+                reasons_json = "[]"
+        try:
+            table.upsert_entity({
+                "PartitionKey": "info",
+                "RowKey": token,
+                "tone": tone,
+                "reply_text": reply_text,
+                "reasons_json": reasons_json,
+                "parent_id": parent_id,
+                "parent_author_username": parent_author_username,
+                "created_at": datetime.now(timezone.utc),
+            })
+        except Exception:
+            logger.exception("Failed to persist info token %s to Azure Tables", token)
+
+    threading.Thread(target=_persist, daemon=False, name=f"info-persist-{token}").start()
+    return token
+
+
+def _get_info_params(token: str) -> dict | None:
+    """Look up a token: memory first, then Azure Tables on cache miss."""
+    with _INFO_STORE_LOCK:
+        params = _INFO_STORE.get(token)
+    if params is not None:
+        return params
+    table = _get_info_table()
+    if table is None:
+        return None
+    try:
+        entity = table.get_entity("info", token)
+        params = {
+            "tone": entity.get("tone", ""),
+            "reply_text": entity.get("reply_text", ""),
+            "reasons": json.loads(entity.get("reasons_json", "[]")),
+            "parent_id": entity.get("parent_id", ""),
+            "parent_author_username": entity.get("parent_author_username", ""),
+            "reply_id": entity.get("reply_id", ""),
+            "_ts": time.monotonic(),
+        }
+        with _INFO_STORE_LOCK:
+            _INFO_STORE[token] = params
+        return params
+    except Exception as exc:
+        from azure.core.exceptions import ResourceNotFoundError
+        if isinstance(exc, ResourceNotFoundError):
+            logger.debug("Info token %s not found in Azure Tables", token)
+        else:
+            logger.warning("Azure Tables lookup failed for token %s: %s", token, exc)
+        return None
+
+
+def _update_info_token(token: str, **fields) -> None:
+    """Merge extra fields into an existing token (e.g. reply_id after posting)."""
+    with _INFO_STORE_LOCK:
+        if token in _INFO_STORE:
+            _INFO_STORE[token].update(fields)
+
+    def _persist_update():
+        table = _get_info_table()
+        if table is None:
+            return
+        try:
+            # upsert (merge) so this is safe even if the initial persist thread
+            # hasn't completed yet — whichever thread wins, the other merges in.
+            table.upsert_entity({"PartitionKey": "info", "RowKey": token, **fields})
+        except Exception:
+            logger.exception("Failed to update info token %s in Azure Tables", token)
+
+    threading.Thread(target=_persist_update, daemon=False, name=f"info-update-{token}").start()
+
+
+def _evict_info_store() -> None:
+    while True:
+        time.sleep(600)
+        cutoff = time.monotonic() - _INFO_STORE_TTL
+        with _INFO_STORE_LOCK:
+            stale = [k for k, v in _INFO_STORE.items() if v.get("_ts", 0) < cutoff]
+            for k in stale:
+                del _INFO_STORE[k]
+        if stale:
+            logger.debug("Evicted %d stale info tokens from memory cache", len(stale))
+
+
+# Gunicorn forks workers AFTER module import, and threads do not survive fork.
+# Starting the evictor at module level means forked workers never evict — the
+# in-memory _INFO_STORE grows unbounded. Defer the start to first request via
+# a before_request hook so each worker gets its own evictor.
+_evictor_started = False
+_evictor_start_lock = threading.Lock()
+
+
+def _ensure_evictor_started() -> None:
+    global _evictor_started
+    if _evictor_started:
+        return
+    with _evictor_start_lock:
+        if _evictor_started:
+            return
+        # Double-check by name in case another path already started it in this process.
+        if any(t.name == "info-store-evictor" for t in threading.enumerate()):
+            _evictor_started = True
+            return
+        threading.Thread(
+            target=_evict_info_store,
+            daemon=True,
+            name="info-store-evictor",
+        ).start()
+        _evictor_started = True
+
+
+# 4-letter study code derived deterministically from reply_id.
+# Alphabet excludes I and O to avoid confusion when read aloud.
+_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ"  # 24 chars → 24^4 = 331,776 combinations
+
+
+def _make_study_code(reply_id: str) -> str:
+    n = int(hashlib.sha256(reply_id.encode()).hexdigest(), 16)
+    base = len(_CODE_ALPHABET)
+    code = []
+    for _ in range(4):
+        code.append(_CODE_ALPHABET[n % base])
+        n //= base
+    return "".join(code)
+
+
+def _is_self_reply(tweet: dict, tone: str) -> tuple[bool, str]:
+    """Return ``(should_drop, reason)``.
+
+    ``reason`` is ``"self_reply"`` when the mention author matches the bot's
+    configured user id, or ``"self_reply_unconfigured"`` when the bot id env
+    var is unset (we still fail closed but tag the drop so analytics can
+    distinguish misconfiguration from genuine self-replies).
     """
     bot_id = BOT_USER_ID_BY_TONE.get(tone)
     if not bot_id:
-        logger.warning("BOT_USER_ID for tone=%s is unset — skipping mention as self-reply fail-closed", tone)
-        return True
-    return (tweet.get("user") or {}).get("id_str") == bot_id
+        logger.warning(
+            "BOT_USER_ID for tone=%s is unset — skipping mention as self-reply fail-closed",
+            tone,
+        )
+        return True, "self_reply_unconfigured"
+    if (tweet.get("user") or {}).get("id_str") == bot_id:
+        return True, "self_reply"
+    return False, "self_reply"
 
 
-def _build_info_url(reply_id: str, tone: str, tweet_ids, note_ids) -> str:
+# Startup warning for missing BOT_USER_ID env vars — surfaces misconfiguration
+# before the first mention silently fails closed.
+for _tone, _bot_id in BOT_USER_ID_BY_TONE.items():
+    if not _bot_id:
+        logger.warning(
+            "BOT_USER_ID_%s is unset at import time — all mentions for tone=%s "
+            "will be dropped with reason=self_reply_unconfigured",
+            _tone.upper(), _tone,
+        )
+
+
+def _build_info_url(tone: str, tweet_ids, note_ids, reply_id: str = "") -> str:
     return url_for(
         "info",
         reply_id=reply_id,
@@ -138,6 +343,18 @@ def _build_info_url(reply_id: str, tone: str, tweet_ids, note_ids) -> str:
     )
 
 
+# X shortens every URL to 23 chars via t.co regardless of actual length.
+_X_URL_LEN = 23
+
+
+def _append_url(text: str, url: str, limit: int = TWEET_LIMIT) -> str:
+    """Append url on its own line, truncating text with ellipsis if needed to stay within limit."""
+    budget = limit - _X_URL_LEN - 1  # -1 for the newline
+    if len(text) > budget:
+        text = text[:budget - 1] + "…"
+    return f"{text}\n{url}"
+
+
 def _build_sources_text(reply: dict, info_url: str) -> str:
     parts = ["Sources:"]
     parts.extend(reply["sources"] or [])
@@ -146,10 +363,6 @@ def _build_sources_text(reply: dict, info_url: str) -> str:
 
 
 def _fit_sources_text(sources: list[str], info_url: str, limit: int = TWEET_LIMIT) -> str:
-    """Build the sources tweet, dropping URLs from the end until it fits.
-
-    The More Info link is preserved — it's the link readers actually need.
-    """
     kept = list(sources or [])
     while True:
         text = _build_sources_text({"sources": kept}, info_url)
@@ -164,22 +377,12 @@ def _fit_sources_text(sources: list[str], info_url: str, limit: int = TWEET_LIMI
 
 
 def _author_username(tweet: dict) -> str | None:
-    """Pull the mention author's username from the webhook payload.
-
-    The X webhook payload carries ``user.screen_name`` (v1 style) or
-    ``user.username`` (v2 style); we accept either rather than assume.
-    """
     user = tweet.get("user") or {}
     return user.get("screen_name") or user.get("username")
 
 
 def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
-    """Run the pipeline, post the reply, and write the event row.
-
-    Runs in a background thread. The MentionEvent row is written at every
-    terminal point so we can reconstruct what happened to every accepted
-    mention.
-    """
+    """Run the pipeline, post the reply, and write the event row."""
     mention_id = tweet.get("id_str") or ""
     parent_id = tweet.get("in_reply_to_status_id_str") or ""
     author_id = (tweet.get("user") or {}).get("id_str") or ""
@@ -196,6 +399,7 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         received_at_utc=received_at_utc,
         pipeline_start_utc=pipeline_start_utc,
         author_username=author_username,
+        bot_author_id=BOT_USER_ID_BY_TONE.get(tone),
     )
 
     def _finalize(outcome: str, exc: BaseException | None = None) -> None:
@@ -208,12 +412,8 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         metrics.replies_posted.add(1, {"tone": tone, "outcome": outcome})
         metrics.pipeline_latency_ms.record(ev.pipeline_ms, {"tone": tone, "outcome": outcome})
 
-        # TODO: create unique four-letter identifier for tweet (I recommend doing generating based on the replies_posted metric)
-
     try:
         if DRY_RUN:
-            # Skip X API calls. Use the mention text (minus @handle) as the
-            # statement so the LLM pipeline can run end-to-end without credentials.
             import re as _re
             raw_text = tweet.get("text", "")
             statement = _re.sub(r"@\w+\s*", "", raw_text).strip() or raw_text
@@ -243,62 +443,67 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             logger.info("Empty reply text for mention %s; skipping", mention_id)
             _finalize("empty_reply")
             return
-        ev.reply_text = reply["text"]
-        logger.info("DRY_RUN reply (tone=%s): %s", tone, reply["text"] if DRY_RUN else "(posting)")
+
+        # Distinguish grounded factcheck replies from no-factcheck fallbacks for
+        # downstream research analysis. reasons_detail is populated only when the
+        # reply was grounded in Community Notes.
+        ev.reply_type = "factcheck" if reply.get("reasons_detail") else "no_factcheck"
+
+        token = _make_info_token(
+            tone,
+            reply["text"],
+            reply.get("reasons_detail") or [],
+            parent_id=parent_id,
+            parent_author_username=ev.parent_author_username or "",
+        )
+        with app.app_context():
+            info_url = url_for("info_short", token=token, _external=True)
+        reply_text = _append_url(reply["text"], info_url)
+        ev.reply_text = reply_text
+
+        if DRY_RUN:
+            logger.info("DRY_RUN reply (tone=%s): %s", tone, reply_text)
+        else:
+            logger.info("Posting reply (tone=%s): (text suppressed)", tone)
 
         if DRY_RUN:
             _finalize("dry_run")
             return
 
-        reply_id = post_reply(parent_id=mention_id, reply_text=reply["text"], tone=tone)
+        reply_id = post_reply(parent_id=mention_id, reply_text=reply_text, tone=tone)
         if reply_id is None:
             _finalize("x_post_error")
             return
         ev.reply_id = reply_id
+        _update_info_token(token, reply_id=reply_id)
         ev.reply_posted_utc = events.utcnow()
+
+        ev.study_code = _make_study_code(reply_id)
+        participant = _PARTICIPANTS_BY_ID.get(author_id)
+        if participant:
+            ev.participant_id = author_id
+            ev.study_day = (
+                received_at_utc.date() - participant.enrolled_at_utc.date()
+            ).days + 1
 
         sources_outcome = "replied"
         if POST_SOURCES_TWEET and reply.get("sources"):
             with app.app_context():
-                info_url = _build_info_url(reply_id, tone, reply["tweets"], reply["notes"])
+                info_url = _build_info_url(tone, reply.get("tweets") or [], reply.get("notes") or [], reply_id=reply_id)
             sources_text = _fit_sources_text(reply["sources"], info_url)
             ev.sources_reply_id = post_reply(parent_id=reply_id, reply_text=sources_text, tone=tone)
             if ev.sources_reply_id is None:
-                # Main reply went out fine; sources follow-up failed. Mark it so
-                # we can tell this apart from a reply that had no sources at all.
                 sources_outcome = "replied_no_sources"
 
         _finalize(sources_outcome)
-
-        # TODO: store tweet_id (reply_id), study_id (see _finalize TODO), author_id (bot username), parent_id (parent_id), text (reply_text), likes = 0, reposts = 0, replies = 0, created_at, source_notes in Posts table
 
     except Exception as exc:
         logger.exception("Pipeline failed for mention %s (tone=%s)", mention_id, tone)
         _finalize("pipeline_error", exc=exc)
 
 
-def _route_tone_from_event(event: dict) -> str | None:
-    """Map an Account Activity event to the bot tone it's destined for.
-
-    The v2 webhook payload puts ``for_user_id`` at the top level alongside
-    ``tweet_create_events``; it identifies which subscribed user the event
-    is for. We translate to tone via TONE_BY_USER_ID.
-    """
-    for_user_id = event.get("for_user_id") if isinstance(event, dict) else None
-    if for_user_id is None:
-        return None
-    return TONE_BY_USER_ID.get(str(for_user_id))
-
-
 def _dispatch_tweet(tone: str, tweet: dict, received_at_utc: datetime) -> bool:
-    """Apply the guard chain and, if accepted, start a pipeline thread.
-
-    Called by the webhook handler (via mention()) and the polling worker.
-    Returns True if the tweet was accepted and a pipeline thread started.
-
-    All guard logic lives here so both code paths share identical filtering —
-    no risk of the poller bypassing a guard that the webhook checks.
-    """
+    """Apply the guard chain and, if accepted, start a pipeline thread."""
     metrics.mentions_received.add(1, {"tone": tone})
 
     def _drop(reason: str, **drop_kwargs):
@@ -316,14 +521,10 @@ def _dispatch_tweet(tone: str, tweet: dict, received_at_utc: datetime) -> bool:
               extra={"has_mention_id": bool(mention_id), "has_parent_id": bool(parent_id)})
         return False
 
-    if _is_self_reply(tweet, tone):
-        logger.info("Skipping self-reply %s (tone=%s)", mention_id, tone)
-        _drop("self_reply", mention_id=mention_id, author_id=author_id)
-        return False
-
-    if RESTRICT_TO_REGISTERED and author_id not in ALLOWED_AUTHOR_IDS:
-        logger.info("Skipping mention %s from unregistered author %s", mention_id, author_id)
-        _drop("unregistered", mention_id=mention_id, author_id=author_id)
+    is_self, self_reason = _is_self_reply(tweet, tone)
+    if is_self:
+        logger.info("Skipping self-reply %s (tone=%s reason=%s)", mention_id, tone, self_reason)
+        _drop(self_reason, mention_id=mention_id, author_id=author_id)
         return False
 
     store = get_store()
@@ -338,24 +539,25 @@ def _dispatch_tweet(tone: str, tweet: dict, received_at_utc: datetime) -> bool:
         _drop("rate_limit", mention_id=mention_id, author_id=author_id, extra={"hits": hits})
         return False
 
-    # Daily cap: defense in depth against runaway loops. Counted in-memory
-    # per tone; resets on UTC date rollover. Lose-on-restart is acceptable.
-    if metrics.daily_cap_reached(tone):
-        _drop("daily_cap", mention_id=mention_id, author_id=author_id)
-        return False
+    if USER_DAILY_CAP > 0:
+        day = datetime.now(timezone.utc).date().isoformat()
+        day_hits = store.hit_and_count(f"author_day:{author_id}:{day}", window_seconds=86400)
+        if day_hits > USER_DAILY_CAP:
+            logger.info(
+                "User daily cap reached for author %s on %s (hits=%d, cap=%d)",
+                author_id, day, day_hits, USER_DAILY_CAP,
+            )
+            _drop(
+                "daily_cap", mention_id=mention_id, author_id=author_id,
+                extra={"day_hits": day_hits, "cap": USER_DAILY_CAP},
+            )
+            return False
 
     logger.info(
         "Accepted mention %s (tone=%s, author=%s, parent=%s)",
         mention_id, tone, author_id, parent_id,
     )
-
-    # TODO: save tweet_id (mention_id), author_id, parent_id, tone, created_at in Mentions table
-    # TODO: save tweet_id (parent_id), likes, reposts, replies (of parent tweet) in Parents table
-
     metrics.mentions_accepted.add(1, {"tone": tone})
-    # daemon=False: lets gunicorn's --graceful-timeout drain in-flight pipelines
-    # on SIGTERM. We've already claimed mention_id in the dedup store, so X
-    # won't redeliver — dropping the thread would silently lose the reply.
     threading.Thread(
         target=process_mention,
         args=(tone, tweet, received_at_utc),
@@ -364,88 +566,12 @@ def _dispatch_tweet(tone: str, tweet: dict, received_at_utc: datetime) -> bool:
     return True
 
 
-def mention(tone: str, event: dict, received_at_utc: datetime):
-    """Unwrap a webhook event and hand off to _dispatch_tweet."""
-
-    def _drop(reason: str, **drop_kwargs):
-        log_mention_drop(MentionDrop(
-            drop_reason=reason, received_at_utc=received_at_utc, tone=tone, **drop_kwargs,
-        ))
-        metrics.mentions_dropped.add(1, {"tone": tone, "reason": reason})
-
-    tweet_events = event.get("tweet_create_events")
-    if not isinstance(tweet_events, list) or not tweet_events:
-        # Account-activity event types other than tweet_create_events
-        # (favorites, follows, etc.) land here. We don't log every one — too
-        # noisy — but if the field is the wrong shape (a string, say), log it.
-        if tweet_events is not None and not isinstance(tweet_events, list):
-            _drop("invalid_payload", extra={
-                "why": "tweet_create_events_not_list",
-                "type": type(tweet_events).__name__,
-            })
-        return "", 200
-
-    tweet = tweet_events[0]
-    if not isinstance(tweet, dict):
-        _drop("invalid_payload", extra={"why": "tweet_not_dict", "type": type(tweet).__name__})
-        return "", 200
-
-    _dispatch_tweet(tone, tweet, received_at_utc)
-    return "", 200
-
-
-# TODO: create endpoints to add and delete username from Participants table. At time of adding, we should retrieve the user_id associated with the username (https://docs.x.com/x-api/users/get-user-by-username)
-
-
-@app.route("/mentions", methods=["GET", "POST"])
-def mentions_endpoint():
-    """Single Account Activity webhook for all three bots.
-
-    GET serves the CRC handshake. POST verifies the signature, routes by
-    ``for_user_id`` to the right tone, then hands off to ``mention()``.
-    """
-    if request.method == "GET":
-        crc_token = request.args.get("crc_token")
-        if not crc_token:
-            return "Missing crc_token", 400
-        return jsonify(_crc_response(crc_token)), 200
-
-    raw = request.get_data()
-    if not _verify_signature(raw, request.headers.get("X-Twitter-Webhooks-Signature")):
-        logger.warning("Rejected POST to /mentions: invalid signature")
-        abort(403)
-
-    if INGEST_MODE != "webhooks":
-        # Polling mode: accept the delivery so X doesn't mark the URL as
-        # unhealthy, but don't process it — the poller handles ingestion.
-        return "", 200
-
-    received_at_utc = events.utcnow()
-    event = request.get_json(silent=True) or {}
-
-    if not isinstance(event, dict):
-        log_mention_drop(MentionDrop(
-            drop_reason="invalid_payload", received_at_utc=received_at_utc,
-            extra={"why": "event_not_dict"},
-        ))
-        metrics.mentions_dropped.add(1, {"tone": "unknown", "reason": "invalid_payload"})
-        return "", 200
-
-    tone = _route_tone_from_event(event)
-    if tone is None:
-        # Either no for_user_id, or its value doesn't map to any configured
-        # bot. Could also be a non-mention event type (follow, DM, etc.).
-        # Quiet drop; the event delivery itself already cost us money.
-        for_user_id = event.get("for_user_id")
-        log_mention_drop(MentionDrop(
-            drop_reason="unknown_target_user", received_at_utc=received_at_utc,
-            extra={"for_user_id": str(for_user_id) if for_user_id is not None else None,
-                   "event_keys": sorted(event.keys())},
-        ))
-        metrics.mentions_dropped.add(1, {"tone": "unknown", "reason": "unknown_target_user"})
-        return "", 200
-
-    return mention(tone, event, received_at_utc)
+@app.before_request
+def _before_request_start_evictor():
+    """Lazily start the info-store evictor on the first request in this worker
+    process. Module-level start does not survive gunicorn fork; this hook
+    ensures every worker has exactly one evictor thread."""
+    _ensure_evictor_started()
 
 
 @app.route("/info", methods=["GET"])
@@ -456,16 +582,16 @@ def info():
     tone = request.args.get("tone", "neutral")
     bot_handle = BOT_HANDLE_BY_TONE.get(tone, "i")
 
-    safe_reply_id = escape(reply_id)
-    safe_handle = escape(bot_handle)
-    reply_html = (
-        '<blockquote class="twitter-tweet">'
-        f'<a href="https://twitter.com/{safe_handle}/status/{safe_reply_id}"></a>'
-        '</blockquote>'
-    )
-    # Degrade gracefully during the ~30 s startup preload: render the embed
-    # without the notes carousel rather than blocking the request thread on
-    # the index lock and risking a worker timeout.
+    if reply_id:
+        safe_reply_id = escape(reply_id)
+        safe_handle = escape(bot_handle)
+        reply_html = (
+            '<blockquote class="twitter-tweet">'
+            f'<a href="https://twitter.com/{safe_handle}/status/{safe_reply_id}"></a>'
+            '</blockquote>'
+        )
+    else:
+        reply_html = ""
     if index_loaded():
         notes_html = generate_notes_html(tweet_ids, note_ids, bot_handle=bot_handle)
     else:
@@ -473,11 +599,219 @@ def info():
     return render_template("info.html", reply=reply_html, notes=notes_html), 200
 
 
+@app.route("/i/<token>", methods=["GET"])
+def info_short(token: str):
+    params = _get_info_params(token)
+    if params is None:
+        return render_template("info.html"), 404
+    tone = params.get("tone", "")
+    return render_template(
+        "info.html",
+        headline=params.get("reply_text", ""),
+        reasons=params.get("reasons", []),
+        tone=tone,
+        bot_handle=BOT_HANDLE_BY_TONE.get(tone, ""),
+        parent_id=params.get("parent_id", ""),
+        parent_author_username=params.get("parent_author_username", ""),
+        reply_tweet_id=params.get("reply_id", ""),
+    ), 200
+
+
 @app.route("/healthz", methods=["GET"])
 def healthz():
-    """Cheap readiness probe — does not force the index to load."""
     return jsonify({"ok": True, "index_loaded": index_loaded()}), 200
 
 
+# ── Dashboard ─────────────────────────────────────────────────────────────────
+
+@app.route("/dashboard")
+def dashboard():
+    return render_template("dashboard.html")
+
+
+@app.route("/api/activity")
+def api_activity():
+    ev_store = events.get_store()
+    recent_events = ev_store.list_recent(50)
+    recent_drops = ev_store.list_recent_drops(20)
+
+    outcome_counts: dict[str, int] = {}
+    tone_counts: dict[str, int] = {"agreeable": 0, "neutral": 0, "satirical": 0}
+    latencies: list[int] = []
+    for ev in recent_events:
+        outcome = ev.get("outcome") or "unknown"
+        outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
+        tone = ev.get("tone") or ""
+        if tone in tone_counts:
+            tone_counts[tone] += 1
+        ms = ev.get("pipeline_ms")
+        if ms:
+            latencies.append(int(ms))
+
+    part_store = _participants.get_store()
+    all_parts = part_store.list_all()
+    participant_tone_counts = {"agreeable": 0, "neutral": 0, "satirical": 0}
+    for p in all_parts:
+        if p.tone in participant_tone_counts:
+            participant_tone_counts[p.tone] += 1
+
+    payload = {
+        "events": recent_events,
+        "drops": recent_drops,
+        "metrics": {
+            "total_events": len(recent_events),
+            "outcome_counts": outcome_counts,
+            "tone_counts": tone_counts,
+            "avg_pipeline_ms": int(sum(latencies) / len(latencies)) if latencies else 0,
+            "participant_count": len(all_parts),
+            "participant_tone_counts": participant_tone_counts,
+            "dry_run": DRY_RUN,
+            "stream_connected": _streamer.is_connected() if hasattr(_streamer, "is_connected") else None,
+        },
+    }
+    return jsonify(payload), 200
+
+
+@app.route("/api/replies", methods=["GET"])
+def api_replies():
+    """Recent bot replies, newest first. One row per posted reply.
+
+    Each row carries enough context to render in the dashboard *and* to link
+    to the live tweet on X. `reply_url` is built server-side from the bot
+    handle for the event's tone + reply_id so the client doesn't need to
+    duplicate the handle map.
+
+    Query params: ?limit=N (default 200, max 1000).
+    """
+    try:
+        limit = max(1, min(int(request.args.get("limit", "200")), 1000))
+    except ValueError:
+        limit = 200
+
+    raw = events.get_store().list_recent(limit)
+    out: list[dict] = []
+    for e in raw:
+        reply_id = e.get("reply_id")
+        if not reply_id:
+            continue  # not a successful reply — skip
+        tone = (e.get("tone") or "").lower()
+        bot_handle = BOT_HANDLE_BY_TONE.get(tone) or ""
+        reply_url = (
+            f"https://twitter.com/{bot_handle}/status/{reply_id}"
+            if bot_handle else ""
+        )
+        out.append({
+            "reply_id": reply_id,
+            "reply_url": reply_url,
+            "bot_handle": bot_handle,
+            "tone": tone,
+            "received_at_utc": e.get("received_at_utc"),
+            "author_id": e.get("author_id"),
+            "author_username": e.get("author_username"),
+            "study_code": e.get("study_code"),
+            "study_day": e.get("study_day"),
+            "reply_text": e.get("reply_text"),
+            "parent_text": e.get("parent_text"),
+        })
+    return jsonify({"replies": out}), 200
+
+
+def _serialize_participant(p: _participants.Participant) -> dict:
+    return {
+        "author_id": p.author_id,
+        "author_username": p.author_username,
+        "tone": p.tone,
+        "enrolled_at_utc": p.enrolled_at_utc.isoformat() if p.enrolled_at_utc else None,
+        "notes": p.notes,
+    }
+
+
+@app.route("/api/participants", methods=["GET"])
+def api_participants_list():
+    parts = _participants.get_store().list_all()
+    parts.sort(key=lambda p: p.enrolled_at_utc or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    return jsonify({"participants": [_serialize_participant(p) for p in parts]}), 200
+
+
+@app.route("/api/participants", methods=["POST"])
+def api_participants_create():
+    """Register a participant by @handle. Body: {username, notes?}.
+
+    Looks up the X numeric user ID and persists the handle. Bot tone is
+    assigned manually outside this system, so no tone is stored here.
+    Updates the in-process cache so events from the newly-registered
+    participant in *this worker* are tagged immediately; other gunicorn
+    workers pick up the registration from Azure Tables when they next
+    look up the author.
+    """
+    payload = request.get_json(silent=True) or {}
+    username_raw = (payload.get("username") or "").strip()
+    notes = (payload.get("notes") or "").strip()
+
+    if not username_raw:
+        return jsonify({"error": "username is required"}), 400
+
+    clean_username = username_raw.lstrip("@")
+
+    try:
+        author_id = _participants.lookup_author_id(clean_username)
+    except _participants.ParticipantLookupError as exc:
+        return jsonify({"error": str(exc)}), 422
+
+    registered_at = datetime.now(timezone.utc)
+
+    p = _participants.Participant(
+        author_id=author_id,
+        author_username=clean_username,
+        tone="",
+        enrolled_at_utc=registered_at,
+        notes=notes,
+    )
+    _participants.get_store().register(p)
+    _PARTICIPANTS_BY_ID[author_id] = p
+    logger.info(
+        "Registered participant via dashboard: @%s id=%s",
+        clean_username, author_id,
+    )
+    return jsonify({"participant": _serialize_participant(p)}), 201
+
+
+_SSE_TTL = int(os.getenv("DERAD_SSE_TTL", "1800"))  # 30 min default; browser auto-reconnects
+
+
+@app.route("/stream/logs")
+def stream_logs():
+    def _generate():
+        deadline = time.monotonic() + _SSE_TTL
+        # Backfill last 80 lines
+        try:
+            with open(_LOG_FILE, "r") as f:
+                lines = f.readlines()
+            for line in lines[-80:]:
+                yield f"data: {json.dumps({'line': line.rstrip()})}\n\n"
+        except FileNotFoundError:
+            yield f"data: {json.dumps({'line': f'[log: {_LOG_FILE} not found — check DERAD_LOG_FILE]'})}\n\n"
+            return
+
+        # Tail new lines until TTL
+        try:
+            with open(_LOG_FILE, "r") as f:
+                f.seek(0, 2)
+                while time.monotonic() < deadline:
+                    line = f.readline()
+                    if line:
+                        yield f"data: {json.dumps({'line': line.rstrip()})}\n\n"
+                    else:
+                        time.sleep(0.3)
+                        yield ": keep-alive\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'line': f'[stream error: {exc}]'})}\n\n"
+
+    resp = Response(stream_with_context(_generate()), mimetype="text/event-stream")
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"
+    return resp
+
+
 preload_index_async()
-_poller.start_poller(_dispatch_tweet)
+_streamer.start_streamer(_dispatch_tweet)

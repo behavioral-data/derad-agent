@@ -33,6 +33,7 @@ class NotesIndex:
     tweet_ids: List[str]
     embeddings: np.ndarray  # [N, D], L2-normalized
     notes_by_tweet: Dict[str, List[Dict[str, Any]]]
+    total_notes: int = 0  # precomputed at load time; avoids O(N) traversal per pipeline call
 
 
 def _l2_normalize(matrix: np.ndarray) -> np.ndarray:
@@ -66,7 +67,8 @@ def load_notes_index(index_dir: Path) -> NotesIndex:
         raw = json.load(f)
     notes_by_tweet = {str(k): list(v or []) for k, v in raw.items()}
 
-    return NotesIndex(tweet_ids=tweet_ids, embeddings=embeddings, notes_by_tweet=notes_by_tweet)
+    total_notes = sum(len(v) for v in notes_by_tweet.values())
+    return NotesIndex(tweet_ids=tweet_ids, embeddings=embeddings, notes_by_tweet=notes_by_tweet, total_notes=total_notes)
 
 
 def retrieve_tweets(

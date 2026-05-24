@@ -109,12 +109,6 @@ def fetch_tweet(tweet_id, *, tone: str = "neutral") -> Optional[TweetSnapshot]:
     )
 
 
-def fetch_tweet_text(tweet_id, *, tone: str = "neutral") -> Optional[str]:
-    """Backwards-compatible wrapper used by code paths that only need the text."""
-    snap = fetch_tweet(tweet_id, tone=tone)
-    return snap.text if snap else None
-
-
 def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5):
     from derad_agent.runtime.landscape_api import retrieve_statement_landscape
 
@@ -135,9 +129,11 @@ def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5):
     # dedup/cap, used by /info so the carousel matches what the user saw.
     all_cited_tweet_ids: list[str] = []
     all_cited_note_ids: list[str] = []
+    reasons_detail: list[dict] = []
     tweets: list = []
     notes: list = []
     sources: list = []
+    index = get_index()
     seen = set()
     for reason in (reply.get("reasons") or []):
         tid, nid = reason.get("tweet_id"), reason.get("note_id")
@@ -145,20 +141,27 @@ def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5):
             all_cited_tweet_ids.append(str(tid))
         if nid is not None:
             all_cited_note_ids.append(str(nid))
+        links = [l.strip() for l in (reason.get("evidence_links") or []) if isinstance(l, str) and l.strip()]
+        note_text = None
+        if tid is not None and nid is not None:
+            for n in index.notes_by_tweet.get(str(tid), []):
+                if str(n.get("note_id")) == str(nid):
+                    note_text = (n.get("summary") or "").strip() or None
+                    break
+        reasons_detail.append({
+            "reason": str(reason.get("reason") or ""),
+            "note_id": str(nid) if nid is not None else None,
+            "tweet_id": str(tid) if tid is not None else None,
+            "evidence_links": links,
+            "note_text": note_text,
+        })
         if len(sources) >= max_sources:
             continue
-        reason_contributed = False
-        for link in (reason.get("evidence_links") or []):
-            if not isinstance(link, str):
-                continue
-            stripped = link.strip()
-            if not stripped:
-                continue
-            reason_contributed = True
-            if stripped not in seen and len(sources) < max_sources:
-                sources.append(stripped)
-                seen.add(stripped)
-        if reason_contributed:
+        if links:
+            for link in links:
+                if link not in seen and len(sources) < max_sources:
+                    sources.append(link)
+                    seen.add(link)
             tweets.append(tid)
             notes.append(nid)
 
@@ -170,7 +173,18 @@ def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5):
         "queries": queries,
         "all_cited_tweet_ids": all_cited_tweet_ids,
         "all_cited_note_ids": all_cited_note_ids,
+        "reasons_detail": reasons_detail,
     }
+
+
+_TCO_URL_RE = re.compile(r'https?://\S+')
+_X_TCO_LEN = 23
+_X_TWEET_LIMIT = 280
+
+
+def _x_weighted_length(text: str) -> int:
+    """Count characters the way X does: every URL is collapsed to 23 chars."""
+    return len(_TCO_URL_RE.sub("x" * _X_TCO_LEN, text))
 
 
 def post_reply(parent_id, reply_text, tone) -> Optional[str]:
@@ -179,6 +193,14 @@ def post_reply(parent_id, reply_text, tone) -> Optional[str]:
     Uses the xdk ``CreateRequest`` body shape — passing loose kwargs to
     ``posts.create`` raises because the real signature takes a single ``body``.
     """
+    weighted = _x_weighted_length(reply_text)
+    if weighted > _X_TWEET_LIMIT:
+        logger.warning(
+            "post_reply refused: text %d weighted chars > %d (tone=%s, parent=%s)",
+            weighted, _X_TWEET_LIMIT, tone, parent_id,
+        )
+        return None
+
     from xdk.posts.models import CreateRequest, CreateRequestReply
 
     body = CreateRequest(

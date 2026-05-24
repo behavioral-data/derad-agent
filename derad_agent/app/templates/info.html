@@ -1,28 +1,136 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <link rel="stylesheet" href="{{ url_for('static',filename='info.css') }}">
-    <meta charset="UTF-8">
-    <title>Political Conversations Bot - Research Study</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reply Context</title>
+  <link rel="stylesheet" href="/static/dash/html-design-system.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='info.css') }}">
 </head>
-<body>
-<main>
-    <h2>About this Bot</h2>
-    <p>This bot was created by University of Washington researchers as part of a study to investigate how AI bots affect online political conversations. Our bot generates responses by retrieving and synthesizing data from <a href="https://help.x.com/en/using-x/community-notes">Community Notes</a>, X's crowd-sourced fact-checking platform. We source notes from X's publicly available repository of <a href="https://x.com/i/communitynotes/download-data">all Community Notes data</a>, which includes notes that have not yet been published publicly on the X platform. Responses may contain inaccurate information; please consult linked sources to verify any claims.
-    </p>
+<body data-theme="light">
 
-    <h2>About this Post</h2>
-    {{reply|safe}}
-    <div class="sources">
-        <h3>Sources</h3>
-        <ul>
-            {{notes|safe}}
-        </ul>
+<div class="info-wrap">
+
+  <header class="info-masthead">
+    <span class="info-masthead-label">Community Notes Context</span>
+    <span class="info-masthead-tag">X Community Notes</span>
+  </header>
+
+  {% if headline %}
+  {# ── Short URL mode ── #}
+
+  {# Conversation: parent tweet + bot reply #}
+  {% if parent_id or reply_tweet_id %}
+  <section class="info-section info-section-first">
+    <div class="info-section-hd"><span class="info-section-label">Conversation</span></div>
+    <div class="info-tweet-col">
+      {% if parent_id %}
+      <blockquote class="twitter-tweet" data-conversation="none">
+        {% if parent_author_username %}
+        <a href="https://twitter.com/{{ parent_author_username }}/status/{{ parent_id }}"></a>
+        {% else %}
+        <a href="https://twitter.com/i/status/{{ parent_id }}"></a>
+        {% endif %}
+      </blockquote>
+      {% endif %}
+      {% if reply_tweet_id %}
+      <blockquote class="twitter-tweet" data-conversation="none">
+        {% if bot_handle %}
+        <a href="https://twitter.com/{{ bot_handle }}/status/{{ reply_tweet_id }}"></a>
+        {% else %}
+        <a href="https://twitter.com/i/status/{{ reply_tweet_id }}"></a>
+        {% endif %}
+      </blockquote>
+      {% else %}
+      {# Fallback if reply not yet posted #}
+      {% set parts = headline.split('\n\n') %}
+      <blockquote class="info-reply">
+        {% if parts | length > 1 %}
+        <p class="info-reply-lead">{{ parts[0] }}</p>
+        <p class="info-reply-body">{{ parts[1:] | join(' ') }}</p>
+        {% else %}
+        <p class="info-reply-body">{{ headline }}</p>
+        {% endif %}
+      </blockquote>
+      {% endif %}
     </div>
-    <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-</main>
-<footer>
-    <p>&copy; 2026 University of Washington</p>
-</footer>
+  </section>
+  {% endif %}
+
+  {# Supporting evidence #}
+  {% if reasons %}
+  <section class="info-section">
+    <div class="info-section-hd"><span class="info-section-label">Supporting Evidence</span></div>
+    <div class="info-reasons">
+      {% for r in reasons %}
+      <div class="info-reason">
+        <div class="info-reason-idx">{{ '%02d' % loop.index }}</div>
+        <div class="info-reason-body">
+          <p class="info-reason-text">{{ r.reason }}</p>
+          {% if r.note_text %}
+          <div class="info-note-block">
+            <span class="info-note-label">Community Note</span>
+            <p class="info-note-text">{{ r.note_text }}</p>
+          </div>
+          {% endif %}
+          <div class="info-reason-links">
+            {% if r.evidence_links %}
+            <ul class="info-sources">
+              {% for link in r.evidence_links %}
+              <li><a href="{{ link }}" class="info-src-link" rel="noopener noreferrer">{{ link }}</a></li>
+              {% endfor %}
+            </ul>
+            {% endif %}
+            {% if r.tweet_id %}
+            <a class="info-src-link info-tweet-link" href="https://x.com/i/web/status/{{ r.tweet_id }}" rel="noopener noreferrer">View tweet this note was added to →</a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% else %}
+  <p class="info-empty"><em>No supporting evidence recorded for this reply.</em></p>
+  {% endif %}
+
+  {% elif reply %}
+  {# ── Long URL / legacy mode ── #}
+  <section class="info-section info-section-first">
+    <div class="info-section-hd"><span class="info-section-label">About this Post</span></div>
+    {{ reply | safe }}
+  </section>
+  {% if notes %}
+  <section class="info-section sources">
+    <div class="info-section-hd"><span class="info-section-label">Community Notes Sources</span></div>
+    <ul>{{ notes | safe }}</ul>
+  </section>
+  {% else %}
+  <p class="info-empty"><em>No Community Notes sources were retrieved for this post.</em></p>
+  {% endif %}
+
+  {% else %}
+  <div class="info-not-found">
+    <strong>Link not found.</strong> This reply context link is invalid or has been removed.
+  </div>
+  {% endif %}
+
+  <footer class="info-footer">
+    <p class="info-disclaimer">
+      This bot generates replies by retrieving and synthesizing data from
+      <a href="https://help.x.com/en/using-x/community-notes" rel="noopener noreferrer">X Community Notes</a>,
+      a crowd-sourced fact-checking platform. Sources include notes from the
+      <a href="https://x.com/i/communitynotes/download-data" rel="noopener noreferrer">public Community Notes archive</a>.
+      Responses may contain inaccuracies — verify claims using the sources above.
+    </p>
+    <span class="info-copyright">© 2026 University of Washington</span>
+  </footer>
+
+</div>
+
+{% if parent_id or reply_tweet_id or reply %}
+<script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+{% endif %}
+
 </body>
 </html>

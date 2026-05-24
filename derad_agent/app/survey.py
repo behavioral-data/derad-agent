@@ -9,14 +9,10 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-from pathlib import Path
 
-from dotenv import load_dotenv
 from derad_agent.llm.config import _require_env
 
 logger = logging.getLogger(__name__)
-
-load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 
 def _build_dm_client(tone: str):

@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>derad-agent · End-to-End Test Plan</title>
+  <link rel="stylesheet" href="../assets/html-design-system.css">
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="sidebar-brand">derad-agent</div>
+    <nav class="sidebar-nav">
+      <div class="nav-group">
+        <div class="nav-group-label">Phases</div>
+        <a class="nav-link" href="#smoke">A · Smoke test</a>
+        <a class="nav-link" href="#dryryn">B · Live dry-run</a>
+        <a class="nav-link" href="#live">C · Full live test</a>
+        <a class="nav-link" href="#day3">D · Day-3 collection</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-label">Reference</div>
+        <a class="nav-link" href="#env">Env vars</a>
+        <a class="nav-link" href="#checklist">Checklist</a>
+      </div>
+    </nav>
+    <div class="theme-toggle" onclick="toggleTheme()">Toggle theme</div>
+  </aside>
+
+  <main class="main">
+
+    <section id="overview">
+      <div class="section-head">
+        <p class="eyebrow">Study workflow</p>
+        <h2>End-to-End Test Plan</h2>
+        <p>Three phases — in-memory smoke test, live dry-run, and full live — covering participant registration through day-3 engagement collection.</p>
+      </div>
+
+      <div class="grid-3">
+        <div class="panel">
+          <div class="panel-head"><span class="tag">Phase A</span></div>
+          <h4>Smoke test</h4>
+          <p>Pure in-memory, no API calls. Runs in ~2 seconds. Verifies all logic before touching live infrastructure.</p>
+          <code class="inline-code">python scripts/smoke_test.py</code>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="tag">Phase B</span></div>
+          <h4>Live dry-run</h4>
+          <p>Real Azure Tables + Azure OpenAI. <code class="inline-code">DERAD_DRY_RUN=true</code> so no X posts. Verifies pipeline output quality and event logging.</p>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="tag">Phase C + D</span></div>
+          <h4>Full live + Day-3</h4>
+          <p>Real X mention → bot reply. 3 days later: poll engagement and collect bystander replies. Run <code class="inline-code">derad-daily-summary</code>.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════ Phase A -->
+    <section id="smoke">
+      <div class="section-head">
+        <p class="eyebrow">Phase A · No external APIs</p>
+        <h2>Smoke test</h2>
+        <p>Verifies the full data-flow logic end-to-end in memory. Must pass before proceeding to live phases.</p>
+      </div>
+
+      <div class="demo-block">
+        <div class="demo-label">Run it</div>
+        <div class="panel">
+          <pre><code>python scripts/smoke_test.py</code></pre>
+        </div>
+      </div>
+
+      <div class="demo-block">
+        <div class="demo-label">What it tests (7 phases)</div>
+        <div class="panel">
+          <ul class="task-list">
+            <li><span class="chip chip-done">done</span> <strong>Phase 1</strong> — <code class="inline-code">InMemoryParticipantsStore.register()</code> and <code class="inline-code">list_all()</code></li>
+            <li><span class="chip chip-done">done</span> <strong>Phase 2</strong> — App startup reads participant store; participant appears in <code class="inline-code">_PARTICIPANTS_BY_ID</code> and <code class="inline-code">_ALLOWED_IDS</code></li>
+            <li><span class="chip chip-done">done</span> <strong>Phase 3</strong> — Unregistered author dropped with <code class="inline-code">reason=unregistered</code>; registered author accepted</li>
+            <li><span class="chip chip-done">done</span> <strong>Phase 4</strong> — <code class="inline-code">process_mention()</code> sets <code class="inline-code">study_code</code> (4-char, valid alphabet), <code class="inline-code">study_day=6</code> (enrolled May 15, received May 20), <code class="inline-code">participant_id</code></li>
+            <li><span class="chip chip-done">done</span> <strong>Phase 5</strong> — <code class="inline-code">_poll_one()</code> writes <code class="inline-code">EngagementSnapshot</code> with correct metrics and <code class="inline-code">mention_id</code> back-link</li>
+            <li><span class="chip chip-done">done</span> <strong>Phase 6</strong> — <code class="inline-code">_collect_one()</code> writes <code class="inline-code">BotReplyReply</code> with correct text, username, like count</li>
+            <li><span class="chip chip-done">done</span> <strong>Phase 7</strong> — <code class="inline-code">derad-daily-summary</code> prints per-participant table with study codes and URLs</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout callout-info">
+        <strong>Expected output:</strong> all assertions print <code class="inline-code">✓</code> and the script exits 0. A <code class="inline-code">✗ FAIL</code> line means a regression — do not proceed to live phases until green.
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════ Phase B -->
+    <section id="dryryn">
+      <div class="section-head">
+        <p class="eyebrow">Phase B · Real infra, no X posts</p>
+        <h2>Live dry-run</h2>
+        <p>Register a test participant in the real Participants table, start the app with <code class="inline-code">DERAD_DRY_RUN=true</code>, trigger a dispatch via the provided test script, and verify the MentionEvent row in Azure Tables.</p>
+      </div>
+
+      <div class="demo-block">
+        <div class="demo-label">Step B1 — Register a test participant</div>
+        <div class="panel">
+          <pre><code>derad-register-participant \
+  --author-id YOUR_X_USER_ID \
+  --username yourxhandle \
+  --tone neutral \
+  --enrolled 2026-05-20 \
+  --notes "smoke test participant"</code></pre>
+          <p style="margin-top: 8px; color: var(--text-muted);">Writes a row to the <strong>Participants</strong> Azure Table. Requires <code class="inline-code">DERAD_PARTICIPANTS_BACKEND=tables</code> and <code class="inline-code">DERAD_TABLES_ENDPOINT</code>.</p>
+        </div>
+      </div>
+
+      <div class="demo-block">
+        <div class="demo-label">Step B2 — Start the app in dry-run mode</div>
+        <div class="panel">
+          <pre><code>DERAD_DRY_RUN=true \
+DERAD_INGEST_MODE=off \
+gunicorn derad_agent.app.app:app \
+  --bind 0.0.0.0:5000 \
+  --workers 1 \
+  --timeout 120</code></pre>
+          <p style="margin-top: 8px; color: var(--text-muted);"><code class="inline-code">INGEST_MODE=off</code> prevents the X stream from starting. We inject test mentions directly.</p>
+        </div>
+      </div>
+
+      <div class="demo-block">
+        <div class="demo-label">Step B3 — Inject a test mention via Python</div>
+        <div class="panel">
+          <pre><code>python - &lt;&lt;'EOF'
+import os, sys
+os.environ["DERAD_EVENTS_BACKEND"] = "tables"
+os.environ["DERAD_PARTICIPANTS_BACKEND"] = "tables"
+os.environ["DERAD_DRY_RUN"] = "true"
+os.environ["DERAD_INGEST_MODE"] = "off"
+os.environ.setdefault("SERVER_NAME", "localhost:5000")
+
+from datetime import datetime, timezone
+from derad_agent.app import app as app_module
+from derad_agent.app import dedup as dedup_module
+
+tweet = {
+    "id_str": "TEST_MENTION_001",
+    "in_reply_to_status_id_str": "SOME_REAL_TWEET_ID",
+    "user": {"id_str": "YOUR_X_USER_ID", "screen_name": "yourxhandle"},
+    "text": "@neutralbot This climate legislation is very effective.",
+}
+app_module._dispatch_tweet("neutral", tweet, datetime.now(timezone.utc))
+print("Dispatch sent — check logs and Azure Tables for MentionEvent.")
+EOF</code></pre>
+        </div>
+      </div>
+
+      <div class="demo-block">
+        <div class="demo-label">Step B4 — Verify in Azure Tables</div>
+        <div class="panel">
+          <p>Check the <strong>MentionEvents</strong> table for a row with:</p>
+          <table class="data-table">
+            <thead><tr><th>Field</th><th>Expected value</th></tr></thead>
+            <tbody>
+              <tr><td><code class="inline-code">mention_id</code></td><td><code class="inline-code">TEST_MENTION_001</code></td></tr>
+              <tr><td><code class="inline-code">outcome</code></td><td><code class="inline-code">dry_run</code></td></tr>
+              <tr><td><code class="inline-code">participant_id</code></td><td>YOUR_X_USER_ID</td></tr>
+              <tr><td><code class="inline-code">study_day</code></td><td>1 (enrolled today)</td></tr>
+              <tr><td><code class="inline-code">study_code</code></td><td><em>null</em> (dry_run exits before reply is posted)</td></tr>
+              <tr><td><code class="inline-code">reply_text</code></td><td>Non-empty LLM response</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="callout callout-warning">
+        <strong>study_code is null in dry-run.</strong> The code is derived from the reply tweet ID, which is only assigned after X accepts the post. In dry-run mode the bot exits before posting, so study_code is never set. This is expected.
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════ Phase C -->
+    <section id="live">
+      <div class="section-head">
+        <p class="eyebrow">Phase C · Everything real</p>
+        <h2>Full live test</h2>
+        <p>Send a real X mention from the test participant's account. Verify the bot replies, then verify the MentionEvent in Azure Tables has all study fields set.</p>
+      </div>
+
+      <div class="demo-block">
+        <div class="demo-label">Step C1 — Start the app in streaming mode</div>
+        <div class="panel">
+          <pre><code>gunicorn derad_agent.app.app:app \
+  --bind 0.0.0.0:5000 \
+  --workers 1 \
+  --timeout 300</code></pre>
+          <p style="margin-top: 8px; color: var(--text-muted);">Requires <code class="inline-code">DERAD_INGEST_MODE=streaming</code> (now the default) and <code class="inline-code">X_BEARER_TOKEN</code>.</p>
+        </div>
+      </div>
+
+      <div class="demo-block">
+        <div class="demo-label">Step C2 — Send a test mention</div>
+        <div class="panel">
+          <p>From the participant's X account, post a reply to any public tweet that mentions the neutral bot handle:</p>
+          <pre><code>@nelliexbot This new climate legislation seems really effective at reducing emissions.</code></pre>
+          <p style="margin-top: 8px; color: var(--text-muted);">The tweet must be a <strong>reply</strong> (not a quote tweet or standalone mention). The bot will only respond when <code class="inline-code">in_reply_to_status_id_str</code> is set.</p>
+        </div>
+      </div>
+
+      <div class="demo-block">
+        <div class="demo-label">Step C3 — Verify MentionEvent fields</div>
+        <div class="panel">
+          <table class="data-table">
+            <thead><tr><th>Field</th><th>Expected</th></tr></thead>
+            <tbody>
+              <tr><td><code class="inline-code">outcome</code></td><td><code class="inline-code">replied</code></td></tr>
+              <tr><td><code class="inline-code">reply_id</code></td><td>Non-null tweet ID</td></tr>
+              <tr><td><code class="inline-code">study_code</code></td><td>4-char code, e.g. <code class="inline-code">BZCH</code></td></tr>
+              <tr><td><code class="inline-code">participant_id</code></td><td>Participant's X user ID</td></tr>
+              <tr><td><code class="inline-code">study_day</code></td><td>Days since enrollment + 1</td></tr>
+              <tr><td><code class="inline-code">reply_text</code></td><td>Non-empty, cites community notes</td></tr>
+              <tr><td><code class="inline-code">pipeline_ms</code></td><td>Under 30,000 (30 s)</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="demo-block">
+        <div class="demo-label">Step C4 — Check healthz and logs</div>
+        <div class="panel">
+          <pre><code>curl http://localhost:5000/healthz
+# → {"ok": true, "index_loaded": true}</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════ Phase D -->
+    <section id="day3">
+      <div class="section-head">
+        <p class="eyebrow">Phase D · 3 days after C</p>
+        <h2>Day-3 collection</h2>
+        <p>Run the two collection CLIs and the daily summary exactly 3–4 days after the bot reply was posted. These are the commands researchers run on a daily schedule.</p>
+      </div>
+
+      <div class="demo-block">
+        <div class="demo-label">Step D1 — Poll engagement metrics</div>
+        <div class="panel">
+          <pre><code>derad-poll-engagement</code></pre>
+          <p style="margin-top: 8px; color: var(--text-muted);">Reads all <code class="inline-code">reply_id</code>s from MentionEvents whose <code class="inline-code">reply_posted_utc</code> is in the [3d, 4d) window. Fetches public metrics from X and writes an <strong>EngagementSnapshot</strong> row per reply.</p>
+        </div>
+      </div>
+
+      <div class="demo-block">
+        <div class="demo-label">Step D2 — Collect bystander replies</div>
+        <div class="panel">
+          <pre><code>derad-collect-replies</code></pre>
+          <p style="margin-top: 8px; color: var(--text-muted);">Searches the conversation thread for replies to each bot post in the 3-day window. Writes <strong>BotReplyReply</strong> rows for NLP analysis. Uses the same [3d, 4d) window so it runs alongside <code class="inline-code">derad-poll-engagement</code>.</p>
+        </div>
+      </div>
+
+      <div class="demo-block">
+        <div class="demo-label">Step D3 — Daily summary for survey DMs</div>
+        <div class="panel">
+          <pre><code>derad-daily-summary --date $(date -d yesterday +%Y-%m-%d)</code></pre>
+          <p style="margin-top: 8px; color: var(--text-muted);">Prints a table grouped by participant showing study codes and bot-reply URLs. Use this to compose the daily DM survey links.</p>
+          <pre><code>=== Daily DM Summary for 2026-05-20 ===
+
+@studyparticipant (id=123456, bot=nelliexbot, day=6)
+------------------------------------------------------------
+  [BZCH] https://x.com/nelliexbot/status/1234567890
+          (original: https://x.com/i/web/status/9876543210)
+
+Total: 1 replies across 1 participant(s)</code></pre>
+        </div>
+      </div>
+
+      <div class="demo-block">
+        <div class="demo-label">Step D4 — Send survey DM</div>
+        <div class="panel">
+          <pre><code>python -m derad_agent.app.survey \
+  --participant-id PARTICIPANT_X_USER_ID \
+  --form-url "https://forms.gle/your-form-url" \
+  --tone neutral</code></pre>
+          <p style="margin-top: 8px; color: var(--text-muted);">Sends a Google Form link by X Direct Message from the assigned bot account.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════ Env vars -->
+    <section id="env">
+      <div class="section-head">
+        <p class="eyebrow">Reference</p>
+        <h2>Key env vars for testing</h2>
+      </div>
+
+      <div class="demo-block">
+        <div class="demo-label">Backend switches</div>
+        <div class="panel">
+          <table class="data-table">
+            <thead><tr><th>Variable</th><th>Smoke test</th><th>Live test</th></tr></thead>
+            <tbody>
+              <tr><td><code class="inline-code">DERAD_EVENTS_BACKEND</code></td><td><code class="inline-code">memory</code></td><td><code class="inline-code">tables</code></td></tr>
+              <tr><td><code class="inline-code">DERAD_PARTICIPANTS_BACKEND</code></td><td><code class="inline-code">memory</code></td><td><code class="inline-code">tables</code></td></tr>
+              <tr><td><code class="inline-code">DERAD_INGEST_MODE</code></td><td><code class="inline-code">off</code></td><td><code class="inline-code">streaming</code> (default)</td></tr>
+              <tr><td><code class="inline-code">DERAD_DRY_RUN</code></td><td><code class="inline-code">false</code></td><td><code class="inline-code">true</code> for B, <code class="inline-code">false</code> for C</td></tr>
+              <tr><td><code class="inline-code">DERAD_RESTRICT_TO_REGISTERED</code></td><td><code class="inline-code">true</code></td><td><code class="inline-code">true</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════ Checklist -->
+    <section id="checklist">
+      <div class="section-head">
+        <p class="eyebrow">Reference</p>
+        <h2>Go / no-go checklist</h2>
+      </div>
+
+      <div class="demo-block">
+        <div class="demo-label">Before running live phases</div>
+        <div class="panel">
+          <ul class="task-list">
+            <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Smoke test passes: <code class="inline-code">python scripts/smoke_test.py</code> exits 0</li>
+            <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Full test suite passes: <code class="inline-code">python -m pytest tests/ -q</code> → 90 passed</li>
+            <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> <code class="inline-code">DERAD_TABLES_ENDPOINT</code> is set and reachable</li>
+            <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Notes index is built and at <code class="inline-code">INDEX_ROOT</code></li>
+            <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> Test participant registered: <code class="inline-code">derad-register-participant --author-id ... --tone neutral</code></li>
+            <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> App restarted after participant registration (allow-list is loaded at startup)</li>
+            <li><label class="task-check"><input type="checkbox"><span class="chip chip-pending">todo</span></label> <code class="inline-code">/healthz</code> returns <code class="inline-code">{"ok": true, "index_loaded": true}</code></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="demo-block">
+        <div class="demo-label">Day-3 timing window</div>
+        <div class="panel">
+          <div class="callout callout-warning">
+            <code class="inline-code">derad-poll-engagement</code> and <code class="inline-code">derad-collect-replies</code> only pick up replies whose <code class="inline-code">reply_posted_utc</code> is in the <strong>[72h, 96h)</strong> window. Run them exactly once per day — earlier or later and they miss the window.
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script src="../assets/html-design-system.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    initTaskCheckboxes('derad-test-plan');
+  });
+</script>
+</body>
+</html>

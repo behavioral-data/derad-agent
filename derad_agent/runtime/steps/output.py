@@ -1,23 +1,25 @@
 """Compose a reply from a list of evidence notes.
 
 Hands the filtered, recency-sorted notes to the response-output LLM
-prompt and returns a 3-5 sentence reply plus structured reasons grounded
+prompt and returns a two-sentence reply plus structured reasons grounded
 in the supplied note_ids.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from html import unescape
 from typing import Any, Dict, List, Optional, Sequence
 
 from derad_agent.llm.config import get_llm, STYLE_LLM_PROVIDERS
-from derad_agent.llm.prompts import get_style_prompt
+from derad_agent.llm.prompts import get_style_prompt, get_no_factcheck_prompt
 
 from ._helpers import extract_text_from_response, parse_json_response
 
+logger = logging.getLogger(__name__)
 
 _URL_RE = re.compile(r"https?://[^\s<>\"]+")
 _TAG_RE = re.compile(r"</?[A-Z_]+>")
@@ -139,7 +141,7 @@ def step_compose_reply(
     llm = get_llm(
         temperature=None,
         max_tokens=1400,
-        reasoning_effort="low",
+        reasoning_effort="medium",
         text_verbosity="medium",
         provider=provider,
     )
@@ -148,15 +150,25 @@ def step_compose_reply(
     invoke_vars: Dict[str, str] = {
         "statement": statement,
         "evidence_notes_json": json.dumps(candidates, ensure_ascii=False),
+        "current_date": datetime.now(timezone.utc).strftime("%B %d, %Y"),
     }
-    if style == "satirical":
-        invoke_vars["current_date"] = datetime.now(timezone.utc).strftime("%B %d, %Y")
+
+    try:
+        formatted = prompt.format_messages(**invoke_vars)
+        logger.info(
+            "compose_reply request — provider=%s style=%s notes=%d\n%s",
+            provider, style, len(candidates),
+            "\n---\n".join(f"[{m.type}] {m.content}" for m in formatted),
+        )
+    except Exception:
+        pass
 
     raw = chain.invoke(invoke_vars)
     text = extract_text_from_response(raw)
     try:
         parsed = parse_json_response(text)
-    except Exception:
+    except Exception as _parse_exc:
+        logger.warning("JSON parse failed, attempting repair: %s", _parse_exc)
         repair_prompt = (
             "Convert the following text into valid JSON only, preserving the same schema keys. "
             "Return JSON and nothing else.\n\n"
@@ -165,7 +177,7 @@ def step_compose_reply(
         repair_llm = get_llm(
             temperature=None,
             max_tokens=1400,
-            reasoning_effort="low",
+            reasoning_effort="medium",
             text_verbosity="low",
             provider=provider,
         )
@@ -190,4 +202,55 @@ def step_compose_reply(
     }
 
 
-__all__ = ["step_compose_reply"]
+def step_compose_no_factcheck_reply(
+    statement: str,
+    style: str = "neutral",
+    *,
+    reason: str = "no_claim",
+) -> Dict[str, Any]:
+    """Generate a tone-appropriate reply when no grounded reply is available.
+
+    ``reason`` controls the template family used:
+      - ``"no_claim"``: planner gate fired — tweet has no factcheckable claim.
+      - ``"no_notes"``: search ran but no relevant Community Notes were found.
+    """
+    provider = STYLE_LLM_PROVIDERS.get(style, "openai")
+    prompt = get_no_factcheck_prompt(style, reason=reason)
+    llm = get_llm(
+        temperature=None,
+        max_tokens=200,
+        reasoning_effort="medium",
+        text_verbosity="low",
+        provider=provider,
+    )
+    chain = prompt | llm
+
+    try:
+        try:
+            formatted = prompt.format_messages(statement=statement)
+            logger.info(
+                "compose_no_factcheck_reply request — provider=%s style=%s reason=%s\n%s",
+                provider, style, reason,
+                "\n---\n".join(f"[{m.type}] {m.content}" for m in formatted),
+            )
+        except Exception:
+            pass
+        raw = chain.invoke({"statement": statement})
+        text = extract_text_from_response(raw)
+        parsed = parse_json_response(text)
+        response_text = str(parsed.get("response") or "").strip()
+    except Exception as exc:
+        logger.warning("No-factcheck reply generation failed (reason=%s): %s", reason, exc)
+        response_text = ""
+
+    if not response_text:
+        response_text = "No Community Notes corrections found for this post."
+
+    return {
+        "statement": statement,
+        "response": response_text,
+        "reasons": [],
+    }
+
+
+__all__ = ["step_compose_reply", "step_compose_no_factcheck_reply"]

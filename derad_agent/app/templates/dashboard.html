@@ -1,0 +1,665 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>DeRad Agent — Live Dashboard</title>
+  <link rel="stylesheet" href="/static/dash/html-design-system.css">
+  <style>
+    /* ── Sidebar flex so theme toggle sticks to bottom ── */
+    .sidebar { display: flex; flex-direction: column; }
+
+    /* ── Log panel ── */
+    .log-panel {
+      background: #111;
+      border: 1.5px solid #333;
+      font-family: var(--mono);
+      font-size: 11px;
+      height: 420px;
+      overflow-y: auto;
+      padding: 10px 12px;
+      line-height: 1.55;
+    }
+    .log-line { white-space: pre-wrap; word-break: break-all; color: var(--gray-500); }
+    .log-line.ll-warn   { color: #e8a040; }
+    .log-line.ll-error  { color: #e85040; }
+    .log-line.ll-accept { color: #4fc1ff; }
+    .log-line.ll-reply  { color: #6fe080; }
+    .log-line.ll-stream { color: #b48eff; }
+    .log-line.ll-table  { color: #ffcc50; }
+
+    .log-controls { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+    .log-pause-btn {
+      font-size: 11px; padding: 2px 8px; cursor: pointer;
+      background: transparent; border: 1px solid #333;
+      color: var(--gray-500); font-family: var(--mono);
+    }
+    .log-pause-btn:hover { border-color: var(--clay); color: var(--clay); }
+
+    /* ── Status dot ── */
+    .status-dot { width: 8px; height: 8px; display: inline-block; margin-right: 6px; }
+    .status-dot.live { background: #6fe080; animation: blink 1.4s step-end infinite; }
+    .status-dot.off  { background: #e85040; }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* ── Tone + outcome chips ── */
+    .outcome-chip {
+      font-size: 10px; font-family: var(--mono);
+      padding: 1px 5px; border: 1px solid; border-radius: 0;
+    }
+    .oc-replied      { border-color: #6fe080; color: #6fe080; }
+    .oc-dry_run      { border-color: #4fc1ff; color: #4fc1ff; }
+    .oc-pipeline_error,
+    .oc-parent_fetch_failed,
+    .oc-x_post_error { border-color: #e85040; color: #e85040; }
+    .oc-empty_reply  { border-color: #e8a040; color: #e8a040; }
+
+    .tone-satirical { color: #e85040; }
+    .tone-agreeable { color: #6fe080; }
+    .tone-neutral   { color: #4fc1ff; }
+    .drop-reason    { font-size: 10px; font-family: var(--mono); color: #e8a040; }
+
+    /* ── Sidebar info rows ── */
+    .sb-info {
+      padding: 14px 22px;
+      font-size: 11px;
+      color: var(--gray-500);
+      line-height: 2;
+      border-bottom: 1px solid #2a2a2a;
+    }
+    .sb-info + .sb-info { border-top: none; }
+    .sb-val { font-family: var(--mono); color: var(--gray-700); }
+
+    /* ── Refresh note ── */
+    .refresh-note { font-size: 10px; color: var(--gray-500); font-family: var(--mono); }
+
+    /* ── Reply text cell ── */
+    .reply-text-cell {
+      max-width: 260px; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; font-size: 11px;
+    }
+
+    /* ── Add-participant form ── */
+    .add-part-form {
+      display: grid;
+      grid-template-columns: 1.4fr 2fr auto;
+      gap: 8px;
+      align-items: stretch;
+      margin: 8px 0 18px;
+    }
+    .add-part-form input, .add-part-form select {
+      background: transparent;
+      border: 1px solid #333;
+      color: var(--gray-700);
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 0;
+      outline: none;
+    }
+    .add-part-form input:focus, .add-part-form select:focus { border-color: var(--clay); }
+    .add-part-form button {
+      background: var(--clay);
+      border: 1px solid var(--clay);
+      color: #000;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 18px;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+    }
+    .add-part-form button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .add-part-msg {
+      font-family: var(--mono);
+      font-size: 11px;
+      min-height: 18px;
+      margin-bottom: 8px;
+    }
+    .add-part-msg.ok    { color: #6fe080; }
+    .add-part-msg.err   { color: #e85040; }
+    .add-part-msg.info  { color: var(--gray-500); }
+
+    /* ── Bot replies table ── */
+    .day-header td {
+      background: rgba(255, 204, 80, 0.06);
+      color: var(--clay);
+      font-family: var(--mono);
+      font-size: 11px;
+      padding-top: 14px;
+      padding-bottom: 6px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .day-header .day-count {
+      color: var(--gray-500);
+      font-weight: 400;
+      margin-left: 8px;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+    .reply-link {
+      color: #4fc1ff;
+      text-decoration: none;
+      font-family: var(--mono);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    .reply-link:hover { text-decoration: underline; color: #80d4ff; }
+    .reply-link.disabled { color: var(--gray-500); cursor: not-allowed; }
+
+    .bot-chip {
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 1px 5px;
+      border: 1px solid;
+      border-radius: 0;
+      white-space: nowrap;
+    }
+    .bot-chip.tone-agreeable { color: #6fe080; border-color: #6fe080; }
+    .bot-chip.tone-neutral   { color: #4fc1ff; border-color: #4fc1ff; }
+    .bot-chip.tone-satirical { color: #e85040; border-color: #e85040; }
+    .bot-chip.tone-unknown   { color: var(--gray-500); border-color: var(--gray-500); }
+  </style>
+</head>
+<body>
+<div class="layout">
+
+  <!-- ── Sidebar ──────────────────────────────────────────────────── -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-name">DeRad Agent</div>
+      <div class="logo-sub">Live Dashboard</div>
+    </div>
+
+    <nav>
+      <span class="nav-section">Navigation</span>
+      <a href="#overview">Overview</a>
+      <a href="#events">Events</a>
+      <a href="#drops">Drops</a>
+      <a href="#bot-replies">Bot Replies</a>
+      <a href="#participants">Participants</a>
+      <a href="#logs">Live Logs</a>
+    </nav>
+
+    <span class="nav-section" style="margin-top:16px;">System</span>
+    <div class="sb-info">
+      <div>Events: <span class="sb-val" id="sb-events-backend">—</span></div>
+      <div>Participants: <span class="sb-val" id="sb-part-backend">—</span></div>
+      <div>Dry-run: <span class="sb-val" id="sb-dry-run">—</span></div>
+      <div>Stream: <span class="sb-val" id="sb-stream">—</span></div>
+    </div>
+
+    <span class="nav-section" style="margin-top:16px;">Participants</span>
+    <div class="sb-info" id="sb-participants">—</div>
+
+    <div style="margin-top:auto;">
+      <div class="theme-toggle" onclick="toggleTheme()">
+        <div class="theme-toggle-track"></div>
+        <div class="theme-toggle-label">Theme</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── Main ─────────────────────────────────────────────────────── -->
+  <main class="main">
+
+    <!-- 01 · Overview -->
+    <section id="overview">
+      <div class="section-head">
+        <p class="eyebrow">01 · Overview</p>
+        <h2>Activity Metrics <span id="last-refresh" class="refresh-note"></span></h2>
+      </div>
+
+      <div class="stat-row" id="stat-row">
+        <div class="stat"><div class="num" id="m-total">—</div><div class="label">Events (recent 50)</div></div>
+        <div class="stat"><div class="num" id="m-replied">—</div><div class="label">Replied</div></div>
+        <div class="stat"><div class="num" id="m-dryrun">—</div><div class="label">Dry-run</div></div>
+        <div class="stat"><div class="num" id="m-errors">—</div><div class="label">Errors</div></div>
+        <div class="stat"><div class="num" id="m-latency">—</div><div class="label">Avg latency (ms)</div></div>
+      </div>
+
+      <div class="grid-2" style="margin-top:16px;">
+        <div class="panel">
+          <div class="panel-head"><span class="meta">Tone distribution</span></div>
+          <div id="tone-bar" style="margin-top:8px;"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="meta">Outcome distribution</span></div>
+          <div id="outcome-bar" style="margin-top:8px;"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 02 · Events -->
+    <section id="events" style="margin-top:48px;">
+      <div class="section-head">
+        <p class="eyebrow">02 · Events</p>
+        <h2>Recent MentionEvents</h2>
+        <p>Last 50 events written to Azure Tables, newest first.</p>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="events-table">
+          <thead>
+            <tr>
+              <th>Time (UTC)</th>
+              <th>Author</th>
+              <th>Tone</th>
+              <th>Outcome</th>
+              <th>Study Day</th>
+              <th>Code</th>
+              <th>ms</th>
+              <th>Reply text</th>
+            </tr>
+          </thead>
+          <tbody id="events-tbody">
+            <tr><td colspan="8" style="color:var(--gray-500);">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 03 · Drops -->
+    <section id="drops" style="margin-top:48px;">
+      <div class="section-head">
+        <p class="eyebrow">03 · Drops</p>
+        <h2>Recent MentionDrops</h2>
+        <p>Mentions filtered out — dedup, rate-limit, unregistered, self-reply, etc.</p>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="drops-table">
+          <thead>
+            <tr>
+              <th>Time (UTC)</th>
+              <th>Author</th>
+              <th>Tone</th>
+              <th>Reason</th>
+              <th>Mention ID</th>
+            </tr>
+          </thead>
+          <tbody id="drops-tbody">
+            <tr><td colspan="5" style="color:var(--gray-500);">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 04 · Bot Replies -->
+    <section id="bot-replies" style="margin-top:48px;">
+      <div class="section-head">
+        <p class="eyebrow">04 · Bot Replies</p>
+        <h2>Bot Replies by User · by Day</h2>
+        <p>Every successful bot reply, grouped by UTC date, newest first. Each row links to the live tweet on X. Showing up to 200 most recent.</p>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="bot-replies-table">
+          <thead>
+            <tr>
+              <th>Time (UTC)</th>
+              <th>User</th>
+              <th>Bot</th>
+              <th>Study Day</th>
+              <th>Code</th>
+              <th>Reply text</th>
+              <th>Link</th>
+            </tr>
+          </thead>
+          <tbody id="bot-replies-tbody">
+            <tr><td colspan="7" style="color:var(--gray-500);">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 05 · Participants -->
+    <section id="participants" style="margin-top:48px;">
+      <div class="section-head">
+        <p class="eyebrow">05 · Participants</p>
+        <h2>Add Participant</h2>
+        <p>Enter an X handle (with or without <code class="inline-code">@</code>). The X user ID is looked up automatically. Bot assignment is handled manually outside this dashboard.</p>
+      </div>
+
+      <form class="add-part-form" id="add-part-form" autocomplete="off">
+        <input type="text" id="ap-username" name="username" placeholder="@handle" required>
+        <input type="text" id="ap-notes" name="notes" placeholder="notes (optional)">
+        <button type="submit" id="ap-submit">Add</button>
+      </form>
+      <div class="add-part-msg info" id="ap-msg">Ready.</div>
+
+      <div class="table-wrap">
+        <table class="data-table" id="participants-table">
+          <thead>
+            <tr>
+              <th>Handle</th>
+              <th>X User ID</th>
+              <th>Registered (UTC)</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody id="participants-tbody">
+            <tr><td colspan="4" style="color:var(--gray-500);">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 05 · Logs -->
+    <section id="logs" style="margin-top:48px;">
+      <div class="section-head">
+        <p class="eyebrow">06 · Logs</p>
+        <h2>Live Log Stream</h2>
+        <p>Real-time tail of the application log. Color:
+          <span style="color:#4fc1ff;">mention accepted</span> ·
+          <span style="color:#6fe080;">reply posted</span> ·
+          <span style="color:#b48eff;">stream</span> ·
+          <span style="color:#ffcc50;">table write</span> ·
+          <span style="color:#e8a040;">warning</span> ·
+          <span style="color:#e85040;">error</span>
+        </p>
+      </div>
+      <div class="log-controls">
+        <span>
+          <span class="status-dot off" id="log-dot"></span>
+          <span id="log-status-text" style="font-size:11px; font-family:var(--mono);">connecting…</span>
+        </span>
+        <button class="log-pause-btn" id="pause-btn" onclick="togglePause()">Pause</button>
+        <button class="log-pause-btn" onclick="clearLog()">Clear</button>
+      </div>
+      <div class="log-panel" id="log-panel"></div>
+    </section>
+
+  </main>
+</div>
+
+<script src="/static/dash/html-design-system.js"></script>
+<script>
+  // ── Utilities ──────────────────────────────────────────────────────────────
+  const esc = s => (s == null ? '—' : String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
+
+  function fmtTime(iso) {
+    if (!iso) return '—';
+    return iso.replace('T', ' ').replace(/\.\d+.*/, '').replace('+00:00', '');
+  }
+
+  function outcomeChip(outcome) {
+    return `<span class="outcome-chip oc-${outcome || 'unknown'}">${outcome || '?'}</span>`;
+  }
+
+  function toneSpan(tone) {
+    return `<span class="tone-${tone || ''}">${tone || '—'}</span>`;
+  }
+
+  // ── Log panel ──────────────────────────────────────────────────────────────
+  let paused = false;
+  let autoScroll = true;
+  const logPanel = document.getElementById('log-panel');
+  const MAX_LOG_LINES = 500;
+
+  function togglePause() {
+    paused = !paused;
+    document.getElementById('pause-btn').textContent = paused ? 'Resume' : 'Pause';
+  }
+
+  function clearLog() { logPanel.innerHTML = ''; }
+
+  function classifyLine(line) {
+    if (/ERROR|CRITICAL|Exception|Traceback/.test(line)) return 'll-error';
+    if (/WARNING|warn/.test(line))                       return 'll-warn';
+    if (/Accepted mention/.test(line))                   return 'll-accept';
+    if (/Created reply|Posting reply|replied/.test(line))return 'll-reply';
+    if (/stream|Stream|filtered/.test(line))             return 'll-stream';
+    if (/TablesEventsStore|write_event|write_drop|create_entity/.test(line)) return 'll-table';
+    return '';
+  }
+
+  function appendLogLine(line) {
+    if (paused) return;
+    const el = document.createElement('div');
+    el.className = 'log-line ' + classifyLine(line);
+    el.textContent = line;
+    logPanel.appendChild(el);
+    while (logPanel.children.length > MAX_LOG_LINES) logPanel.removeChild(logPanel.firstChild);
+    if (autoScroll) logPanel.scrollTop = logPanel.scrollHeight;
+  }
+
+  logPanel.addEventListener('scroll', () => {
+    autoScroll = logPanel.scrollTop + logPanel.clientHeight >= logPanel.scrollHeight - 30;
+  });
+
+  function connectLogs() {
+    const dot = document.getElementById('log-dot');
+    const statusText = document.getElementById('log-status-text');
+    const es = new EventSource('/stream/logs');
+    es.onopen = () => {
+      dot.className = 'status-dot live';
+      statusText.textContent = 'connected';
+    };
+    es.onmessage = e => {
+      const data = JSON.parse(e.data);
+      if (data.line) appendLogLine(data.line);
+    };
+    es.onerror = () => {
+      dot.className = 'status-dot off';
+      statusText.textContent = 'reconnecting…';
+      es.close();
+      setTimeout(connectLogs, 3000);
+    };
+  }
+  connectLogs();
+
+  // ── Activity data ──────────────────────────────────────────────────────────
+  function renderActivity(data) {
+    const m = data.metrics;
+
+    // Sidebar system info
+    const dryEl = document.getElementById('sb-dry-run');
+    dryEl.textContent = m.dry_run ? 'true' : 'false';
+    dryEl.style.color = m.dry_run ? '#e8a040' : '#6fe080';
+
+    document.getElementById('sb-stream').textContent =
+      m.stream_connected === null ? 'n/a' : (m.stream_connected ? 'live' : 'off');
+    document.getElementById('sb-events-backend').textContent = data.events.length ? 'tables' : 'memory';
+    document.getElementById('sb-part-backend').textContent = 'tables';
+
+    document.getElementById('sb-participants').innerHTML =
+      `<div>Total: <span class="sb-val">${m.participant_count}</span></div>` +
+      Object.entries(m.participant_tone_counts)
+        .map(([t, n]) => `<div><span class="tone-${t}">${t}</span>: <span class="sb-val">${n}</span></div>`)
+        .join('');
+
+    // Stat numbers
+    document.getElementById('m-total').textContent   = m.total_events;
+    document.getElementById('m-replied').textContent = m.outcome_counts.replied || 0;
+    document.getElementById('m-dryrun').textContent  = m.outcome_counts.dry_run || 0;
+    const errKeys = ['pipeline_error', 'parent_fetch_failed', 'x_post_error', 'empty_reply'];
+    document.getElementById('m-errors').textContent  = errKeys.reduce((s, k) => s + (m.outcome_counts[k] || 0), 0);
+    document.getElementById('m-latency').textContent = m.avg_pipeline_ms || '—';
+    document.getElementById('last-refresh').textContent = '· ' + new Date().toLocaleTimeString();
+
+    // Tone bar
+    renderStackedBar('tone-bar', [
+      { label: 'agreeable', value: m.tone_counts.agreeable || 0, color: '#6fe080' },
+      { label: 'neutral',   value: m.tone_counts.neutral   || 0, color: '#4fc1ff' },
+      { label: 'satirical', value: m.tone_counts.satirical || 0, color: '#e85040' },
+    ]);
+
+    // Outcome bar
+    const outcomes = Object.entries(m.outcome_counts).map(([k, v]) => ({
+      label: k, value: v,
+      color: k === 'replied' ? '#6fe080' : k === 'dry_run' ? '#4fc1ff' : '#e85040',
+    }));
+    if (outcomes.length) renderStackedBar('outcome-bar', outcomes);
+
+    // Events table
+    const tbody = document.getElementById('events-tbody');
+    tbody.innerHTML = data.events.length
+      ? data.events.map(ev => `
+          <tr>
+            <td style="white-space:nowrap;">${fmtTime(ev.received_at_utc)}</td>
+            <td>@${esc(ev.author_username || ev.author_id)}</td>
+            <td>${toneSpan(ev.tone)}</td>
+            <td>${outcomeChip(ev.outcome)}</td>
+            <td>${esc(ev.study_day)}</td>
+            <td>${ev.study_code ? `<code class="inline-code">${esc(ev.study_code)}</code>` : '—'}</td>
+            <td>${esc(ev.pipeline_ms)}</td>
+            <td class="reply-text-cell" title="${esc(ev.reply_text)}">${esc(ev.reply_text)}</td>
+          </tr>`).join('')
+      : '<tr><td colspan="8" style="color:var(--gray-500);">No events yet.</td></tr>';
+
+    // Drops table
+    const dtbody = document.getElementById('drops-tbody');
+    dtbody.innerHTML = data.drops.length
+      ? data.drops.map(d => `
+          <tr>
+            <td style="white-space:nowrap;">${fmtTime(d.received_at_utc)}</td>
+            <td>${esc(d.author_id)}</td>
+            <td>${toneSpan(d.tone)}</td>
+            <td><span class="drop-reason">${esc(d.drop_reason)}</span></td>
+            <td><code class="inline-code">${esc(d.mention_id)}</code></td>
+          </tr>`).join('')
+      : '<tr><td colspan="5" style="color:var(--gray-500);">No drops yet.</td></tr>';
+  }
+
+  function fetchActivity() {
+    fetch('/api/activity')
+      .then(r => r.json())
+      .then(renderActivity)
+      .catch(e => console.error('activity fetch failed', e));
+  }
+
+  fetchActivity();
+  setInterval(fetchActivity, 5000);
+
+  // ── Participants ───────────────────────────────────────────────────────────
+  function renderParticipants(rows) {
+    const tbody = document.getElementById('participants-tbody');
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--gray-500);">No participants yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(p => `
+      <tr>
+        <td>@${esc(p.author_username)}</td>
+        <td><code class="inline-code">${esc(p.author_id)}</code></td>
+        <td style="white-space:nowrap;">${fmtTime(p.enrolled_at_utc)}</td>
+        <td>${esc(p.notes) || '—'}</td>
+      </tr>`).join('');
+  }
+
+  function fetchParticipants() {
+    fetch('/api/participants')
+      .then(r => r.json())
+      .then(data => renderParticipants(data.participants || []))
+      .catch(e => console.error('participants fetch failed', e));
+  }
+
+  function setApMsg(text, cls) {
+    const m = document.getElementById('ap-msg');
+    m.className = 'add-part-msg ' + (cls || 'info');
+    m.textContent = text;
+  }
+
+  document.getElementById('add-part-form').addEventListener('submit', ev => {
+    ev.preventDefault();
+    const username = document.getElementById('ap-username').value.trim();
+    const notes    = document.getElementById('ap-notes').value.trim();
+    if (!username) { setApMsg('Handle is required.', 'err'); return; }
+
+    const btn = document.getElementById('ap-submit');
+    btn.disabled = true;
+    setApMsg(`Looking up @${username.replace(/^@/, '')}…`, 'info');
+
+    fetch('/api/participants', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, notes }),
+    })
+      .then(async r => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+        return data;
+      })
+      .then(data => {
+        const p = data.participant;
+        setApMsg(`Added @${p.author_username} (id=${p.author_id}).`, 'ok');
+        document.getElementById('ap-username').value = '';
+        document.getElementById('ap-notes').value = '';
+        fetchParticipants();
+        fetchActivity();  // refresh sidebar counts
+      })
+      .catch(e => setApMsg(`Error: ${e.message}`, 'err'))
+      .finally(() => { btn.disabled = false; });
+  });
+
+  fetchParticipants();
+
+  // ── Bot replies ────────────────────────────────────────────────────────────
+  function fmtDay(iso) {
+    return (iso || '').slice(0, 10) || '—';
+  }
+  function fmtClock(iso) {
+    return (iso || '').slice(11, 19) || '—';
+  }
+
+  function renderBotReplies(rows) {
+    const tbody = document.getElementById('bot-replies-tbody');
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="7" style="color:var(--gray-500);">No bot replies yet.</td></tr>';
+      return;
+    }
+
+    // Group by date for the day-header rows; keep rows ordered within the day.
+    const byDay = new Map();
+    for (const r of rows) {
+      const d = fmtDay(r.received_at_utc);
+      if (!byDay.has(d)) byDay.set(d, []);
+      byDay.get(d).push(r);
+    }
+
+    let html = '';
+    for (const [day, items] of byDay) {
+      const count = items.length;
+      html += `<tr class="day-header">
+        <td colspan="7">${esc(day)}<span class="day-count">${count} ${count === 1 ? 'reply' : 'replies'}</span></td>
+      </tr>`;
+      for (const r of items) {
+        const user = r.author_username ? `@${esc(r.author_username)}` : esc(r.author_id || '—');
+        const tone = (r.tone || 'unknown').toLowerCase();
+        const knownTone = ['agreeable', 'neutral', 'satirical'].includes(tone) ? tone : 'unknown';
+        const botLabel = r.bot_handle ? `@${esc(r.bot_handle)}` : esc(tone || '?');
+        const code = r.study_code
+          ? `<code class="inline-code">${esc(r.study_code)}</code>` : '—';
+        const link = r.reply_url
+          ? `<a class="reply-link" href="${esc(r.reply_url)}" target="_blank" rel="noopener noreferrer">→ tweet</a>`
+          : '<span class="reply-link disabled">—</span>';
+        html += `<tr>
+          <td style="white-space:nowrap;">${esc(fmtClock(r.received_at_utc))}</td>
+          <td>${user}</td>
+          <td><span class="bot-chip tone-${knownTone}">${botLabel}</span></td>
+          <td>${esc(r.study_day)}</td>
+          <td>${code}</td>
+          <td class="reply-text-cell" title="${esc(r.reply_text)}">${esc(r.reply_text)}</td>
+          <td>${link}</td>
+        </tr>`;
+      }
+    }
+    tbody.innerHTML = html;
+  }
+
+  function fetchBotReplies() {
+    fetch('/api/replies?limit=200')
+      .then(r => r.json())
+      .then(data => renderBotReplies(data.replies || []))
+      .catch(e => console.error('bot replies fetch failed', e));
+  }
+
+  fetchBotReplies();
+  setInterval(fetchBotReplies, 10000);
+
+  // ── Init ───────────────────────────────────────────────────────────────────
+  initScrollSpy();
+</script>
+</body>
+</html>

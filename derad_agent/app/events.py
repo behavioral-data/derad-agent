@@ -31,7 +31,7 @@ import logging
 import os
 import threading
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Protocol
 
 logger = logging.getLogger(__name__)
@@ -70,8 +70,17 @@ class MentionEvent:
     reply_id: Optional[str] = None
     sources_reply_id: Optional[str] = None
 
+    # Study tracking
+    study_code: Optional[str] = None      # 4-letter code used in daily DM surveys
+    participant_id: Optional[str] = None  # author_id, explicit FK to Participants table
+    study_day: Optional[int] = None       # 1-based day number within the 5-day study
+    bot_author_id: Optional[str] = None   # X user ID of the bot that replied
+
     # Outcome
     outcome: str = "replied"  # 'replied' | 'pipeline_error' | 'x_post_error' | 'parent_fetch_failed' | 'empty_reply'
+    # reply_type distinguishes a grounded factcheck reply ('factcheck') from a
+    # planner/empty-notes fallback ('no_factcheck'). None when no reply was sent.
+    reply_type: Optional[str] = None
     error_class: Optional[str] = None
     error_detail: Optional[str] = None
 
@@ -98,6 +107,25 @@ class EngagementSnapshot:
     retweet_count: int = 0
     reply_count: int = 0
     quote_count: int = 0
+    mention_id: Optional[str] = None  # FK back to MentionEvents
+    parent_id: Optional[str] = None   # original post being fact-checked
+
+
+@dataclass
+class BotReplyReply:
+    """Text of a reply to a bot post — collected for bystander NLP analysis.
+
+    Written by the derad-collect-replies CLI (~3 days after each bot reply).
+    """
+    bot_reply_id: str        # the bot's reply tweet that was responded to
+    reply_tweet_id: str      # ID of the bystander's reply
+    author_id: str           # bystander author's X user ID
+    text: str                # full text of the bystander reply
+    collected_at_utc: datetime
+    author_username: Optional[str] = None
+    like_count: int = 0
+    mention_id: Optional[str] = None  # FK back to MentionEvents
+    tone: Optional[str] = None        # which bot posted the reply
 
 
 # ── Store interface ─────────────────────────────────────────────────────────
@@ -106,7 +134,8 @@ class EventsStore(Protocol):
     def write_event(self, ev: MentionEvent) -> None: ...
     def write_drop(self, drop: MentionDrop) -> None: ...
     def write_engagement(self, snap: EngagementSnapshot) -> None: ...
-    def iter_reply_ids(self) -> list[tuple[str, str, datetime | None]]: ...
+    def write_reply_reply(self, reply: BotReplyReply) -> None: ...
+    def iter_reply_ids(self) -> list[tuple[str, str, datetime | None, str | None, str | None]]: ...
 
 
 # ── In-memory backend (tests + local dev) ───────────────────────────────────
@@ -118,6 +147,7 @@ class InMemoryEventsStore:
         self.events: list[MentionEvent] = []
         self.drops: list[MentionDrop] = []
         self.engagements: list[EngagementSnapshot] = []
+        self.reply_replies: list[BotReplyReply] = []
         self._lock = threading.Lock()
 
     def write_event(self, ev: MentionEvent) -> None:
@@ -132,13 +162,52 @@ class InMemoryEventsStore:
         with self._lock:
             self.engagements.append(snap)
 
-    def iter_reply_ids(self) -> list[tuple[str, str, datetime | None]]:
+    def write_reply_reply(self, reply: BotReplyReply) -> None:
+        with self._lock:
+            self.reply_replies.append(reply)
+
+    def iter_reply_ids(self) -> list[tuple[str, str, datetime | None, str | None, str | None]]:
         with self._lock:
             return [
-                (ev.reply_id, ev.tone, ev.reply_posted_utc)
+                (ev.reply_id, ev.tone, ev.reply_posted_utc, ev.mention_id, ev.parent_id)
                 for ev in self.events
                 if ev.reply_id
             ]
+
+    def list_recent(self, limit: int = 50) -> list[dict]:
+        with self._lock:
+            events = list(reversed(self.events[-limit:]))
+        return [
+            {
+                "mention_id": e.mention_id,
+                "author_id": e.author_id,
+                "author_username": e.author_username,
+                "tone": e.tone,
+                "outcome": e.outcome,
+                "reply_id": e.reply_id,
+                "received_at_utc": e.received_at_utc.isoformat() if e.received_at_utc else None,
+                "pipeline_ms": e.pipeline_ms,
+                "study_day": e.study_day,
+                "study_code": e.study_code,
+                "reply_text": (e.reply_text or "")[:120],
+                "parent_text": (e.parent_text or "")[:120],
+            }
+            for e in events
+        ]
+
+    def list_recent_drops(self, limit: int = 20) -> list[dict]:
+        with self._lock:
+            drops = list(reversed(self.drops[-limit:]))
+        return [
+            {
+                "mention_id": d.mention_id,
+                "author_id": d.author_id,
+                "tone": d.tone,
+                "drop_reason": d.drop_reason,
+                "received_at_utc": d.received_at_utc.isoformat() if d.received_at_utc else None,
+            }
+            for d in drops
+        ]
 
 
 # ── Azure Tables backend ────────────────────────────────────────────────────
@@ -165,6 +234,7 @@ class TablesEventsStore:
         events_table: str = "MentionEvents",
         drops_table: str = "MentionDrops",
         engagements_table: str = "EngagementSnapshots",
+        reply_replies_table: str = "BotReplyReplies",
         credential=None,
     ) -> None:
         from azure.core.exceptions import ResourceExistsError
@@ -173,7 +243,7 @@ class TablesEventsStore:
 
         cred = credential or DefaultAzureCredential()
         self._service = TableServiceClient(endpoint=endpoint, credential=cred)
-        for name in (events_table, drops_table, engagements_table):
+        for name in (events_table, drops_table, engagements_table, reply_replies_table):
             try:
                 self._service.create_table(name)
                 logger.info("Created events table %s", name)
@@ -182,11 +252,13 @@ class TablesEventsStore:
         self._events = self._service.get_table_client(events_table)
         self._drops = self._service.get_table_client(drops_table)
         self._engagements = self._service.get_table_client(engagements_table)
+        self._reply_replies = self._service.get_table_client(reply_replies_table)
 
     def write_event(self, ev: MentionEvent) -> None:
         entity = self._event_entity(ev)
         try:
             self._events.create_entity(entity)
+            logger.info("Wrote event to tables (mention=%s outcome=%s)", ev.mention_id, ev.outcome)
         except Exception:
             logger.exception("write_event failed for mention %s; continuing", ev.mention_id)
 
@@ -194,6 +266,7 @@ class TablesEventsStore:
         entity = self._drop_entity(drop)
         try:
             self._drops.create_entity(entity)
+            logger.info("Wrote drop to tables (mention=%s reason=%s)", drop.mention_id, drop.drop_reason)
         except Exception:
             logger.exception(
                 "write_drop failed for mention %s reason=%s; continuing",
@@ -217,8 +290,8 @@ class TablesEventsStore:
             "parent_reply_count": ev.parent_reply_count,
             "parent_quote_count": ev.parent_quote_count,
             "queries_json": json.dumps(ev.queries, ensure_ascii=False),
-            "cited_note_ids_json": json.dumps(ev.cited_note_ids),
-            "cited_tweet_ids_json": json.dumps(ev.cited_tweet_ids),
+            "cited_note_ids_json": json.dumps(ev.cited_note_ids, ensure_ascii=False),
+            "cited_tweet_ids_json": json.dumps(ev.cited_tweet_ids, ensure_ascii=False),
             "reply_text": self._truncate(ev.reply_text),
             "reply_id": ev.reply_id,
             "sources_reply_id": ev.sources_reply_id,
@@ -227,8 +300,13 @@ class TablesEventsStore:
             "reply_posted_utc": ev.reply_posted_utc,
             "pipeline_ms": ev.pipeline_ms,
             "outcome": ev.outcome,
+            "reply_type": ev.reply_type,
             "error_class": ev.error_class,
             "error_detail": self._truncate(ev.error_detail, cap=1000),
+            "study_code": ev.study_code,
+            "participant_id": ev.participant_id,
+            "study_day": ev.study_day,
+            "bot_author_id": ev.bot_author_id,
         }
 
     def _drop_entity(self, drop: MentionDrop) -> dict[str, Any]:
@@ -257,24 +335,102 @@ class TablesEventsStore:
             "retweet_count": snap.retweet_count,
             "reply_count": snap.reply_count,
             "quote_count": snap.quote_count,
+            "mention_id": snap.mention_id,
+            "parent_id": snap.parent_id,
         }
         try:
             self._engagements.upsert_entity(entity)
         except Exception:
             logger.exception("write_engagement failed for reply %s; continuing", snap.reply_id)
 
-    def iter_reply_ids(self) -> list[tuple[str, str, datetime | None]]:
+    def write_reply_reply(self, reply: BotReplyReply) -> None:
+        entity = {
+            "PartitionKey": reply.collected_at_utc.strftime("%Y-%m"),
+            "RowKey": f"{reply.collected_at_utc.isoformat()}_{reply.reply_tweet_id}",
+            "bot_reply_id": reply.bot_reply_id,
+            "reply_tweet_id": reply.reply_tweet_id,
+            "author_id": reply.author_id,
+            "author_username": reply.author_username,
+            "text": self._truncate(reply.text),
+            "like_count": reply.like_count,
+            "collected_at_utc": reply.collected_at_utc,
+            "mention_id": reply.mention_id,
+            "tone": reply.tone,
+        }
+        try:
+            self._reply_replies.upsert_entity(entity)
+        except Exception:
+            logger.exception(
+                "write_reply_reply failed for reply_tweet_id=%s; continuing", reply.reply_tweet_id
+            )
+
+    def iter_reply_ids(self) -> list[tuple[str, str, datetime | None, str | None, str | None]]:
         result = []
         try:
-            for entity in self._events.list_entities(select=["reply_id", "tone", "reply_posted_utc"]):
+            for entity in self._events.list_entities(
+                select=["reply_id", "tone", "reply_posted_utc", "mention_id", "parent_id"]
+            ):
                 rid = entity.get("reply_id")
                 tone = entity.get("tone", "")
                 posted_at = entity.get("reply_posted_utc")
+                mention_id = entity.get("mention_id")
+                parent_id = entity.get("parent_id")
                 if rid:
-                    result.append((rid, tone, posted_at))
+                    result.append((rid, tone, posted_at, mention_id, parent_id))
         except Exception:
             logger.exception("iter_reply_ids failed")
         return result
+
+    _EVENT_SELECT = [
+        "RowKey", "mention_id", "author_id", "author_username", "tone", "outcome",
+        "received_at_utc", "pipeline_ms", "study_day", "study_code",
+        "reply_text", "parent_text", "reply_id", "bot_author_id",
+    ]
+    _DROP_SELECT = [
+        "RowKey", "mention_id", "author_id", "tone", "drop_reason", "received_at_utc",
+    ]
+
+    @staticmethod
+    def _normalize(d: dict) -> dict:
+        d.pop("odata.etag", None)
+        for k, v in list(d.items()):
+            if hasattr(v, "isoformat"):
+                d[k] = v.isoformat()
+        return d
+
+    def list_recent(self, limit: int = 50) -> list[dict]:
+        now = datetime.now(timezone.utc)
+        months = [now.strftime("%Y-%m")]
+        if now.day <= 3:
+            months.append((now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m"))
+        result = []
+        try:
+            for month in months:
+                for entity in self._events.query_entities(
+                    f"PartitionKey eq '{month}'", select=self._EVENT_SELECT
+                ):
+                    d = self._normalize(dict(entity))
+                    for fld in ("reply_text", "parent_text"):
+                        if d.get(fld):
+                            d[fld] = d[fld][:120]
+                    result.append(d)
+        except Exception:
+            logger.exception("list_recent failed")
+        result.sort(key=lambda e: e.get("RowKey", ""), reverse=True)
+        return result[:limit]
+
+    def list_recent_drops(self, limit: int = 20) -> list[dict]:
+        month = datetime.now(timezone.utc).strftime("%Y-%m")
+        result = []
+        try:
+            for entity in self._drops.query_entities(
+                f"PartitionKey eq '{month}'", select=self._DROP_SELECT
+            ):
+                result.append(self._normalize(dict(entity)))
+        except Exception:
+            logger.exception("list_recent_drops failed")
+        result.sort(key=lambda e: e.get("RowKey", ""), reverse=True)
+        return result[:limit]
 
     def _truncate(self, value: Optional[str], cap: int = _FIELD_CAP) -> Optional[str]:
         if value is None:
@@ -293,7 +449,13 @@ _default_lock = threading.Lock()
 def _build_default_store() -> EventsStore:
     backend = os.getenv("DERAD_EVENTS_BACKEND", "memory").lower()
     if backend == "tables":
-        endpoint = os.environ["DERAD_TABLES_ENDPOINT"]
+        endpoint = os.getenv("DERAD_TABLES_ENDPOINT")
+        if not endpoint:
+            logger.warning(
+                "DERAD_EVENTS_BACKEND=tables but DERAD_TABLES_ENDPOINT is unset; "
+                "falling back to InMemoryEventsStore"
+            )
+            return InMemoryEventsStore()
         logger.info("Events store: TablesEventsStore at %s", endpoint)
         return TablesEventsStore(endpoint)
     logger.info("Events store: InMemoryEventsStore")
@@ -343,6 +505,31 @@ def log_engagement_snapshot(snap: EngagementSnapshot) -> None:
         logger.exception("log_engagement_snapshot swallowed exception for reply %s", snap.reply_id)
 
 
+def log_reply_reply(reply: BotReplyReply) -> None:
+    """Best-effort write. Never raises."""
+    try:
+        get_store().write_reply_reply(reply)
+    except Exception:
+        logger.exception(
+            "log_reply_reply swallowed exception for reply_tweet_id=%s", reply.reply_tweet_id
+        )
+
+
 def utcnow() -> datetime:
     """Single source of UTC-now so timings line up across the codebase."""
     return datetime.now(timezone.utc)
+
+
+# Shared constants for the 3-day bystander measurement window.
+THREE_DAY_MIN_AGE = timedelta(days=3)
+MEASUREMENT_WINDOW = timedelta(days=1)
+
+
+def in_three_day_window(posted_at: Optional[datetime], now: datetime) -> bool:
+    """True if posted_at falls in the [3-day, 4-day) window relative to now."""
+    if posted_at is None:
+        return False
+    if posted_at.tzinfo is None:
+        posted_at = posted_at.replace(tzinfo=timezone.utc)
+    age = now - posted_at
+    return THREE_DAY_MIN_AGE <= age < THREE_DAY_MIN_AGE + MEASUREMENT_WINDOW

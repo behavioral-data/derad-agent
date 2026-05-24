@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DeRad Agent — Collaborator Onboarding</title>
+  <link rel="stylesheet" href="assets/html-design-system.css">
+</head>
+<body data-theme="light">
+<div class="page-wrap">
+
+  <header class="page-header">
+    <h1>DeRad Agent — Collaborator Onboarding</h1>
+    <p class="subtitle">Everything you need to go from zero to full dev+deploy access.</p>
+  </header>
+
+  <!-- ── Overview ─────────────────────────────────────────────────────────── -->
+  <section>
+    <h2>What this system does</h2>
+    <p>
+      The DeRad Agent monitors mentions of three X (Twitter) bot accounts
+      (<strong>@aggiexbot</strong>, <strong>@nelliexbot</strong>, <strong>@eddiexbot</strong>)
+      via the X Filtered Stream API. When a registered study participant mentions a bot while
+      replying to a post containing a claim, the agent fetches the parent post, searches
+      Community Notes for relevant evidence, generates a tone-matched reply using an LLM,
+      and posts it. All events are stored in Azure Table Storage.
+    </p>
+    <div class="grid-3" style="margin-top: var(--grid-2)">
+      <div class="panel">
+        <div class="panel-head"><span class="chip chip-active">streaming</span> Ingest</div>
+        <p>X Filtered Stream → mention dispatch → dedup/rate-limit guard</p>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="chip chip-active">LLM</span> Pipeline</div>
+        <p>Fetch parent tweet → embed query → retrieve notes → generate reply (GPT / Grok)</p>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="chip chip-active">storage</span> Output</div>
+        <p>Post reply on X → write MentionEvent row to Azure Tables → log to App Insights</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Step 1: Get Azure access ─────────────────────────────────────────── -->
+  <section>
+    <h2>Step 1 — Get Azure access</h2>
+    <div class="callout callout-info">
+      Ask Advait to run this once with your UW email:
+      <pre><code>bash scripts/grant-access.sh you@uw.edu</code></pre>
+      This grants Contributor on the resource group, Key Vault Secrets User,
+      Storage Table Data Contributor, and AcrPush — everything you need.
+    </div>
+    <p>Once granted, verify with:</p>
+    <pre><code>az login
+az account set --subscription faac48db-165b-4928-a952-7d769267fe0b
+az webapp show --name azapplikxqqfjcgk72 --resource-group rg-derad-agent --query name -o tsv
+# should print: azapplikxqqfjcgk72</code></pre>
+  </section>
+
+  <!-- ── Step 2: Clone + install ──────────────────────────────────────────── -->
+  <section>
+    <h2>Step 2 — Clone and install</h2>
+    <pre><code>git clone &lt;repo-url&gt;
+cd derad-agent
+pip install -e .</code></pre>
+    <p>Python 3.9+ required. A <code>conda</code> or <code>venv</code> environment is recommended.</p>
+  </section>
+
+  <!-- ── Step 3: Bootstrap .env ───────────────────────────────────────────── -->
+  <section>
+    <h2>Step 3 — Bootstrap your <code>.env</code></h2>
+    <p>
+      All secrets live in Azure Key Vault. The setup script pulls them all and writes
+      <code>derad_agent/llm/.env</code> for you — no manual credential sharing needed.
+    </p>
+    <pre><code>bash scripts/setup-env.sh</code></pre>
+    <div class="callout callout-warn">
+      <strong>Never commit <code>.env</code></strong> — it is in <code>.gitignore</code>.
+      Re-run <code>setup-env.sh</code> after key rotations.
+    </div>
+    <p>The script sets <code>DERAD_INGEST_MODE=off</code> so your local app never opens a
+    second stream connection and disrupts production. Do not change this.</p>
+  </section>
+
+  <!-- ── Step 4: Run locally ──────────────────────────────────────────────── -->
+  <section>
+    <h2>Step 4 — Run locally</h2>
+    <pre><code>flask --app derad_agent.app.app run --port 5001</code></pre>
+    <p>The dashboard is at <a href="http://localhost:5001/dashboard">http://localhost:5001/dashboard</a>.
+    With ingest off, the stream panel will show disconnected — that's expected.
+    You can still use all CLI tools and test the pipeline manually.</p>
+
+    <h3>Useful CLI commands</h3>
+    <div class="data-table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>derad-ask "some claim"</code></td><td>Run the full pipeline against a claim and print the reply</td></tr>
+          <tr><td><code>derad-register-participant --username Test182205 --tone satirical</code></td><td>Add a participant to the allowlist</td></tr>
+          <tr><td><code>derad-list-participants</code></td><td>Show all registered participants</td></tr>
+          <tr><td><code>derad-export --out events.csv</code></td><td>Export all events from Azure Tables to CSV</td></tr>
+          <tr><td><code>derad-embed-notes</code></td><td>Re-embed the Community Notes index (slow)</td></tr>
+          <tr><td><code>derad-daily-summary</code></td><td>Print a daily metrics summary</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── Step 5: Deploy ───────────────────────────────────────────────────── -->
+  <section>
+    <h2>Step 5 — Deploy to production</h2>
+    <div class="callout callout-warn">
+      <strong>Only one person deploys at a time.</strong> Coordinate on Slack before pushing
+      a new image — a restart drops the stream connection for ~60 seconds.
+    </div>
+
+    <h3>Build and push a new image</h3>
+    <pre><code># From the repo root — builds in Azure, no local Docker needed
+az acr build \
+  --registry azacrlikxqqfjcgk72 \
+  --image derad-agent:latest \
+  --file Dockerfile \
+  . 2>&amp;1 | tail -5</code></pre>
+
+    <h3>Deploy the new image</h3>
+    <pre><code># Get the new digest
+DIGEST=$(az acr repository show \
+  --name azacrlikxqqfjcgk72 \
+  --image "derad-agent:latest" \
+  --query digest -o tsv)
+
+# Pin App Service to it (triggers restart)
+az webapp config container set \
+  --name azapplikxqqfjcgk72 \
+  --resource-group rg-derad-agent \
+  --container-image-name "azacrlikxqqfjcgk72.azurecr.io/derad-agent@$DIGEST"</code></pre>
+
+    <h3>Verify the deployment</h3>
+    <pre><code># Watch the live log stream for "Filtered stream connected"
+curl -s "https://azapplikxqqfjcgk72.azurewebsites.net/stream/logs" | grep "data:" | grep -E "stream|rule|error"</code></pre>
+  </section>
+
+  <!-- ── Key resources ────────────────────────────────────────────────────── -->
+  <section>
+    <h2>Key Azure resources</h2>
+    <div class="data-table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Resource</th><th>Name</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td>Resource group</td><td><code>rg-derad-agent</code></td><td>Contains everything below</td></tr>
+          <tr><td>App Service</td><td><code>azapplikxqqfjcgk72</code></td><td>Runs the Flask app + streamer in Docker</td></tr>
+          <tr><td>Container Registry</td><td><code>azacrlikxqqfjcgk72</code></td><td>Stores Docker images</td></tr>
+          <tr><td>Storage Account</td><td><code>azsalikxqqfjcgk72</code></td><td>Azure Tables: events, drops, participants, dedup</td></tr>
+          <tr><td>Key Vault</td><td><code>azkvlikxqqfjcgk72</code></td><td>All secrets (X credentials, OpenAI key)</td></tr>
+          <tr><td>App Insights</td><td><code>appilikxqqfjcgk72</code></td><td>Telemetry and metrics</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Production URLs</h3>
+    <div class="data-table-wrap">
+      <table class="data-table">
+        <thead><tr><th>URL</th><th>What it is</th></tr></thead>
+        <tbody>
+          <tr><td><code>https://azapplikxqqfjcgk72.azurewebsites.net/dashboard</code></td><td>Live dashboard — logs, events, metrics</td></tr>
+          <tr><td><code>https://azapplikxqqfjcgk72.azurewebsites.net/api/activity</code></td><td>JSON API for dashboard data</td></tr>
+          <tr><td><code>https://azapplikxqqfjcgk72.azurewebsites.net/healthz</code></td><td>Health check</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── X stream warning ─────────────────────────────────────────────────── -->
+  <section>
+    <h2>Critical: X Filtered Stream</h2>
+    <div class="callout callout-warn">
+      <strong>The X API allows only one active filtered stream connection per bearer token.</strong>
+      If a local app starts the streamer (ingest mode = streaming), it will steal the connection
+      from production, causing 429 errors and bot downtime.<br><br>
+      <strong>Always keep <code>DERAD_INGEST_MODE=off</code> in your local <code>.env</code>.</strong>
+      The <code>setup-env.sh</code> script sets this automatically.
+    </div>
+  </section>
+
+</div>
+<script src="assets/html-design-system.js"></script>
+</body>
+</html>

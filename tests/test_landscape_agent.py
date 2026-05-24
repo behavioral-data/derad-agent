@@ -118,7 +118,7 @@ def test_run_landscape_agent_end_to_end(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         "derad_agent.runtime.landscape_agent.step_1_generate_queries",
-        lambda **kwargs: (["q1"], None, "{}"),
+        lambda **kwargs: (True, ["q1"]),
     )
 
     captured = {}
@@ -169,7 +169,6 @@ def test_retrieve_statement_landscape_resolves_notes_dir(monkeypatch, tmp_path):
         return {
             "statement": kwargs["statement"],
             "queries": [],
-            "planner_thinking": None,
             "retrieved_tweets": [],
             "selected_notes": [],
             "reply": {"statement": kwargs["statement"], "response": "", "reasons": []},

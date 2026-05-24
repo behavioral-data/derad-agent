@@ -8,16 +8,16 @@
 
 ## Overview
 
-The agent receives X (Twitter) mention events via webhooks, fetches the parent tweet being fact-checked, retrieves relevant Community Notes, and posts a reply. All three bot accounts (agreeable / neutral / satirical) share a single webhook URL; routing is by `for_user_id` in the event payload.
+The agent ingests X (Twitter) mentions via the **Filtered Stream API** (`GET /2/tweets/search/stream`). On startup, the app connects outbound to X and keeps the connection open permanently. X pushes matching tweets in real time; no public webhook URL or CRC handshake is required.
 
 ```
-X Account Activity API
-  └─ POST /mentions  (HMAC-signed webhook)
-       ├─ verifies signature
-       ├─ routes to tone by for_user_id
+X Filtered Stream API (persistent SSE)
+  └─ GET /2/tweets/search/stream
+       ├─ rules synced at startup (one rule per bot, tagged by tone)
+       ├─ stream events contain matching_rules[].tag → tone routing
        ├─ fetches parent tweet (X API v2)
        ├─ runs LLM + embedding pipeline (~40 s)
-       └─ posts reply (X API v2)
+       └─ posts reply (X API v2, OAuth 1.0a per-bot)
 ```
 
 Results (reply text, outcome, source notes) are written asynchronously to the `MentionEvents` table in Azure Table Storage.
@@ -26,12 +26,28 @@ Results (reply text, outcome, source notes) are written asynchronously to the `M
 
 ## Endpoints
 
-| Route | Method | Purpose |
-|-------|--------|---------|
-| `/mentions` | `GET` | CRC handshake — responds with `response_token` |
-| `/mentions` | `POST` | Webhook delivery — processes mention events |
-| `/healthz` | `GET` | Readiness probe — returns `{"ok": true, "index_loaded": true/false}` |
-| `/info` | `GET` | Human-readable reply page linked from bot tweets |
+| Route      | Method | Purpose                                                              |
+| ---------- | ------ | -------------------------------------------------------------------- |
+| `/healthz` | `GET`  | Readiness probe — returns `{"ok": true, "index_loaded": true/false}` |
+| `/info`    | `GET`  | Human-readable reply page linked from bot tweets                     |
+
+There is no `/mentions` webhook endpoint. The stream runs as a background thread inside the app process.
+
+---
+
+## How Tone Routing Works
+
+At startup, `streamer.py` syncs stream rules so each bot handle has exactly one tagged rule:
+
+```json
+[
+  {"value": "@aggiexbot", "tag": "agreeable"},
+  {"value": "@nelliexbot", "tag": "neutral"},
+  {"value": "@eddiexbot",  "tag": "satirical"}
+]
+```
+
+When a stream event arrives, `matching_rules[0].tag` identifies the target bot tone. The tweet is reshaped into the expected dict format and passed to `_dispatch_tweet(tone, tweet, received_at_utc)`.
 
 ---
 
@@ -39,32 +55,17 @@ Results (reply text, outcome, source notes) are written asynchronously to the `M
 
 ### 1. Create / configure the X app
 
-- Tier: **Basic** (webhooks require Account Activity API, which needs PPU or higher)
+- Tier: **Basic** or higher (Filtered Stream requires PPU or Basic access)
 - Permissions: **Read + Write** (needs to post replies)
-- App type: **Web App / Bot** (generates both API key+secret and access tokens)
+- App type: **Web App / Bot** (generates API key+secret and per-bot access tokens)
 
-### 2. Register the webhook URL
+### 2. No webhook registration needed
 
-```bash
-# Replace <bearer_token> with your app's bearer token
-curl -X POST "https://api.twitter.com/2/account_activity/webhooks" \
-  -H "Authorization: Bearer <bearer_token>" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://azapplikxqqfjcgk72.azurewebsites.net/mentions"}'
-```
+Filtered Stream is a pull-based API. The app connects to X, not the other way around. There is no URL to register and no CRC challenge to answer.
 
-X will immediately send a GET CRC challenge to `/mentions?crc_token=…` — the
-app handles it automatically and responds with the HMAC-SHA256 digest.
+### 3. Bearer token
 
-### 3. Subscribe each bot account
-
-For each bot account, subscribe its user ID to the webhook:
-
-```bash
-# Must be authenticated as the bot user (use its access token)
-curl -X POST "https://api.twitter.com/2/account_activity/webhooks/<webhook_id>/subscriptions" \
-  -H "Authorization: OAuth ..."
-```
+The Filtered Stream uses **Bearer token auth** (app-only). The bearer token is stored in Key Vault as `x-bearer-token`. Posting replies uses per-bot **OAuth 1.0a access tokens**.
 
 ---
 
@@ -81,6 +82,9 @@ KV="azkvlikxqqfjcgk72"
 az keyvault secret set --vault-name $KV --name x-api-key           --value "<API_KEY>"
 az keyvault secret set --vault-name $KV --name x-api-secret        --value "<API_SECRET>"
 
+# Bearer token — for Filtered Stream (app-only auth)
+az keyvault secret set --vault-name $KV --name x-bearer-token      --value "<BEARER_TOKEN>"
+
 # Per-bot OAuth 1.0a access tokens (one set per bot account)
 az keyvault secret set --vault-name $KV --name x-access-token-agreeable        --value "<TOKEN>"
 az keyvault secret set --vault-name $KV --name x-access-token-secret-agreeable --value "<SECRET>"
@@ -89,13 +93,10 @@ az keyvault secret set --vault-name $KV --name x-access-token-secret-neutral   -
 az keyvault secret set --vault-name $KV --name x-access-token-satirical        --value "<TOKEN>"
 az keyvault secret set --vault-name $KV --name x-access-token-secret-satirical --value "<SECRET>"
 
-# Bot user IDs (numeric, not handles) — enables tone routing and self-reply guard
+# Bot user IDs (numeric, not handles) — enables self-reply guard
 az keyvault secret set --vault-name $KV --name bot-user-id-agreeable --value "<NUMERIC_USER_ID>"
 az keyvault secret set --vault-name $KV --name bot-user-id-neutral   --value "<NUMERIC_USER_ID>"
 az keyvault secret set --vault-name $KV --name bot-user-id-satirical --value "<NUMERIC_USER_ID>"
-
-# HMAC webhook secret — set this to the value from the X webhook registration response
-az keyvault secret set --vault-name $KV --name x-api-secret --value "<CONSUMER_SECRET>"
 ```
 
 After updating secrets, restart the App Service to pick them up:
@@ -108,10 +109,12 @@ az webapp restart --name azapplikxqqfjcgk72 --resource-group rg-derad-agent
 
 ## App Settings to Flip
 
-| Setting | Current | Production value |
-|---------|---------|-----------------|
-| `DERAD_DRY_RUN` | `true` | `false` |
-| `DERAD_ALLOWED_AUTHOR_IDS` | `111,222,333` (test IDs) | real bot author IDs |
+| Setting                    | Current                  | Production value    |
+| -------------------------- | ------------------------ | ------------------- |
+| `DERAD_DRY_RUN`            | `true`                   | `false`             |
+
+The bot now replies to every mention — there is no allow-list. Author registration in
+the Participants table is used for study tracking metadata only.
 
 Update via:
 
@@ -124,34 +127,23 @@ az webapp config appsettings set \
 
 ---
 
-## Webhook Payload Format
+## Stream Event Format
 
-The app expects the standard X Account Activity API v1.1 payload:
+The Filtered Stream delivers v2 tweet objects. The streamer reshapes each event into a v1-style dict for `_dispatch_tweet`:
 
 ```json
 {
-  "for_user_id": "<bot_numeric_user_id>",
-  "tweet_create_events": [{
-    "id_str": "<mention_tweet_id>",
-    "text": "@bot_handle <question or claim>",
-    "user": {
-      "id_str": "<author_user_id>",
-      "screen_name": "<author_handle>"
-    },
-    "in_reply_to_status_id_str": "<parent_tweet_id_being_fact_checked>"
-  }]
+  "id_str": "<mention_tweet_id>",
+  "text": "@bot_handle <question or claim>",
+  "in_reply_to_status_id_str": "<parent_tweet_id_being_fact_checked>",
+  "user": {
+    "id_str": "<author_user_id>",
+    "username": "<author_handle>"
+  }
 }
 ```
 
-**Routing:** `for_user_id` maps to tone:
-- agreeable bot's user ID → `agreeable` tone
-- neutral bot's user ID → `neutral` tone  
-- satirical bot's user ID → `satirical` tone
-
-**Signature:** Every POST must include the header:
-```
-X-Twitter-Webhooks-Signature: sha256=<base64(HMAC-SHA256(body, consumer_secret))>
-```
+The tone is extracted from `matching_rules[0].tag`, not from the tweet payload.
 
 ---
 
@@ -160,15 +152,14 @@ X-Twitter-Webhooks-Signature: sha256=<base64(HMAC-SHA256(body, consumer_secret))
 While X credentials are still `placeholder`, use dry-run mode:
 
 ```bash
-# The app is currently running with DERAD_DRY_RUN=true
-python scripts/test_webhook.py --text "vaccines cause autism — is this true?"
+# DERAD_INGEST_MODE=streaming must be set; the streamer will connect and print events
+# DERAD_DRY_RUN=true skips the actual X reply post
+
+# In dry-run, the mention text itself is used as the statement (no parent fetch needed)
+# Trigger a test by sending a mention from an allowed account to any of the three bot handles
 ```
 
-The script signs the request with the dev HMAC secret and POSTs to `/mentions`.
-The pipeline runs (~40 s) but skips X API calls, using the mention text as the
-statement instead.
-
-**To see the generated reply** (wait ~40 s after sending):
+**To see the generated reply** (wait ~40 s after the mention is ingested):
 
 ```python
 from azure.data.tables import TableServiceClient
@@ -189,22 +180,20 @@ You need the `Storage Table Data Reader` role on `azsalikxqqfjcgk72` — ask @ad
 
 ## Tone Routing Reference
 
-| Bot handle | Tone | KV secret for user ID |
-|-----------|------|----------------------|
-| `@aggie_bot` | agreeable | `bot-user-id-agreeable` |
-| `@nellie_bot` | neutral | `bot-user-id-neutral` |
-| `@eddie_bot` | satirical | `bot-user-id-satirical` |
+| Bot handle    | Tone      | KV secret for user ID   |
+| ------------- | --------- | ----------------------- |
+| `@aggiexbot`  | agreeable | `bot-user-id-agreeable` |
+| `@nelliexbot` | neutral   | `bot-user-id-neutral`   |
+| `@eddiexbot`  | satirical | `bot-user-id-satirical` |
 
 ---
 
 ## Checklist: Going Live
 
 - [ ] Create X developer app with Read + Write permissions
-- [ ] Generate API key/secret and per-bot access token pairs
-- [ ] Register webhook URL with X Account Activity API
-- [ ] Subscribe each bot account to the webhook
-- [ ] Populate all 10 X-related KV secrets (keys, tokens, user IDs)
+- [ ] Generate API key/secret, bearer token, and per-bot access token pairs
+- [ ] Populate all KV secrets (bearer token, keys, per-bot tokens, user IDs)
 - [ ] Set `DERAD_DRY_RUN=false` in App Service
-- [ ] Update `DERAD_ALLOWED_AUTHOR_IDS` to real allowed author IDs
 - [ ] Restart App Service and verify `/healthz` returns `index_loaded: true`
+- [ ] Check App Service logs for "Filtered stream connected" — confirms the stream is live
 - [ ] Send a test mention from an allowed account and check `MentionEvents` table
