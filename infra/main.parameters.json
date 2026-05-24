@@ -12,7 +12,7 @@
       "value": "${APP_SERVICE_PLAN_SKU=B2}"
     },
     "botHandle": {
-      "value": "${BOT_HANDLE=eddie_bot}"
+      "value": "${BOT_HANDLE=eddiexbot}"
     }
   }
 }
