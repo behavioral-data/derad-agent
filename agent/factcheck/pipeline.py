@@ -118,6 +118,9 @@ def _attached_image_records(images: list[ImageEvidence]) -> list[AttachedImage]:
     return records
 
 
+_log = __import__("logging").getLogger("agent.factcheck.pipeline")
+
+
 def run_pipeline(
     claim_text: str,
     *,
@@ -138,12 +141,20 @@ def run_pipeline(
     invocation_time = datetime.now(timezone.utc)
     image_urls = image_urls or []
     modality: Modality = "mixed" if image_urls and claim_text.strip() else ("image" if image_urls else "text")
+    _log.info(
+        "run_pipeline[%s]: starting (modality=%s, claim_chars=%d, images=%d)",
+        invocation_id, modality, len(claim_text), len(image_urls),
+    )
 
     image_evidence: list[ImageEvidence] = []
     if image_urls:
+        _log.info("run_pipeline[%s]: Stage 1.5 entering with %d image(s)", invocation_id, len(image_urls))
         image_evidence = _run_multimodal(image_urls, backend)
+        _log.info("run_pipeline[%s]: Stage 1.5 complete (%d evidence)", invocation_id, len(image_evidence))
 
+    _log.info("run_pipeline[%s]: Stage 4 — text search", invocation_id)
     hits = backend.search(claim_text, top_k=5)
+    _log.info("run_pipeline[%s]: Stage 4 done (%d hits)", invocation_id, len(hits))
     text_evidence = _build_evidence(claim_text, hits)
 
     # Roll image-provenance hits into the source-quality table too — Claude is
@@ -159,12 +170,14 @@ def run_pipeline(
         lens_1 = Lens1(narrative="No evidence retrieved.")
         verdict_label = "NotEnoughEvidence"
     else:
+        _log.info("run_pipeline[%s]: Stage 4.5 — reconcile", invocation_id)
         recon = reconcile(
             central_claim_text=claim_text,
             evidence=text_evidence,
             source_quality_table=quality_table,
             image_evidence=image_evidence or None,
         )
+        _log.info("run_pipeline[%s]: Stage 4.5 done", invocation_id)
         text_evidence = [
             Evidence(
                 question=e.question,
@@ -181,12 +194,18 @@ def run_pipeline(
         verdict_label = derive_verdict(findings, quality_table)
     evidence = text_evidence
 
+    _log.info("run_pipeline[%s]: Stage 5 — audit (declared=%s)", invocation_id, verdict_label)
     audit_result = audit(
         declared_verdict=verdict_label,
         findings=findings,
         source_quality_table=quality_table,
         presentation_payload=payload,
         tone_neutral_justification=justification,
+    )
+    _log.info(
+        "run_pipeline[%s]: Stage 5 audit %s (failures=%d)",
+        invocation_id, "passed" if audit_result.passed else "FAILED → NEI",
+        len(audit_result.failures),
     )
     if not audit_result.passed:
         verdict_label = "NotEnoughEvidence"

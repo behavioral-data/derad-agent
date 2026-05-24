@@ -417,6 +417,7 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         metrics.pipeline_latency_ms.record(ev.pipeline_ms, {"tone": tone, "outcome": outcome})
 
     try:
+        logger.info("process_mention[%s]: fetching parent %s", mention_id, parent_id)
         snap = fetch_tweet(parent_id)
         if snap is None or not snap.text:
             logger.info("Parent tweet %s unreachable; skipping mention %s", parent_id, mention_id)
@@ -434,11 +435,19 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             logger.info("DRY_RUN: parent_text=%r", statement)
 
         parent_image_urls = list(snap.image_urls or [])
+        logger.info(
+            "process_mention[%s]: parent fetched (text_chars=%d, images=%d) — entering generate_reply",
+            mention_id, len(statement), len(parent_image_urls),
+        )
         reply = generate_reply(
             statement=statement,
             exclude_tweet_id=parent_id,
             tone=tone,
             image_urls=parent_image_urls,
+        )
+        logger.info(
+            "process_mention[%s]: generate_reply returned (reply_text_chars=%d, sources=%s)",
+            mention_id, len(reply.get("text") or ""), reply.get("sources"),
         )
         ev.queries = reply.get("queries") or []
         ev.cited_tweet_ids = reply.get("all_cited_tweet_ids") or []
