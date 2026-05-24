@@ -15,7 +15,7 @@ except ImportError:
                 return self.template.format(**kwargs)
 
 
-PLANNER_TEMPLATE = """Your task is to assess a tweet and, if it contains checkable factual claims, generate targeted search queries for finding relevant Community Notes.
+PLANNER_TEMPLATE = """Your task is to assess a tweet and, if it contains checkable factual claims, generate targeted search queries for finding relevant Community Notes to verify the claims.
 
 Community Notes are crowd-sourced corrections to misinformation on X. They cover verifiable factual claims — statistics, events, policies, quotes from public figures, scientific consensus.
 
@@ -91,6 +91,11 @@ OUTPUT:
 
 Use information from Community Notes in EVIDENCE_NOTES to create a response to the CLAIM that meets the above criteria.
 Community Notes are crowd-sourced fact-checking messages from Twitter/X.
+Each note has a "note" field (the text), a "note_id", a "tweet_id", and optional "evidence_links".
+
+These notes have already been filtered for relevance — treat them all as valid evidence.
+Read ALL of them. For determining what is actually true, weight recent notes more heavily
+than older ones.
 
 IMPORTANT — Community Notes are written in response to a specific tweet.
 Only reference community notes that discuss general facts, NOT specific details about tweets.
@@ -106,12 +111,6 @@ Never use "will," "would need to," or "pending" for events already past as of
 today's date.
 
 Today's date: {current_date}.
-
-CLAIM:
-{statement}
-
-EVIDENCE_NOTES_JSON:
-{evidence_notes_json}
 
 Each note has a "note" field (the text), a "note_id", a "tweet_id", and optional "evidence_links".
 
@@ -140,6 +139,11 @@ Rules:
 - Include evidence_links only when source URLs appear in the note.
 - If the evidence is mixed or unclear, say so plainly.
 - If there are no evidence notes, return an empty reasons list and say the evidence is insufficient.
+
+CLAIM: {statement}
+
+EVIDENCE NOTES (JSON array, sorted most-recent first):
+{evidence_notes_json}
 """
 
 
@@ -181,6 +185,11 @@ OUTPUT:
 
 Use information from Community Notes in EVIDENCE_NOTES to create a response to the CLAIM that meets the above criteria.
 Community Notes are crowd-sourced fact-checking messages from Twitter/X.
+Each note has a "note" field (the text), a "note_id", a "tweet_id", and optional "evidence_links".
+
+These notes have already been filtered for relevance — treat them all as valid evidence.
+Read ALL of them. For determining what is actually true, weight recent notes more heavily
+than older ones.
 
 IMPORTANT — Community Notes are written in response to a specific tweet.
 Only reference community notes that discuss general facts, NOT specific details about tweets.
@@ -196,14 +205,6 @@ Never use "will," "would need to," or "pending" for events already past as of
 today's date.
 
 Today's date: {current_date}.
-
-CLAIM:
-{statement}
-
-EVIDENCE_NOTES_JSON:
-{evidence_notes_json}
-
-Each note has a "note" field (the text), a "note_id", a "tweet_id", and optional "evidence_links".
 
 Run STEP 1-4 internally, then output JSON only.
 
@@ -231,6 +232,11 @@ Rules:
 - Include evidence_links only when source URLs appear in the note.
 - If the evidence is mixed or unclear, say so plainly.
 - If there are no evidence notes, return an empty reasons list and say the evidence is insufficient.
+
+CLAIM: {statement}
+
+EVIDENCE NOTES (JSON array, sorted most-recent first):
+{evidence_notes_json}
 """
 
 
@@ -337,6 +343,12 @@ OUTPUT:
 
 Use information from Community Notes in EVIDENCE_NOTES to create a response to the CLAIM that meets the above criteria.
 Community Notes are crowd-sourced fact-checking messages from Twitter/X.
+Each note has a "note" field (the text), a "note_id", a "tweet_id", and optional "evidence_links".
+
+These notes have already been filtered for relevance — treat them all as valid evidence.
+Read ALL of them. For determining what is actually true, weight recent notes more heavily
+than older ones. For finding the sharpest comic angle, use whichever note gives you the
+most specific and absurd detail, regardless of recency.
 
 IMPORTANT — Community Notes are written in response to a specific tweet.
 Only reference community notes that discuss general facts, NOT specific details about tweets.
@@ -352,18 +364,6 @@ Never use "will," "would need to," or "pending" for events already past as of
 today's date.
 
 Today's date: {current_date}.
-
-CLAIM: {statement}
-
-EVIDENCE NOTES (JSON array, sorted most-recent first):
-{evidence_notes_json}
-
-Each note has a "note" field (the text), a "note_id", a "tweet_id", and optional "evidence_links".
-
-These notes have already been filtered for relevance — treat them all as valid evidence.
-Read ALL of them. For determining what is actually true, weight recent notes more heavily
-than older ones. For finding the sharpest comic angle, use whichever note gives you the
-most specific and absurd detail, regardless of recency.
 
 Run STEP 1-4 internally using the full set of notes, then output JSON only:
 {{
@@ -382,6 +382,11 @@ Rules:
 - Ground every reason in a specific note. Do not invent note_id or tweet_id values.
 - Return 1-3 reasons — the notes that most directly ground the joke.
 - Include evidence_links only when source URLs appear in the note.
+
+CLAIM: {statement}
+
+EVIDENCE NOTES (JSON array, sorted most-recent first):
+{evidence_notes_json}
 """
 
 NO_FACTCHECK_AGREEABLE_TEMPLATE = """You are responding to a tweet that doesn't contain a factual claim requiring fact-checking. Be warm, genuine, and never condescending.
