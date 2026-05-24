@@ -89,7 +89,13 @@ OUTPUT:
 
 # YOUR TASK
 
-Today's date: {current_date}.
+Use information from Community Notes in EVIDENCE_NOTES to create a response to the CLAIM that meets the above criteria.
+Community Notes are crowd-sourced fact-checking messages from Twitter/X.
+
+IMPORTANT — Community Notes are written in response to a specific tweet.
+Only reference community notes that discuss general facts, NOT specific details about tweets.
+Notes that discuss specific details about tweets might not generalize to this one.
+If a note says, "this is AI-generated," you should not assume that the CLAIM is AI-generated.
 
 IMPORTANT — Community Notes are written at a point in time and may use future
 tense for events that have since occurred. Override any note's temporal framing
@@ -98,6 +104,8 @@ today is after January 2026, that person is already in office. If a note refers
 to an upcoming election that has since been decided, the result is settled history.
 Never use "will," "would need to," or "pending" for events already past as of
 today's date.
+
+Today's date: {current_date}.
 
 CLAIM:
 {statement}
@@ -171,7 +179,13 @@ OUTPUT:
 
 # YOUR TASK
 
-Today's date: {current_date}.
+Use information from Community Notes in EVIDENCE_NOTES to create a response to the CLAIM that meets the above criteria.
+Community Notes are crowd-sourced fact-checking messages from Twitter/X.
+
+IMPORTANT — Community Notes are written in response to a specific tweet.
+Only reference community notes that discuss general facts, NOT specific details about tweets.
+Notes that discuss specific details about tweets might not generalize to this one.
+If a note says, "this is AI-generated," you should not assume that the CLAIM is AI-generated.
 
 IMPORTANT — Community Notes are written at a point in time and may use future
 tense for events that have since occurred. Override any note's temporal framing
@@ -180,6 +194,8 @@ today is after January 2026, that person is already in office. If a note refers
 to an upcoming election that has since been decided, the result is settled history.
 Never use "will," "would need to," or "pending" for events already past as of
 today's date.
+
+Today's date: {current_date}.
 
 CLAIM:
 {statement}
@@ -319,7 +335,13 @@ OUTPUT:
 
 # YOUR TASK
 
-Today's date: {current_date}.
+Use information from Community Notes in EVIDENCE_NOTES to create a response to the CLAIM that meets the above criteria.
+Community Notes are crowd-sourced fact-checking messages from Twitter/X.
+
+IMPORTANT — Community Notes are written in response to a specific tweet.
+Only reference community notes that discuss general facts, NOT specific details about tweets.
+Notes that discuss specific details about tweets might not generalize to this one.
+If a note says, "this is AI-generated," you should not assume that the CLAIM is AI-generated.
 
 IMPORTANT — Community Notes are written at a point in time and may use future
 tense for events that have since occurred. Override any note's temporal framing
@@ -328,6 +350,8 @@ today is after January 2026, that person is already in office. If a note refers
 to an upcoming election that has since been decided, the result is settled history.
 Never use "will," "would need to," or "pending" for events already past as of
 today's date.
+
+Today's date: {current_date}.
 
 CLAIM: {statement}
 
