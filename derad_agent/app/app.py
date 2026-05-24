@@ -456,9 +456,13 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             parent_id=parent_id,
             parent_author_username=ev.parent_author_username or "",
         )
-        with app.app_context():
-            info_url = url_for("info_short", token=token, _external=True)
-        reply_text = _append_url(reply["text"], info_url)
+
+        if reply.get("sources"):
+            with app.app_context():
+                info_url = url_for("info_short", token=token, _external=True)
+            reply_text = _append_url(reply["text"], info_url)
+        else:
+            reply_text = reply["text"]
         ev.reply_text = reply_text
 
         if DRY_RUN:
@@ -486,16 +490,7 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
                 received_at_utc.date() - participant.enrolled_at_utc.date()
             ).days + 1
 
-        sources_outcome = "replied"
-        if POST_SOURCES_TWEET and reply.get("sources"):
-            with app.app_context():
-                info_url = _build_info_url(tone, reply.get("tweets") or [], reply.get("notes") or [], reply_id=reply_id)
-            sources_text = _fit_sources_text(reply["sources"], info_url)
-            ev.sources_reply_id = post_reply(parent_id=reply_id, reply_text=sources_text, tone=tone)
-            if ev.sources_reply_id is None:
-                sources_outcome = "replied_no_sources"
-
-        _finalize(sources_outcome)
+        _finalize("replied")
 
     except Exception as exc:
         logger.exception("Pipeline failed for mention %s (tone=%s)", mention_id, tone)
