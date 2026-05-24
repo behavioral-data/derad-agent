@@ -3,7 +3,7 @@
 import json
 import pytest
 
-from derad_agent.runtime.steps.relevance_filter import step_filter_notes_by_relevance
+from agent.runtime.steps.relevance_filter import step_filter_notes_by_relevance
 
 
 def _note(note_id, summary="some text"):
@@ -39,11 +39,11 @@ def test_filter_returns_subset(monkeypatch):
     chain = _make_llm_response(["n1", "n3"])
 
     monkeypatch.setattr(
-        "derad_agent.runtime.steps.relevance_filter.get_llm",
+        "agent.runtime.steps.relevance_filter.get_llm",
         lambda **_: object(),  # not used directly; chain is patched below
     )
     monkeypatch.setattr(
-        "derad_agent.runtime.steps.relevance_filter.get_relevance_filter_prompt",
+        "agent.runtime.steps.relevance_filter.get_relevance_filter_prompt",
         lambda: type("P", (), {"__or__": lambda self, _: chain})(),
     )
 
@@ -62,11 +62,11 @@ def test_filter_malformed_json_returns_all_notes(monkeypatch):
             return _BadResponse()
 
     monkeypatch.setattr(
-        "derad_agent.runtime.steps.relevance_filter.get_llm",
+        "agent.runtime.steps.relevance_filter.get_llm",
         lambda **_: object(),
     )
     monkeypatch.setattr(
-        "derad_agent.runtime.steps.relevance_filter.get_relevance_filter_prompt",
+        "agent.runtime.steps.relevance_filter.get_relevance_filter_prompt",
         lambda: type("P", (), {"__or__": lambda self, _: _BadChain()})(),
     )
 
@@ -78,7 +78,7 @@ def test_filter_empty_input_skips_llm_call(monkeypatch):
     called = []
 
     monkeypatch.setattr(
-        "derad_agent.runtime.steps.relevance_filter.get_llm",
+        "agent.runtime.steps.relevance_filter.get_llm",
         lambda **_: called.append(True) or object(),
     )
 
@@ -93,11 +93,11 @@ def test_filter_hallucinated_ids_are_dropped(monkeypatch):
     chain = _make_llm_response(["n1", "ghost_id_999"])
 
     monkeypatch.setattr(
-        "derad_agent.runtime.steps.relevance_filter.get_llm",
+        "agent.runtime.steps.relevance_filter.get_llm",
         lambda **_: object(),
     )
     monkeypatch.setattr(
-        "derad_agent.runtime.steps.relevance_filter.get_relevance_filter_prompt",
+        "agent.runtime.steps.relevance_filter.get_relevance_filter_prompt",
         lambda: type("P", (), {"__or__": lambda self, _: chain})(),
     )
 

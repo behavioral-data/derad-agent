@@ -2,12 +2,12 @@ import json
 
 import numpy as np
 
-from derad_agent.runtime.landscape_agent import run_landscape_agent
-from derad_agent.runtime.landscape_api import (
+from agent.runtime.landscape_agent import run_landscape_agent
+from agent.runtime.landscape_api import (
     get_notes_index_dir,
     retrieve_statement_landscape,
 )
-from derad_agent.runtime import notes_index as notes_index_module
+from agent.runtime import notes_index as notes_index_module
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -113,11 +113,11 @@ def test_run_landscape_agent_end_to_end(monkeypatch, tmp_path):
     )
 
     monkeypatch.setattr(
-        "derad_agent.runtime.landscape_agent.get_embedder",
+        "agent.runtime.landscape_agent.get_embedder",
         lambda: _FakeEmbedder([1.0, 0.0]),
     )
     monkeypatch.setattr(
-        "derad_agent.runtime.landscape_agent.step_1_generate_queries",
+        "agent.runtime.landscape_agent.step_1_generate_queries",
         lambda **kwargs: (True, ["q1"]),
     )
 
@@ -134,7 +134,7 @@ def test_run_landscape_agent_end_to_end(monkeypatch, tmp_path):
         }
 
     monkeypatch.setattr(
-        "derad_agent.runtime.landscape_agent.step_compose_reply",
+        "agent.runtime.landscape_agent.step_compose_reply",
         _fake_compose,
     )
 
@@ -174,7 +174,7 @@ def test_retrieve_statement_landscape_resolves_notes_dir(monkeypatch, tmp_path):
             "reply": {"statement": kwargs["statement"], "response": "", "reasons": []},
         }
 
-    monkeypatch.setattr("derad_agent.runtime.landscape_api.run_landscape_agent", _fake_agent)
+    monkeypatch.setattr("agent.runtime.landscape_api.run_landscape_agent", _fake_agent)
 
     retrieve_statement_landscape(
         "hello world",

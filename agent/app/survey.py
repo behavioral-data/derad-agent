@@ -1,7 +1,7 @@
 """Send survey invitations by X Direct Message.
 
 Usage:
-    python -m derad_agent.app.survey --participant-id 123 --form-url https://forms.gle/...
+    python -m agent.app.survey --participant-id 123 --form-url https://forms.gle/...
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import argparse
 import logging
 import os
 
-from derad_agent.llm.config import _require_env
+from agent.llm.config import _require_env
 
 logger = logging.getLogger(__name__)
 

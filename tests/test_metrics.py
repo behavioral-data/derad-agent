@@ -1,4 +1,4 @@
-"""Tests for derad_agent.app.metrics counter wiring and the per-user daily cap.
+"""Tests for agent.app.metrics counter wiring and the per-user daily cap.
 
 The cap itself lives in app._dispatch_tweet (it counts via dedup.hit_and_count
 rather than a separate in-memory counter), so its tests sit alongside the
@@ -20,9 +20,9 @@ os.environ.setdefault("AZURE_OPENAI_ENDPOINT", "https://test.example/")
 os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_EMBED", "test-embed")
 os.environ.setdefault("BOT_USER_ID", "999")
 
-from derad_agent.app import app as app_module  # noqa: E402
-from derad_agent.app import dedup as dedup_module  # noqa: E402
-from derad_agent.app import metrics as metrics_module  # noqa: E402
+from agent.app import app as app_module  # noqa: E402
+from agent.app import dedup as dedup_module  # noqa: E402
+from agent.app import metrics as metrics_module  # noqa: E402
 
 
 def _now():
@@ -131,7 +131,7 @@ class TestUserDailyCap:
         # Manually set up dispatch_env without pinning _resolve_tone, so tones
         # really do vary per mention. Drive resolve_tone to flip between
         # "agreeable" and "satirical" so we can assert the bucket is shared.
-        from derad_agent.app import dedup as dedup_mod
+        from agent.app import dedup as dedup_mod
         monkeypatch.setattr(dedup_mod, "_default_store", dedup_mod.InMemoryStore())
 
         tones = iter(["agreeable", "satirical", "neutral"])

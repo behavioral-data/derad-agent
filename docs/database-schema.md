@@ -39,7 +39,7 @@ One row per UW student enrolled in the study. This is the production allow-list 
 | `notes` | string | Optional researcher notes |
 
 **Managed by:** `derad-register-participant` CLI  
-**Source:** `derad_agent/app/participants.py` — `Participant` dataclass + `TablesParticipantsStore`
+**Source:** `agent/app/participants.py` — `Participant` dataclass + `TablesParticipantsStore`
 
 ---
 
@@ -80,7 +80,7 @@ One row per mention that made it all the way through the pipeline (accepted by a
 | `error_class` | string? | Python exception class name (on error outcomes) |
 | `error_detail` | string? (≤1 KB) | Exception message (on error outcomes) |
 
-**Source:** `derad_agent/app/events.py` — `MentionEvent` dataclass + `TablesEventsStore.write_event()`
+**Source:** `agent/app/events.py` — `MentionEvent` dataclass + `TablesEventsStore.write_event()`
 
 ---
 
@@ -100,7 +100,7 @@ One row per mention that was filtered out at a guard before entering the pipelin
 | `received_at_utc` | datetime | When the stream received the mention |
 | `extra_json` | JSON string | Additional context (varies by `drop_reason`) |
 
-**Source:** `derad_agent/app/events.py` — `MentionDrop` dataclass + `TablesEventsStore.write_drop()`
+**Source:** `agent/app/events.py` — `MentionDrop` dataclass + `TablesEventsStore.write_drop()`
 
 ---
 
@@ -123,7 +123,7 @@ One row per bot reply tweet, captured ~3 days after posting by `derad-poll-engag
 | `mention_id` | string? | FK back to `MentionEvents` |
 | `parent_id` | string? | ID of the original post being fact-checked |
 
-**Source:** `derad_agent/app/events.py` — `EngagementSnapshot` dataclass  
+**Source:** `agent/app/events.py` — `EngagementSnapshot` dataclass  
 **Managed by:** `derad-poll-engagement` CLI, invoked daily at 12:00 UTC by the `engagementCronJob` Container Apps Job (see `infra/main.bicep`). Each reply gets exactly one snapshot when it ages into the 3-day window.
 
 ---
@@ -147,7 +147,7 @@ Text of replies to bot posts collected for bystander NLP analysis. Written by `d
 | `mention_id` | string? | FK back to `MentionEvents` |
 | `tone` | string? | Which bot posted the reply that was responded to |
 
-**Source:** `derad_agent/app/events.py` — `BotReplyReply` dataclass  
+**Source:** `agent/app/events.py` — `BotReplyReply` dataclass  
 **Managed by:** `derad-collect-replies` CLI, run alongside `derad-poll-engagement` in the daily 12:00 UTC `engagementCronJob` Container Apps Job
 
 ---
@@ -166,7 +166,7 @@ Tracks which mention IDs have already been processed to prevent double-handling.
 
 The `claim()` operation is atomic: if a row already exists it returns `False` (duplicate), otherwise writes the row and returns `True` (proceed). Entries expire after 24 hours.
 
-**Source:** `derad_agent/app/dedup.py` — `TablesStore`
+**Source:** `agent/app/dedup.py` — `TablesStore`
 
 ---
 
@@ -181,7 +181,7 @@ Stores one row per mention hit per author. Used to enforce rolling time-window r
 |-------|------|-------------|
 | `AtUtc` | `Edm.DateTime` | Exact timestamp of the mention hit |
 
-**Source:** `derad_agent/app/dedup.py` — `TablesStore.check_rate_limit()`
+**Source:** `agent/app/dedup.py` — `TablesStore.check_rate_limit()`
 
 ---
 
@@ -231,4 +231,4 @@ Researchers use study codes to match daily DM survey responses to specific bot r
 | **Timestamps** | All datetimes are UTC; stored as ISO strings; rate-limit table uses `Edm.DateTime` for OData filtering |
 | **Text truncation** | `parent_text` / `reply_text` / `text` → 32 KB; `error_detail` → 1 KB (Azure row size limit ~1 MB) |
 | **Lists/dicts** | Serialized as JSON strings (`queries_json`, `cited_note_ids_json`, `extra_json`) |
-| **Export** | `derad_agent/cli/export.py` handles field deserialization (JSON fields, datetime parsing) for offline analysis |
+| **Export** | `agent/cli/export.py` handles field deserialization (JSON fields, datetime parsing) for offline analysis |

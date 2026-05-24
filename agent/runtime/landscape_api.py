@@ -5,7 +5,7 @@ from __future__ import annotations
 import pathlib
 from typing import Any, Dict, Optional
 
-from derad_agent.llm.config import INDEX_ROOT
+from agent.llm.config import INDEX_ROOT
 from .landscape_agent import run_landscape_agent
 from .notes_index import NOTES_INDEX_DIRNAME
 

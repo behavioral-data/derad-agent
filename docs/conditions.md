@@ -1,8 +1,8 @@
 **Hedged x Consensus**  
-python -m derad_agent.cli.ask --statement "Inflation is only high because the government keeps printing money to fund welfare for people who don't work." --response-style bridging
+python -m agent.cli.ask --statement "Inflation is only high because the government keeps printing money to fund welfare for people who don't work." --response-style bridging
 
 **Confident x Adversarial**  
-python -m derad_agent.cli.ask --statement "Inflation is only high because the government keeps printing money to fund welfare for people who don't work." --response-style agonistic
+python -m agent.cli.ask --statement "Inflation is only high because the government keeps printing money to fund welfare for people who don't work." --response-style agonistic
 
 Here are realistic polarizing claims people might post on social media for each topic. These range from misleading to inflammatory — the kind of posts a bystander might invoke the bot on.
 

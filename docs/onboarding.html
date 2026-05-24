@@ -71,7 +71,7 @@ pip install -e .</code></pre>
     <h2>Step 3 — Bootstrap your <code>.env</code></h2>
     <p>
       All secrets live in Azure Key Vault. The setup script pulls them all and writes
-      <code>derad_agent/llm/.env</code> for you — no manual credential sharing needed.
+      <code>agent/llm/.env</code> for you — no manual credential sharing needed.
     </p>
     <pre><code>bash scripts/setup-env.sh</code></pre>
     <div class="callout callout-warn">
@@ -85,7 +85,7 @@ pip install -e .</code></pre>
   <!-- ── Step 4: Run locally ──────────────────────────────────────────────── -->
   <section>
     <h2>Step 4 — Run locally</h2>
-    <pre><code>flask --app derad_agent.app.app run --port 5001</code></pre>
+    <pre><code>flask --app agent.app.app run --port 5001</code></pre>
     <p>The dashboard is at <a href="http://localhost:5001/dashboard">http://localhost:5001/dashboard</a>.
     With ingest off, the stream panel will show disconnected — that's expected.
     You can still use all CLI tools and test the pipeline manually.</p>

@@ -1,4 +1,4 @@
-"""Tests for derad_agent.app.events + the drop/event wiring in app.py.
+"""Tests for agent.app.events + the drop/event wiring in app.py.
 
 Every guard in _dispatch_tweet() should produce a drop row with the right
 reason; a successful process_mention should produce an event row with the
@@ -24,9 +24,9 @@ os.environ.setdefault("AZURE_OPENAI_ENDPOINT", "https://test.example/")
 os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_EMBED", "test-embed")
 os.environ.setdefault("BOT_USER_ID", "999")
 
-from derad_agent.app import app as app_module  # noqa: E402
-from derad_agent.app import dedup as dedup_module  # noqa: E402
-from derad_agent.app import events as events_module  # noqa: E402
+from agent.app import app as app_module  # noqa: E402
+from agent.app import dedup as dedup_module  # noqa: E402
+from agent.app import events as events_module  # noqa: E402
 
 
 def _now():
@@ -145,7 +145,7 @@ class TestEventWiring:
                      monkeypatch, fake_events_store, received_at_utc=None):
         """Invoke process_mention directly with stubs and return the captured event."""
         monkeypatch.setattr(app_module, "DRY_RUN", False)
-        from derad_agent.app import utils as utils_module
+        from agent.app import utils as utils_module
         monkeypatch.setattr(utils_module, "fetch_tweet", lambda *a, **kw: fetch_snap)
         monkeypatch.setattr(app_module, "fetch_tweet", lambda *a, **kw: fetch_snap)
         monkeypatch.setattr(app_module, "generate_reply", lambda **kw: generate_reply_result)
@@ -167,7 +167,7 @@ class TestEventWiring:
         return fake_events_store.events[-1], ts
 
     def test_replied_outcome_captures_full_pipeline_state(self, monkeypatch, fake_events_store):
-        from derad_agent.app.utils import TweetSnapshot
+        from agent.app.utils import TweetSnapshot
         snap = TweetSnapshot(
             text="Mail-in voting causes fraud.",
             author_id="999",
@@ -216,7 +216,7 @@ class TestEventWiring:
         assert ev.reply_id is None
 
     def test_empty_reply_outcome(self, monkeypatch, fake_events_store):
-        from derad_agent.app.utils import TweetSnapshot
+        from agent.app.utils import TweetSnapshot
         snap = TweetSnapshot(text="claim", author_id="999", author_username="u")
         ev = self._run_process(
             fetch_snap=snap,
@@ -230,7 +230,7 @@ class TestEventWiring:
         assert ev.reply_id is None
 
     def test_x_post_error_outcome(self, monkeypatch, fake_events_store):
-        from derad_agent.app.utils import TweetSnapshot
+        from agent.app.utils import TweetSnapshot
         snap = TweetSnapshot(text="claim", author_id="999", author_username="u")
         gen = {
             "text": "the response", "sources": None, "tweets": None, "notes": None,
@@ -251,7 +251,7 @@ class TestEventWiring:
         monkeypatch.setattr(app_module, "DRY_RUN", False)
         def _boom(*a, **kw):
             raise RuntimeError("synthetic explosion")
-        from derad_agent.app import utils as utils_module
+        from agent.app import utils as utils_module
         monkeypatch.setattr(utils_module, "fetch_tweet", _boom)
         monkeypatch.setattr(app_module, "fetch_tweet", _boom)
 

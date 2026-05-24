@@ -14,8 +14,8 @@ from datetime import datetime, timezone
 from html import unescape
 from typing import Any, Dict, List, Optional, Sequence
 
-from derad_agent.llm.config import get_llm
-from derad_agent.llm.prompts import get_style_prompt, get_no_factcheck_prompt
+from agent.llm.config import get_llm
+from agent.llm.prompts import get_style_prompt, get_no_factcheck_prompt
 
 from ._helpers import extract_text_from_response, parse_json_response
 

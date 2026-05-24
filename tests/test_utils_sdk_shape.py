@@ -26,7 +26,7 @@ os.environ.setdefault("AZURE_OPENAI_API_KEY", "test_key")
 os.environ.setdefault("AZURE_OPENAI_ENDPOINT", "https://test.example/")
 os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_EMBED", "test-embed")
 
-from derad_agent.app import utils as utils_module  # noqa: E402
+from agent.app import utils as utils_module  # noqa: E402
 
 
 def _stub_x_client_with_get_by_id(response):

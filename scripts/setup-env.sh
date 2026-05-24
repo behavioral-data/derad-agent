@@ -8,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 KV="azkvlikxqqfjcgk72"
-ENV_FILE="derad_agent/llm/.env"
+ENV_FILE="agent/llm/.env"
 
 echo "Pulling secrets from Key Vault: $KV"
 echo "(Make sure you've run 'az login' first)"
@@ -70,4 +70,4 @@ echo "Written: $ENV_FILE"
 echo ""
 echo "Next steps:"
 echo "  pip install -e ."
-echo "  flask --app derad_agent.app.app run --port 5001"
+echo "  flask --app agent.app.app run --port 5001"

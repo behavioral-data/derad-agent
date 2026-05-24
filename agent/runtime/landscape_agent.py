@@ -5,9 +5,9 @@ from __future__ import annotations
 import pathlib
 from typing import Any, Dict, List, Optional
 
-from derad_agent.llm.config import get_embedder
-from derad_agent.shared.logging import RuntimeLogger
-from derad_agent.shared.validation import validate_agent_inputs
+from agent.llm.config import get_embedder
+from agent.shared.logging import RuntimeLogger
+from agent.shared.validation import validate_agent_inputs
 
 from .notes_index import (
     load_notes_index,
@@ -40,7 +40,7 @@ def run_landscape_agent(
     Args:
         statement: The claim or post to reply to.
         notes_index_dir: Directory with ``tweet_ids.npy``, ``embeddings.npy``,
-            and ``notes_cache.json`` (output of ``derad_agent.cli.embed_notes``).
+            and ``notes_cache.json`` (output of ``agent.cli.embed_notes``).
         k_per_query: Tweets fetched per planner query.
         notes_per_tweet: Cap on CURRENTLY_RATED_HELPFUL notes kept per tweet (latest first).
         similarity_min: Minimum cosine similarity for retrieved tweets.

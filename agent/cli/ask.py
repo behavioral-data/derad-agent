@@ -8,7 +8,7 @@ a reply grounded in those notes.
 
 Usage::
 
-    python -m derad_agent.cli.ask --statement "Mail-in voting increases fraud."
+    python -m agent.cli.ask --statement "Mail-in voting increases fraud."
 """
 import argparse
 import json
@@ -22,19 +22,19 @@ from rich.panel import Panel
 sys.path.append(str(pathlib.Path(__file__).resolve().parent.parent.parent))
 
 try:
-    from derad_agent.runtime.landscape_api import (
+    from agent.runtime.landscape_api import (
         get_notes_index_dir,
         retrieve_statement_landscape,
     )
-    from derad_agent.llm.config import INDEX_ROOT
-    from derad_agent.llm.prompts import RESPONSE_STYLES
-    from derad_agent.cli.ui import (
+    from agent.llm.config import INDEX_ROOT
+    from agent.llm.prompts import RESPONSE_STYLES
+    from agent.cli.ui import (
         console, RichLogger, create_status,
     )
 except ImportError:
-    print("\n❌ ERROR: Could not import 'derad_agent'.")
+    print("\n❌ ERROR: Could not import 'agent'.")
     print("   Please run this script as a module from the project root:")
-    print("   python -m derad_agent.cli.ask ...")
+    print("   python -m agent.cli.ask ...")
     sys.exit(1)
 
 
@@ -116,7 +116,7 @@ def main():
     if not check_notes_index_exists(args.index_root):
         console.print("[bold red]ERROR: Notes index not found[/bold red]")
         console.print(f"   Expected location: {index_dir}")
-        console.print("   Build it with: python -m derad_agent.cli.embed_notes <notes.tsv> --out indexes/notes_index")
+        console.print("   Build it with: python -m agent.cli.embed_notes <notes.tsv> --out indexes/notes_index")
         sys.exit(1)
 
     agent_kwargs = {

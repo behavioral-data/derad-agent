@@ -27,8 +27,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from derad_agent.app.participants import Participant, get_store
-from derad_agent.llm.config import get_x_client
+from agent.app.participants import Participant, get_store
+from agent.llm.config import get_x_client
 
 logger = logging.getLogger(__name__)
 

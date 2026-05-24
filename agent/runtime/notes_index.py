@@ -1,6 +1,6 @@
 """Tweet-level notes index: loading, retrieval, and note selection.
 
-Consumes the artifacts produced by ``derad_agent.cli.embed_notes``:
+Consumes the artifacts produced by ``agent.cli.embed_notes``:
 
 - ``tweet_ids.npy``    — object array of tweet IDs (row order matches embeddings).
 - ``embeddings.npy``   — float32 [num_tweets, dim] matrix of tweet embeddings.

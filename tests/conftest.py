@@ -1,4 +1,4 @@
-"""Shared fixtures for derad_agent tests."""
+"""Shared fixtures for agent tests."""
 
 import pytest
 

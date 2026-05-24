@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Prompt review — derad_agent</title>
+  <title>Prompt review — agent</title>
   <link rel="stylesheet" href="assets/html-design-system.css">
 </head>
 <body>
   <div class="layout">
     <aside class="sidebar">
       <div class="sidebar-brand">
-        <div class="eyebrow">derad_agent</div>
+        <div class="eyebrow">agent</div>
         <h3>Prompt review</h3>
       </div>
       <nav>
@@ -38,7 +38,7 @@
       <section id="overview">
         <div class="section-head">
           <p class="eyebrow">00 · Overview</p>
-          <h1>Prompt review · derad_agent</h1>
+          <h1>Prompt review · agent</h1>
           <p>Eleven prompts drive the plan→retrieve→filter→compose pipeline. Each section below shows the live template source, the runtime config it ships with, and a verdict / area-tags / notes form. Reviews persist to local storage; the footer button exports the whole review as JSON or Markdown.</p>
         </div>
 
@@ -803,7 +803,7 @@ Output JSON only:
   </div>
 
   <div class="footer-bar">
-    <span class="meta footer-meta">prompt-review · derad_agent · 2026-05-22</span>
+    <span class="meta footer-meta">prompt-review · agent · 2026-05-22</span>
     <button class="export-btn" onclick="exportReview(event, 'markdown')">Copy as Markdown</button>
     <button class="export-btn" onclick="exportReview(event, 'json')">Copy as JSON</button>
     <button class="export-btn small" onclick="clearReview()">Reset</button>
@@ -811,7 +811,7 @@ Output JSON only:
 
   <script src="assets/html-design-system.js"></script>
   <script>
-    const STORAGE_KEY = 'prompt-review:derad_agent';
+    const STORAGE_KEY = 'prompt-review:agent';
     const state = {};
 
     function ensure(id) {
@@ -898,7 +898,7 @@ Output JSON only:
     }
 
     function renderMarkdown(data) {
-      const lines = ['# Prompt review — derad_agent', '', '> Generated ' + new Date().toISOString(), ''];
+      const lines = ['# Prompt review — agent', '', '> Generated ' + new Date().toISOString(), ''];
       const ids = Object.keys(data);
       if (!ids.length) {
         lines.push('_No prompts reviewed yet._');

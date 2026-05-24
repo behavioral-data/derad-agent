@@ -11,7 +11,7 @@ import csv
 import sys
 from datetime import datetime, timezone
 
-from derad_agent.app.participants import get_store
+from agent.app.participants import get_store
 
 
 def _study_day(enrolled_at, now):

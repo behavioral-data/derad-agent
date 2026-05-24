@@ -1,4 +1,4 @@
-"""Tests for derad_agent.app.participants."""
+"""Tests for agent.app.participants."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from derad_agent.app.participants import (
+from agent.app.participants import (
     InMemoryParticipantsStore,
     Participant,
     _entity_to_participant,

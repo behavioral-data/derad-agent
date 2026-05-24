@@ -1,4 +1,4 @@
-"""Tests for derad_agent.cli.collect_replies."""
+"""Tests for agent.cli.collect_replies."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from derad_agent.app.events import BotReplyReply, InMemoryEventsStore
-from derad_agent.app import events as events_module
-from derad_agent.cli.collect_replies import _collect_one, main
+from agent.app.events import BotReplyReply, InMemoryEventsStore
+from agent.app import events as events_module
+from agent.cli.collect_replies import _collect_one, main
 
 
 def _utc(days_ago=0, **kwargs):
@@ -47,13 +47,13 @@ class TestCollectOne:
         fake_client = MagicMock()
         fake_client.tweets.search_recent.return_value = _make_response([tweet], [user])
         monkeypatch.setattr(
-            "derad_agent.cli.collect_replies.get_x_client",
+            "agent.cli.collect_replies.get_x_client",
             lambda: fake_client,
         )
 
         written_replies: list[BotReplyReply] = []
         monkeypatch.setattr(
-            "derad_agent.cli.collect_replies.log_reply_reply",
+            "agent.cli.collect_replies.log_reply_reply",
             lambda r: written_replies.append(r),
         )
 
@@ -78,10 +78,10 @@ class TestCollectOne:
         fake_client = MagicMock()
         fake_client.tweets.search_recent.return_value = _make_response([tweet])
         monkeypatch.setattr(
-            "derad_agent.cli.collect_replies.get_x_client",
+            "agent.cli.collect_replies.get_x_client",
             lambda: fake_client,
         )
-        monkeypatch.setattr("derad_agent.cli.collect_replies.log_reply_reply", MagicMock())
+        monkeypatch.setattr("agent.cli.collect_replies.log_reply_reply", MagicMock())
 
         count = _collect_one("bot99", "neutral", mention_id=None, parent_id="p1")
         assert count == 0
@@ -91,7 +91,7 @@ class TestCollectOne:
         fake_client = MagicMock()
         fake_client.tweets.search_recent.side_effect = RuntimeError("timeout")
         monkeypatch.setattr(
-            "derad_agent.cli.collect_replies.get_x_client",
+            "agent.cli.collect_replies.get_x_client",
             lambda: fake_client,
         )
 
@@ -110,7 +110,7 @@ class TestCollectOne:
 
         fake_client.tweets.search_recent.side_effect = _search
         monkeypatch.setattr(
-            "derad_agent.cli.collect_replies.get_x_client",
+            "agent.cli.collect_replies.get_x_client",
             lambda: fake_client,
         )
 
@@ -126,7 +126,7 @@ class TestCollectOne:
             captured.append(kw.get("query", "")) or _make_response([])
         )
         monkeypatch.setattr(
-            "derad_agent.cli.collect_replies.get_x_client",
+            "agent.cli.collect_replies.get_x_client",
             lambda: fake_client,
         )
 
@@ -141,7 +141,7 @@ class TestCollectRepliesMain:
         monkeypatch.setattr(events_module, "_default_store", fresh_events_store)
         log_calls: list[str] = []
         monkeypatch.setattr(
-            "derad_agent.cli.collect_replies.logger",
+            "agent.cli.collect_replies.logger",
             MagicMock(info=lambda msg, *a: log_calls.append(msg % a if a else msg)),
         )
         main()

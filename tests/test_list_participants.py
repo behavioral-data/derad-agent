@@ -1,4 +1,4 @@
-"""Tests for derad_agent.cli.list_participants and derad_agent.cli.bulk_register."""
+"""Tests for agent.cli.list_participants and agent.cli.bulk_register."""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from derad_agent.app.participants import InMemoryParticipantsStore, Participant, reset_store
-from derad_agent.cli.list_participants import main as list_main
-from derad_agent.cli.bulk_register import main as bulk_main
+from agent.app.participants import InMemoryParticipantsStore, Participant, reset_store
+from agent.cli.list_participants import main as list_main
+from agent.cli.bulk_register import main as bulk_main
 
 
 def _p(author_id, username, tone, day_offset=0):
@@ -111,7 +111,7 @@ class TestBulkRegister:
             client.users.get_by_username.return_value = resp
             return client
 
-        monkeypatch.setattr("derad_agent.cli.bulk_register.get_x_client", _client)
+        monkeypatch.setattr("agent.cli.bulk_register.get_x_client", _client)
         sys.argv = ["derad-bulk-register", str(csv_file)]
         bulk_main()
         assert len(fresh_store.list_all()) == 1
@@ -120,7 +120,7 @@ class TestBulkRegister:
     def test_dry_run_does_not_write(self, fresh_store, tmp_path, monkeypatch):
         csv_file = tmp_path / "p.csv"
         csv_file.write_text("username,tone,enrolled\nbob,agreeable,2026-05-20\n")
-        monkeypatch.setattr("derad_agent.cli.bulk_register.get_x_client", lambda: _fake_client("555"))
+        monkeypatch.setattr("agent.cli.bulk_register.get_x_client", lambda: _fake_client("555"))
         sys.argv = ["derad-bulk-register", str(csv_file), "--dry-run"]
         bulk_main()
         assert len(fresh_store.list_all()) == 0
@@ -145,7 +145,7 @@ class TestBulkRegister:
             client.users.get_by_username.return_value = resp
             return client
 
-        monkeypatch.setattr("derad_agent.cli.bulk_register.get_x_client", _client)
+        monkeypatch.setattr("agent.cli.bulk_register.get_x_client", _client)
         sys.argv = ["derad-bulk-register", str(csv_file)]
         bulk_main()
 
@@ -162,7 +162,7 @@ class TestBulkRegister:
             client.users.get_by_username.side_effect = RuntimeError("API down")
             return client
 
-        monkeypatch.setattr("derad_agent.cli.bulk_register.get_x_client", _failing_client)
+        monkeypatch.setattr("agent.cli.bulk_register.get_x_client", _failing_client)
         sys.argv = ["derad-bulk-register", str(csv_file)]
         bulk_main()
         assert len(fresh_store.list_all()) == 0

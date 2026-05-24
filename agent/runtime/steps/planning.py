@@ -3,10 +3,10 @@
 import os
 from typing import List, Optional, Tuple
 
-from derad_agent.llm.config import get_llm
-from derad_agent.llm.prompts import get_planner_prompt
-from derad_agent.shared.logging import RuntimeLogger
-from derad_agent.shared.validation import validate_search_queries
+from agent.llm.config import get_llm
+from agent.llm.prompts import get_planner_prompt
+from agent.shared.logging import RuntimeLogger
+from agent.shared.validation import validate_search_queries
 
 from ._helpers import extract_text_from_response, parse_json_response
 

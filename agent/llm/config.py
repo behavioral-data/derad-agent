@@ -1,6 +1,6 @@
 """Centralised LLM configuration.
 
-Loads credentials from ``derad_agent/llm/.env`` and exposes factory
+Loads credentials from ``agent/llm/.env`` and exposes factory
 helpers for embedding and chat models, plus path constants for index
 and TSV data locations.
 """

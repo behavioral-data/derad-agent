@@ -16,10 +16,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dotenv import load_dotenv
-load_dotenv(Path(__file__).resolve().parent.parent / "derad_agent" / "llm" / ".env")
+load_dotenv(Path(__file__).resolve().parent.parent / "agent" / "llm" / ".env")
 
-from derad_agent.app.utils import fetch_tweet, generate_reply, post_reply
-from derad_agent.llm.prompts import RESPONSE_STYLES
+from agent.app.utils import fetch_tweet, generate_reply, post_reply
+from agent.llm.prompts import RESPONSE_STYLES
 
 
 def main():
@@ -42,7 +42,7 @@ def main():
         sys.exit(1)
 
     # The mention tweet should be a reply — get the parent ID from it
-    from derad_agent.llm.config import get_x_client
+    from agent.llm.config import get_x_client
     # Re-fetch with expansions to get in_reply_to
     try:
         client = get_x_client()

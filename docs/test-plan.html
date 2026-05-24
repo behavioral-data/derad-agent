@@ -117,7 +117,7 @@
         <div class="panel">
           <pre><code>DERAD_DRY_RUN=true \
 DERAD_INGEST_MODE=off \
-gunicorn derad_agent.app.app:app \
+gunicorn agent.app.app:app \
   --bind 0.0.0.0:5000 \
   --workers 1 \
   --timeout 120</code></pre>
@@ -137,8 +137,8 @@ os.environ["DERAD_INGEST_MODE"] = "off"
 os.environ.setdefault("SERVER_NAME", "localhost:5000")
 
 from datetime import datetime, timezone
-from derad_agent.app import app as app_module
-from derad_agent.app import dedup as dedup_module
+from agent.app import app as app_module
+from agent.app import dedup as dedup_module
 
 tweet = {
     "id_str": "TEST_MENTION_001",
@@ -186,7 +186,7 @@ EOF</code></pre>
       <div class="demo-block">
         <div class="demo-label">Step C1 — Start the app in streaming mode</div>
         <div class="panel">
-          <pre><code>gunicorn derad_agent.app.app:app \
+          <pre><code>gunicorn agent.app.app:app \
   --bind 0.0.0.0:5000 \
   --workers 1 \
   --timeout 300</code></pre>
@@ -273,7 +273,7 @@ Total: 1 replies across 1 participant(s)</code></pre>
       <div class="demo-block">
         <div class="demo-label">Step D4 — Send survey DM</div>
         <div class="panel">
-          <pre><code>python -m derad_agent.app.survey \
+          <pre><code>python -m agent.app.survey \
   --participant-id PARTICIPANT_X_USER_ID \
   --form-url "https://forms.gle/your-form-url" \
   --tone neutral</code></pre>

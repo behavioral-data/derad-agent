@@ -1,4 +1,4 @@
-"""Tests for derad_agent.cli.register_participant."""
+"""Tests for agent.cli.register_participant."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from derad_agent.app.participants import InMemoryParticipantsStore, Participant, reset_store
-from derad_agent.cli.register_participant import _pick_tone, main
+from agent.app.participants import InMemoryParticipantsStore, Participant, reset_store
+from agent.cli.register_participant import _pick_tone, main
 
 
 @pytest.fixture(autouse=True)
@@ -73,7 +73,7 @@ class TestRegisterParticipantCLI:
         fake_client = MagicMock()
         fake_client.users.get_by_username.return_value = _fake_user_response("77777")
         monkeypatch.setattr(
-            "derad_agent.cli.register_participant.get_x_client",
+            "agent.cli.register_participant.get_x_client",
             lambda: fake_client,
         )
         _run(["--username", "lookedupuser", "--tone", "neutral"])

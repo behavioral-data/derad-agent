@@ -1,4 +1,4 @@
-"""Tests for derad_agent.app.streamer.
+"""Tests for agent.app.streamer.
 
 Verifies that the single-bot rule is produced from BOT_HANDLE and that the
 filtered-stream worker dispatches each tweet with (tweet, timestamp) — tone is
@@ -21,7 +21,7 @@ os.environ.setdefault("AZURE_OPENAI_API_KEY", "test_key")
 os.environ.setdefault("AZURE_OPENAI_ENDPOINT", "https://test.example/")
 os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_EMBED", "test-embed")
 
-from derad_agent.app import streamer as streamer_module  # noqa: E402
+from agent.app import streamer as streamer_module  # noqa: E402
 
 
 class TestBotRules:

@@ -11,8 +11,8 @@ Usage:
 import logging
 from datetime import datetime, timezone
 
-from derad_agent.app.events import BotReplyReply, SNAPSHOT_MIN_AGE, get_store, log_reply_reply, utcnow
-from derad_agent.llm.config import get_x_client
+from agent.app.events import BotReplyReply, SNAPSHOT_MIN_AGE, get_store, log_reply_reply, utcnow
+from agent.llm.config import get_x_client
 
 logger = logging.getLogger(__name__)
 

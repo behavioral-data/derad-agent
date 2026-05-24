@@ -19,7 +19,7 @@ import pytest
 @pytest.fixture(autouse=True)
 def _isolate_dedup_singleton():
     """Ensure each test sees a fresh singleton, regardless of import order."""
-    from derad_agent.app import dedup
+    from agent.app import dedup
     dedup.reset_store(None)
     yield
     dedup.reset_store(None)
@@ -29,7 +29,7 @@ def _isolate_dedup_singleton():
 
 def test_get_store_defaults_to_in_memory(monkeypatch):
     monkeypatch.delenv("DERAD_STORE_BACKEND", raising=False)
-    from derad_agent.app import dedup
+    from agent.app import dedup
     store = dedup.get_store()
     assert isinstance(store, dedup.InMemoryStore)
 
@@ -53,7 +53,7 @@ def test_get_store_returns_tables_when_selected(monkeypatch):
     monkeypatch.setitem(sys.modules, "azure.identity", fake_identity)
     monkeypatch.setitem(sys.modules, "azure.core.exceptions", fake_exceptions)
 
-    from derad_agent.app import dedup
+    from agent.app import dedup
     store = dedup.get_store()
     assert isinstance(store, dedup.TablesStore)
     fake_tables.TableServiceClient.assert_called_once()
@@ -61,7 +61,7 @@ def test_get_store_returns_tables_when_selected(monkeypatch):
 
 def test_get_store_caches_singleton(monkeypatch):
     monkeypatch.delenv("DERAD_STORE_BACKEND", raising=False)
-    from derad_agent.app import dedup
+    from agent.app import dedup
     s1 = dedup.get_store()
     s2 = dedup.get_store()
     assert s1 is s2
@@ -92,7 +92,7 @@ def _make_tables_store(monkeypatch):
     monkeypatch.setitem(sys.modules, "azure.identity", fake_identity_mod)
     monkeypatch.setitem(sys.modules, "azure.core.exceptions", fake_exc_mod)
 
-    from derad_agent.app import dedup
+    from agent.app import dedup
     store = dedup.TablesStore("https://example.table.core.windows.net")
     return store, {
         "dedup_client": fake_dedup_client,
@@ -110,7 +110,7 @@ def test_tables_claim_new_key_returns_true(monkeypatch):
     entity = fakes["dedup_client"].create_entity.call_args[0][0]
     assert entity["RowKey"] == "mention-1"
     # Fixed PartitionKey — no midnight-UTC race window.
-    from derad_agent.app.dedup import TablesStore
+    from agent.app.dedup import TablesStore
     assert entity["PartitionKey"] == TablesStore.DEDUP_PARTITION == "mentions"
     # ExpiresAtUtc stored as tz-aware datetime (Edm.DateTime).
     assert isinstance(entity["ExpiresAtUtc"], datetime)
@@ -165,7 +165,7 @@ def test_tables_store_creates_tables_idempotently(monkeypatch):
     monkeypatch.setitem(sys.modules, "azure.identity", fake_identity_mod)
     monkeypatch.setitem(sys.modules, "azure.core.exceptions", fake_exc_mod)
 
-    from derad_agent.app import dedup
+    from agent.app import dedup
     store = dedup.TablesStore("https://example.table.core.windows.net")
     assert isinstance(store, dedup.TablesStore)
     assert fake_service.create_table.call_count == 2

@@ -34,7 +34,7 @@ wheels/
 # Environment variables
 .env
 .env.*
-derad_agent/llm/.env
+agent/llm/.env
 .venv
 env/
 venv/

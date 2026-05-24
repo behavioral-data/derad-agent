@@ -28,7 +28,7 @@ venv/
 env/
 .env
 .env.*
-derad_agent/llm/.env
+agent/llm/.env
 
 # VCS / tooling
 .git/

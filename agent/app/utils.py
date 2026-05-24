@@ -7,10 +7,10 @@ from typing import Optional
 import requests
 from markupsafe import escape
 
-from derad_agent.llm.config import get_x_client
-from derad_agent.llm.config import INDEX_ROOT
-from derad_agent.runtime import get_notes_index_dir
-from derad_agent.runtime.notes_index import load_notes_index
+from agent.llm.config import get_x_client
+from agent.llm.config import INDEX_ROOT
+from agent.runtime import get_notes_index_dir
+from agent.runtime.notes_index import load_notes_index
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +110,7 @@ def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
 
 
 def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5):
-    from derad_agent.runtime.landscape_api import retrieve_statement_landscape
+    from agent.runtime.landscape_api import retrieve_statement_landscape
 
     kwargs = {
         "statement": statement,

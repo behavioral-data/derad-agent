@@ -33,8 +33,8 @@ from pathlib import Path
 
 import numpy as np
 
-from derad_agent.llm.config import get_embedder
-from derad_agent.runtime.notes_index import HELPFUL_STATUS
+from agent.llm.config import get_embedder
+from agent.runtime.notes_index import HELPFUL_STATUS
 
 
 BATCH_SIZE = 500

@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional, Sequence
 
-from derad_agent.llm.config import get_llm
-from derad_agent.llm.prompts import get_relevance_filter_prompt
+from agent.llm.config import get_llm
+from agent.llm.prompts import get_relevance_filter_prompt
 
 from ._helpers import extract_text_from_response, parse_json_response
 

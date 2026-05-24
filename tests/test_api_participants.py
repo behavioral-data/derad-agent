@@ -15,8 +15,8 @@ os.environ.setdefault("AZURE_OPENAI_ENDPOINT", "https://test.example/")
 os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_EMBED", "test-embed")
 os.environ.setdefault("BOT_USER_ID", "999")
 
-from derad_agent.app import app as app_module  # noqa: E402
-from derad_agent.app import participants as participants_module  # noqa: E402
+from agent.app import app as app_module  # noqa: E402
+from agent.app import participants as participants_module  # noqa: E402
 
 
 @pytest.fixture
@@ -148,7 +148,7 @@ class TestApiParticipantsCreate:
 class TestApiReplies:
     @pytest.fixture
     def events_store(self, monkeypatch):
-        from derad_agent.app import events as events_module
+        from agent.app import events as events_module
         store = events_module.InMemoryEventsStore()
         events_module.reset_store(store)
         yield store
@@ -156,7 +156,7 @@ class TestApiReplies:
 
     def _make_event(self, **overrides):
         from datetime import datetime, timezone
-        from derad_agent.app.events import MentionEvent
+        from agent.app.events import MentionEvent
         base = dict(
             mention_id="m1",
             parent_id="p1",

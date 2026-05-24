@@ -1,11 +1,11 @@
-"""Tests for derad_agent.cli.daily_summary."""
+"""Tests for agent.cli.daily_summary."""
 
 from __future__ import annotations
 
 import os
 from datetime import date
 
-from derad_agent.cli.daily_summary import _BOT_HANDLE, _get_events_for_date, main
+from agent.cli.daily_summary import _BOT_HANDLE, _get_events_for_date, main
 
 
 class TestBotHandle:
@@ -40,7 +40,7 @@ class TestDailySummaryMain:
         }
 
     def test_no_events_prints_message(self, monkeypatch, capsys):
-        monkeypatch.setattr("derad_agent.cli.daily_summary._get_events_for_date", lambda d: [])
+        monkeypatch.setattr("agent.cli.daily_summary._get_events_for_date", lambda d: [])
         import sys
         sys.argv = ["derad-daily-summary", "--date", "2026-05-19"]
         main()
@@ -53,7 +53,7 @@ class TestDailySummaryMain:
             self._event("p1", "WXYZ"),
             self._event("p2", "MNPQ"),
         ]
-        monkeypatch.setattr("derad_agent.cli.daily_summary._get_events_for_date", lambda d: events)
+        monkeypatch.setattr("agent.cli.daily_summary._get_events_for_date", lambda d: events)
         import sys
         sys.argv = ["derad-daily-summary", "--date", "2026-05-19"]
         main()
@@ -67,7 +67,7 @@ class TestDailySummaryMain:
 
     def test_url_format(self, monkeypatch, capsys):
         events = [self._event("p1", "ABCD", tone="neutral")]
-        monkeypatch.setattr("derad_agent.cli.daily_summary._get_events_for_date", lambda d: events)
+        monkeypatch.setattr("agent.cli.daily_summary._get_events_for_date", lambda d: events)
         import sys
         sys.argv = ["derad-daily-summary", "--date", "2026-05-19"]
         main()

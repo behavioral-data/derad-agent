@@ -39,7 +39,7 @@ os.environ.setdefault("X_ACCESS_TOKEN_SECRET", "smoke-fake-access-secret")
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
-from derad_agent.app.participants import (
+from agent.app.participants import (
     InMemoryParticipantsStore,
     Participant,
     reset_store as reset_participants_store,
@@ -111,9 +111,9 @@ assert_eq("list_all length", len(p_store.list_all()), 1)
 section("Phase 2 · App startup (participant metadata loaded, no allow-list)")
 
 # Import app NOW so _PARTICIPANTS_BY_ID is populated from our store.
-from derad_agent.app import app as app_module
-from derad_agent.app import dedup as dedup_module
-from derad_agent.app import events as events_module
+from agent.app import app as app_module
+from agent.app import dedup as dedup_module
+from agent.app import events as events_module
 
 # Reset dedup + events store.
 dedup_module._default_store = dedup_module.InMemoryStore()
@@ -194,7 +194,7 @@ MENTION_TWEET = {
     "text": "@neutralbot The climate policy is working well.",
 }
 
-from derad_agent.app.utils import TweetSnapshot
+from agent.app.utils import TweetSnapshot
 
 fake_snap = TweetSnapshot(
     text="The climate policy is working well.",
@@ -254,7 +254,7 @@ print(f"  {_CYAN}study_code={ev.study_code!r}  study_day={ev.study_day}  reply_i
 # ═════════════════════════════════════════════════════════════════════════════
 section("Phase 5 · Poll engagement on 3-day-old reply")
 
-from derad_agent.cli.poll_engagement import _poll_one
+from agent.cli.poll_engagement import _poll_one
 
 # Write a MentionEvent whose reply_posted_utc is exactly 3.5 days ago
 now = datetime.now(timezone.utc)
@@ -272,7 +272,7 @@ old_ev = events_module.MentionEvent(
 e_store2.write_event(old_ev)
 
 # Verify the event is old enough to be eligible for snapshotting
-from derad_agent.app.events import SNAPSHOT_MIN_AGE
+from agent.app.events import SNAPSHOT_MIN_AGE
 assert_true("old reply is ≥3 days old", now - old_posted >= SNAPSHOT_MIN_AGE)
 
 # Mock X client returning fake metrics
@@ -288,7 +288,7 @@ fake_metrics_response.data = {
 fake_x_client = MagicMock()
 fake_x_client.posts.get_by_id.return_value = fake_metrics_response
 
-with patch("derad_agent.cli.poll_engagement.get_x_client", return_value=fake_x_client):
+with patch("agent.cli.poll_engagement.get_x_client", return_value=fake_x_client):
     _poll_one("old_reply_tweet", "neutral", mention_id="old_mention", parent_id="old_parent")
 
 assert_eq("engagement snapshots written", len(e_store2.engagements), 1)
@@ -305,7 +305,7 @@ print(f"  {_CYAN}likes={snap.like_count} retweets={snap.retweet_count} replies={
 # ═════════════════════════════════════════════════════════════════════════════
 section("Phase 6 · Collect bystander replies on 3-day-old reply")
 
-from derad_agent.cli.collect_replies import _collect_one
+from agent.cli.collect_replies import _collect_one
 
 bystander_tweet = {
     "id": "bystander_reply_001",
@@ -323,7 +323,7 @@ fake_search_response.includes = {"users": [bystander_user]}
 fake_collect_client = MagicMock()
 fake_collect_client.tweets.search_recent.return_value = fake_search_response
 
-with patch("derad_agent.cli.collect_replies.get_x_client", return_value=fake_collect_client):
+with patch("agent.cli.collect_replies.get_x_client", return_value=fake_collect_client):
     count = _collect_one(
         "old_reply_tweet", "neutral",
         mention_id="old_mention", parent_id="old_parent",
@@ -346,7 +346,7 @@ print(f"  {_CYAN}bystander: @{rr.author_username} — {rr.text!r}{_RESET}")
 # ═════════════════════════════════════════════════════════════════════════════
 section("Phase 7 · Daily summary (researcher view)")
 
-from derad_agent.cli.daily_summary import main as daily_summary_main
+from agent.cli.daily_summary import main as daily_summary_main
 
 synthetic_events = [
     {
@@ -363,7 +363,7 @@ synthetic_events = [
 ]
 
 sys.argv = ["derad-daily-summary", "--date", "2026-05-20"]
-with patch("derad_agent.cli.daily_summary._get_events_for_date", return_value=synthetic_events):
+with patch("agent.cli.daily_summary._get_events_for_date", return_value=synthetic_events):
     daily_summary_main()
 
 ok("daily summary printed without error")

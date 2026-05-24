@@ -26,7 +26,7 @@ pip install -e .
 Copy the template and fill in your credentials:
 
 ```bash
-cp derad_agent/llm/.env.example derad_agent/llm/.env
+cp agent/llm/.env.example agent/llm/.env
 ```
 
 | Variable | Purpose |
@@ -69,7 +69,7 @@ derad-ask --statement "Vaccines cause autism." \
 ### 3. Python API
 
 ```python
-from derad_agent import retrieve_statement_landscape
+from agent import retrieve_statement_landscape
 
 result = retrieve_statement_landscape("Mail-in voting increases fraud.")
 print(result["reply"]["response"])
@@ -99,7 +99,7 @@ print(result["reply"]["response"])
 ## Repository structure
 
 ```
-derad_agent/
+agent/
 ├── cli/          Entry points: ask.py, embed_notes.py, ui.py
 ├── llm/          LLM config and prompt templates
 ├── runtime/      Pipeline orchestration and notes index

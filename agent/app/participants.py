@@ -184,14 +184,14 @@ def lookup_author_id(
     """Resolve an @username to its X numeric user ID.
 
     Pass `client` to reuse an existing X client (e.g. one a test has patched);
-    otherwise one is built via derad_agent.llm.config.get_x_client. Raises
+    otherwise one is built via agent.llm.config.get_x_client. Raises
     ParticipantLookupError if the handle cannot be resolved.
     """
     clean = username.lstrip("@").strip()
     if not clean:
         raise ParticipantLookupError("username is empty")
     if client is None:
-        from derad_agent.llm.config import get_x_client
+        from agent.llm.config import get_x_client
         client = get_x_client()
     try:
         response = client.users.get_by_username(username=clean)

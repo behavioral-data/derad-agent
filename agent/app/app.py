@@ -11,12 +11,12 @@ from datetime import datetime, timezone
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context, url_for
 from markupsafe import escape
 
-from derad_agent.app import events, metrics
-from derad_agent.app.dedup import get_store
-from derad_agent.app.events import MentionDrop, MentionEvent, log_mention_drop, log_mention_event
-from derad_agent.app import participants as _participants
-from derad_agent.app.participants import VALID_TONES
-from derad_agent.app.utils import (
+from agent.app import events, metrics
+from agent.app.dedup import get_store
+from agent.app.events import MentionDrop, MentionEvent, log_mention_drop, log_mention_event
+from agent.app import participants as _participants
+from agent.app.participants import VALID_TONES
+from agent.app.utils import (
     fetch_tweet,
     generate_notes_html,
     generate_reply,
@@ -25,8 +25,8 @@ from derad_agent.app.utils import (
     preload_index_async,
     x_weighted_length,
 )
-from derad_agent.app import streamer as _streamer
-from derad_agent.llm.config import _parse_bool_env, _require_env
+from agent.app import streamer as _streamer
+from agent.llm.config import _parse_bool_env, _require_env
 
 _LOG_FILE = os.getenv("DERAD_LOG_FILE", "/tmp/derad_stream.log")
 _log_fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")

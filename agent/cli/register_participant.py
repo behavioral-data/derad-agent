@@ -15,7 +15,7 @@ import logging
 import sys
 from datetime import datetime, timezone
 
-from derad_agent.app.participants import (
+from agent.app.participants import (
     VALID_TONES,
     Participant,
     ParticipantLookupError,
@@ -24,7 +24,7 @@ from derad_agent.app.participants import (
     pick_balanced_tone,
 )
 # Re-exported so existing test monkeypatches on this module keep working.
-from derad_agent.llm.config import get_x_client  # noqa: F401
+from agent.llm.config import get_x_client  # noqa: F401
 
 logger = logging.getLogger(__name__)
 

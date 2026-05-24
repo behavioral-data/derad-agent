@@ -1,7 +1,7 @@
 """Tests for shared/validation.py."""
 
 import pytest
-from derad_agent.shared.validation import (
+from agent.shared.validation import (
     validate_agent_inputs,
     validate_search_queries,
 )

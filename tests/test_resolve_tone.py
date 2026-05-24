@@ -19,8 +19,8 @@ os.environ.setdefault("AZURE_OPENAI_ENDPOINT", "https://test.example/")
 os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_EMBED", "test-embed")
 os.environ.setdefault("BOT_USER_ID", "999")
 
-from derad_agent.app import app as app_module  # noqa: E402
-from derad_agent.app.participants import VALID_TONES, Participant  # noqa: E402
+from agent.app import app as app_module  # noqa: E402
+from agent.app.participants import VALID_TONES, Participant  # noqa: E402
 
 
 @pytest.fixture

@@ -23,7 +23,7 @@ RUN pip install -r requirements.txt
 # files referencing /build). package-data in pyproject.toml ships templates
 # and static into the wheel so the runtime stage doesn't need the source tree.
 COPY pyproject.toml README.md ./
-COPY derad_agent ./derad_agent
+COPY agent ./agent
 RUN pip install --no-deps .
 
 # ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ RUN useradd --create-home --shell /usr/sbin/nologin --uid 10001 app
 
 WORKDIR /app
 
-# Bring across the installed venv (carries derad_agent + templates + static).
+# Bring across the installed venv (carries agent + templates + static).
 COPY --from=builder --chown=app:app /opt/venv /opt/venv
 
 # Bake the notes index into the image. ~1.34 GB apparent size, ~1.8 GB final
@@ -75,4 +75,4 @@ CMD ["gunicorn", \
      "--bind", "0.0.0.0:8000", \
      "--access-logfile", "-", \
      "--error-logfile", "-", \
-     "derad_agent.app.app:app"]
+     "agent.app.app:app"]
