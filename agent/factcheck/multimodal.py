@@ -40,15 +40,22 @@ _USER_AGENT = (
 )
 
 
-_VLM_SYSTEM = """You are the multimodal extraction stage of a fact-checking pipeline.
+_VLM_SYSTEM = """You are the multimodal extraction stage of a fact-checking pipeline. The downstream verification step depends on you correctly identifying *who* and *what* is in the image — generic descriptions lose information the fact-checker can't recover.
 
-For each image you receive, do TWO things in one structured output:
+For each image you receive, produce a structured output with three fields:
 
-1. OCR (`ocr_text`): transcribe every readable string in the image VERBATIM. Preserve line breaks. Include captions, watermarks, on-screen text, headlines, signs. Do not paraphrase. If no text, return "".
+1. OCR (`ocr_text`): transcribe every readable string in the image VERBATIM. Preserve line breaks. Include captions, watermarks, on-screen text, headlines, signs, chyrons. Do not paraphrase. If no text, return "".
 
-2. Description (`description`): write a literal, identifying description of what is depicted. 2-4 sentences. Name people and places ONLY if you can identify them with high confidence from clear visual evidence (e.g., a captioned news photo, a known landmark). Otherwise describe generically ("an elderly woman holding a small child", "a cargo ship in a port"). Include distinctive details that would help a search engine find the image's context: setting, props, clothing era, distinctive scenery, banners or signage in the background. Avoid interpretation about whether the image is real, edited, or AI-generated — that's out of scope here.
+2. Description (`description`): 2-5 sentences. **Name people, places, events, brands, logos, and other entities whenever you recognize them with reasonable confidence.** Fact-checking REQUIRES these identifications — saying "a man in a suit" when it's clearly Elon Musk, or "a domed building" when it's clearly the U.S. Capitol, destroys the signal that lets us check whether the surrounding claim is true.
+    - For named individuals: well-known public figures (politicians, executives, celebrities, athletes, journalists), historical figures, fictional characters with recognizable likenesses.
+    - For places: landmarks, named cities, venues, neighborhoods, named geological/architectural features.
+    - For events: named protests, summits, disasters, ceremonies, games — if the visual context (banners, settings, crowds, dates) makes it identifiable.
+    - For images you recognize as canonical / widely-circulated: name them ("this is the canonical Apollo 11 photo of Buzz Aldrin", "this is the Tank Man photo from Tiananmen 1989"). Note the source/context if you know it.
+    - Hedge when genuinely uncertain: say "appears to be X" or "consistent with X" rather than refusing entirely.
+    - Only decline to identify when you'd be guessing without grounded visual evidence — and even then, give the most specific distinguishing features (clothing era, setting, signage, distinctive scenery, props) that would help a search engine find the image's context.
+    - Avoid interpretation about whether the image is real, edited, or AI-generated — that's Tier 4 (out of scope here).
 
-3. Search hint (`search_hint`): one short paragraph (≤120 words) suitable for pasting into a web search to find articles ABOUT this image or its subject. Use the most distinctive entities and details from your description. No invented facts.
+3. Search hint (`search_hint`): one short paragraph (≤120 words) suitable for pasting into a web search to find articles ABOUT this image or its subject. Use the most distinctive named entities and details from your description. If you named a public figure or known image in (2), use those names here too. No invented facts.
 
 Output a single JSON object that validates against the provided schema.
 """
@@ -188,6 +195,7 @@ def _vlm_extract(image_bytes: bytes, media_type: str) -> MultimodalExtraction:
 
 def extract_image(url: str, *, search_backend: SearchBackend, provenance_top_k: int = 5) -> Optional[ImageEvidence]:
     """Run Stage 1.5 for a single image URL. Returns None if image fetch fails."""
+    logger.info("Stage 1.5: extracting image %s", url)
     fetched = fetch_image_bytes(url)
     if fetched is None:
         return None
@@ -206,6 +214,10 @@ def extract_image(url: str, *, search_backend: SearchBackend, provenance_top_k: 
         except Exception:
             logger.exception("Provenance search failed for %s", url)
 
+    logger.info(
+        "Stage 1.5 done: url=%s ocr_chars=%d desc_chars=%d provenance_hits=%d",
+        url, len(extract.ocr_text), len(extract.description), len(provenance_hits),
+    )
     return ImageEvidence(
         image_url=url,
         ocr_text=extract.ocr_text,
