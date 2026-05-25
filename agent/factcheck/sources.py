@@ -1,49 +1,278 @@
 """Source-reliability lookup (design §4.5.2 — four-step lookup).
 
-Thin-slice implementation: a small canned domain → tier table covering the
-common fact-checker / satirical / aggregator domains we expect to see. The
-full four-step lookup (IFCN list → Wikipedia RSP → MBFC → model prior +
-meta-search) is a follow-up.
+Order of resolution per URL:
+  1. Curated `fact-checker` set (IFCN signatories + recognized national/regional
+     fact-checkers).
+  2. Curated `reputable-news` / `primary-source` / `satirical` / `low-quality`
+     sets (Wikipedia perennial-sources style classification).
+  3. Subdomain → parent fallback (`foo.bbc.com` → `bbc.com`).
+  4. Claude classifier (model-prior) for everything else, batched per pipeline
+     invocation and cached for the process lifetime.
+
+Failure to classify falls through to `unknown`.
 """
 from __future__ import annotations
 
+import json
+import logging
+import threading
 from urllib.parse import urlparse
 
 from .schema import SourceQualityEntry, SourceTier, TierSource
 
 
-_DOMAIN_TABLE: dict[str, tuple[SourceTier, TierSource, str]] = {
-    # IFCN signatories (a small subset for the thin slice).
-    "snopes.com": ("fact-checker", "ifcn", "IFCN signatory."),
-    "www.snopes.com": ("fact-checker", "ifcn", "IFCN signatory."),
-    "factcheck.org": ("fact-checker", "ifcn", "IFCN signatory."),
-    "www.factcheck.org": ("fact-checker", "ifcn", "IFCN signatory."),
-    "politifact.com": ("fact-checker", "ifcn", "IFCN signatory."),
-    "www.politifact.com": ("fact-checker", "ifcn", "IFCN signatory."),
-    "thequint.com": ("fact-checker", "ifcn", "IFCN signatory."),
-    "www.thequint.com": ("fact-checker", "ifcn", "IFCN signatory."),
-    "africacheck.org": ("fact-checker", "ifcn", "IFCN signatory."),
-    "www.africacheck.org": ("fact-checker", "ifcn", "IFCN signatory."),
-    "vishvasnews.com": ("fact-checker", "ifcn", "IFCN signatory."),
-    "fullfact.org": ("fact-checker", "ifcn", "IFCN signatory."),
+logger = logging.getLogger(__name__)
 
-    # Reputable news (Wikipedia RSP-style classification).
-    "reuters.com": ("reputable-news", "wikipedia-rsp", "Wikipedia perennial sources: generally reliable."),
-    "apnews.com": ("reputable-news", "wikipedia-rsp", "Wikipedia perennial sources: generally reliable."),
-    "bbc.com": ("reputable-news", "wikipedia-rsp", "Wikipedia perennial sources: generally reliable."),
-    "bbc.co.uk": ("reputable-news", "wikipedia-rsp", "Wikipedia perennial sources: generally reliable."),
-    "nytimes.com": ("reputable-news", "wikipedia-rsp", "Wikipedia perennial sources: generally reliable."),
-    "washingtonpost.com": ("reputable-news", "wikipedia-rsp", "Wikipedia perennial sources: generally reliable."),
-    "theguardian.com": ("reputable-news", "wikipedia-rsp", "Wikipedia perennial sources: generally reliable."),
 
-    # Known satirical / fictional sites.
-    "worldnewsdailyreport.com": ("satirical", "wikipedia-rsp", "Self-described satirical/fictional news site."),
-    "theonion.com": ("satirical", "wikipedia-rsp", "Self-described satirical news site."),
-    "babylonbee.com": ("satirical", "wikipedia-rsp", "Self-described satirical news site."),
+# ── Curated tier sets ────────────────────────────────────────────────────────
 
-    # Aggregators / low-quality.
-    "worldrecordacademy.org": ("low-quality", "wikipedia-rsp", "Aggregator with no editorial oversight."),
+
+# IFCN signatories + nationally-recognized fact-checkers. Selection biased
+# toward outlets we expect Bing to surface for English-language claims.
+_FACT_CHECKER_DOMAINS: set[str] = {
+    "snopes.com",
+    "factcheck.org",
+    "politifact.com",
+    "leadstories.com",
+    "checkyourfact.com",
+    "fullfact.org",
+    "factcheckni.org",
+    "logicallyfacts.com",
+    "factcheck.afp.com",
+    "factual.afp.com",
+    "factuel.afp.com",
+    "thequint.com",
+    "vishvasnews.com",
+    "boomlive.in",
+    "altnews.in",
+    "factly.in",
+    "newschecker.in",
+    "factcrescendo.com",
+    "fact-crescendo.com",
+    "africacheck.org",
+    "pesacheck.org",
+    "dubawa.org",
+    "namibiafactcheck.org.na",
+    "verafiles.org",
+    "rappler.com",
+    "tjekdet.dk",
+    "faktisk.no",
+    "correctiv.org",
+    "dpa-factchecking.com",
+    "demagog.org.pl",
+    "factcheck.kz",
+    "stopfake.org",
+    "maldita.es",
+    "newtral.es",
+    "efe.com",
+    "facta.news",
+    "pagellapolitica.it",
+    "lavoce.info",
+    "20minutes.fr",
+    "checkdesk.org",
+    "checkpoint.bg",
 }
+
+
+# Wikipedia RSP "generally reliable" — major newspapers/broadcasters with
+# clear editorial standards and a track record of corrections. Not exhaustive.
+_REPUTABLE_NEWS_DOMAINS: set[str] = {
+    # United States — general newspapers + wires
+    "apnews.com", "reuters.com", "nytimes.com", "washingtonpost.com",
+    "wsj.com", "usatoday.com", "latimes.com", "chicagotribune.com",
+    "bostonglobe.com", "miamiherald.com", "houstonchronicle.com",
+    "tampabay.com",
+    "propublica.org", "themarshallproject.org",
+    # Broadcasters & magazines
+    "npr.org", "abcnews.go.com", "cbsnews.com", "nbcnews.com",
+    "cnn.com", "msnbc.com", "foxnews.com", "pbs.org",
+    "bloomberg.com", "axios.com", "politico.com", "thehill.com",
+    "time.com", "newsweek.com", "theatlantic.com", "newyorker.com",
+    "vanityfair.com", "rollingstone.com", "wired.com", "vox.com",
+    # United Kingdom
+    "bbc.com", "bbc.co.uk", "theguardian.com", "telegraph.co.uk",
+    "ft.com", "thetimes.co.uk", "independent.co.uk",
+    "economist.com", "skynews.com", "channel4.com",
+    # Europe
+    "dw.com", "france24.com", "rfi.fr", "lemonde.fr", "liberation.fr",
+    "spiegel.de", "zeit.de", "sueddeutsche.de", "tagesschau.de",
+    "elpais.com", "elmundo.es",
+    "corriere.it", "lastampa.it", "repubblica.it",
+    # Australia / NZ
+    "smh.com.au", "theage.com.au", "abc.net.au", "theguardian.com.au",
+    "rnz.co.nz", "stuff.co.nz",
+    # Canada
+    "globeandmail.com", "cbc.ca", "nationalpost.com", "thestar.com",
+    # India
+    "thehindu.com", "indianexpress.com", "hindustantimes.com",
+    "timesofindia.indiatimes.com", "ndtv.com", "scroll.in",
+    "thewire.in",
+    # Middle East
+    "haaretz.com", "timesofisrael.com", "aljazeera.com",
+    "thenationalnews.com",
+    # East Asia
+    "japantimes.co.jp", "asahi.com", "nhk.or.jp",
+    "scmp.com", "straitstimes.com",
+}
+
+
+# Primary-source-tier — government, IGO, academic, journals, institutions.
+_PRIMARY_SOURCE_DOMAINS: set[str] = {
+    # US government
+    "whitehouse.gov", "state.gov", "supremecourt.gov", "uscourts.gov",
+    "archives.gov", "loc.gov", "congress.gov", "house.gov", "senate.gov",
+    "cdc.gov", "fda.gov", "nih.gov", "noaa.gov", "epa.gov",
+    "nasa.gov", "census.gov", "treasury.gov", "doe.gov",
+    "defense.gov", "dod.gov", "justice.gov", "fbi.gov",
+    "energy.gov", "ed.gov", "labor.gov", "doi.gov", "ftc.gov",
+    "sec.gov", "irs.gov", "uscis.gov", "dhs.gov",
+    # Other governments
+    "gov.uk", "europa.eu", "ec.europa.eu", "europarl.europa.eu",
+    "consilium.europa.eu", "echr.coe.int",
+    "canada.ca", "gc.ca",
+    "gov.au", "gov.nz",
+    "india.gov.in", "rbi.org.in",
+    # IGOs
+    "who.int", "un.org", "imf.org", "worldbank.org", "oecd.org",
+    "wto.org", "unesco.org", "unicef.org", "ilo.org", "wmo.int",
+    "icrc.org", "iea.org", "iaea.org", "nato.int",
+    # Academic / Journals
+    "nature.com", "science.org", "thelancet.com", "nejm.org",
+    "jamanetwork.com", "bmj.com", "cell.com", "plos.org",
+    "pnas.org", "ncbi.nlm.nih.gov", "pubmed.ncbi.nlm.nih.gov",
+    "arxiv.org", "biorxiv.org", "medrxiv.org",
+    "smithsonianmag.com", "nationalgeographic.com",
+    "scientificamerican.com",
+}
+
+
+_SATIRICAL_DOMAINS: set[str] = {
+    "theonion.com", "babylonbee.com", "worldnewsdailyreport.com",
+    "clickhole.com", "thehardtimes.net", "reductress.com",
+    "thedailymash.co.uk", "thebeaverton.com", "thepoke.co.uk",
+    "the-postillon.com", "newsthump.com", "thespoof.com",
+    "empirenews.net", "now8news.com", "huzlers.com",
+    "newsbiscuit.com", "private-eye.co.uk", "thedailywtf.com",
+    "rocketnewsfeed.com", "thestonecuttersjournal.com",
+}
+
+
+_LOW_QUALITY_DOMAINS: set[str] = {
+    # Aggregators without editorial oversight
+    "worldrecordacademy.org",
+    # Wikipedia RSP "generally unreliable" or worse
+    "dailymail.co.uk", "dailycaller.com",
+    "naturalnews.com", "infowars.com", "prisonplanet.com",
+    "beforeitsnews.com", "yournewswire.com", "newspunch.com",
+    "gateway-pundit.com", "thegatewaypundit.com",
+    "zerohedge.com", "rt.com", "sputniknews.com", "sputnikglobe.com",
+    "presstv.ir", "geopolitics.news",
+    "globalresearch.ca", "veteranstoday.com",
+    "thefreethoughtproject.com", "activistpost.com",
+    "wnd.com", "newsmax.com", "oann.com",
+}
+
+
+_TIER_BY_DOMAIN: dict[str, tuple[SourceTier, TierSource, str]] = {}
+for _d in _FACT_CHECKER_DOMAINS:
+    _TIER_BY_DOMAIN[_d] = ("fact-checker", "ifcn", "IFCN signatory or recognized fact-checker.")
+for _d in _REPUTABLE_NEWS_DOMAINS:
+    _TIER_BY_DOMAIN[_d] = (
+        "reputable-news", "wikipedia-rsp",
+        "Wikipedia perennial sources / RSP: generally reliable.",
+    )
+for _d in _PRIMARY_SOURCE_DOMAINS:
+    _TIER_BY_DOMAIN[_d] = (
+        "primary-source", "wikipedia-rsp",
+        "Primary source (government, institution, peer-reviewed journal).",
+    )
+for _d in _SATIRICAL_DOMAINS:
+    _TIER_BY_DOMAIN[_d] = (
+        "satirical", "wikipedia-rsp",
+        "Self-described or well-known satirical/fictional site.",
+    )
+for _d in _LOW_QUALITY_DOMAINS:
+    _TIER_BY_DOMAIN[_d] = (
+        "low-quality", "wikipedia-rsp",
+        "Wikipedia perennial sources or community consensus: unreliable.",
+    )
+
+
+# ── Model-prior classifier (Stage 4 of the four-step lookup) ────────────────
+
+
+_MODEL_PRIOR_CACHE: dict[str, tuple[SourceTier, str]] = {}
+_MODEL_PRIOR_LOCK = threading.Lock()
+
+
+_MODEL_PRIOR_SYSTEM = """You classify web-domain reliability for a fact-checking pipeline. For each input domain, decide ONE tier from this exact set:
+
+- "fact-checker" — IFCN signatory or nationally-recognized fact-checking organisation (Snopes, FactCheck.org, Politifact, AFP Fact Check, AltNews, etc.).
+- "reputable-news" — major newspaper/broadcaster/magazine with clear editorial standards and a track record of corrections (AP, Reuters, BBC, NYT, Guardian, Le Monde, Spiegel, etc.).
+- "primary-source" — government, IGO, academic institution, peer-reviewed journal, or major institutional publisher (whitehouse.gov, who.int, nature.com, nih.gov, etc.).
+- "aggregator" — content aggregator without significant original reporting (news.yahoo.com, news.google.com, etc.).
+- "low-quality" — outlet community-consensus marked as unreliable, conspiracy, partisan-propaganda, or known to recycle hoaxes (naturalnews, infowars, gateway pundit, RT, Sputnik, etc.).
+- "satirical" — self-described or widely-recognized satirical / fictional news site (The Onion, Babylon Bee, World News Daily Report, etc.).
+- "unknown" — you have no confident prior on this domain.
+
+For each domain, give a one-line rationale. Be conservative — if you're not sure, return "unknown".
+
+Output a JSON object: a single top-level field `classifications` mapping each input domain → {tier, rationale}.
+"""
+
+
+def _classify_via_model_batch(domains: list[str]) -> dict[str, tuple[SourceTier, str]]:
+    """Single Claude call to classify a batch of unknown domains. Cached results
+    are returned for already-seen domains; only new domains hit the model."""
+    if not domains:
+        return {}
+    fresh: list[str] = []
+    with _MODEL_PRIOR_LOCK:
+        for d in domains:
+            if d in _MODEL_PRIOR_CACHE:
+                continue
+            fresh.append(d)
+    if not fresh:
+        with _MODEL_PRIOR_LOCK:
+            return {d: _MODEL_PRIOR_CACHE[d] for d in domains if d in _MODEL_PRIOR_CACHE}
+
+    from pydantic import BaseModel
+
+    class _Entry(BaseModel):
+        tier: SourceTier
+        rationale: str = ""
+
+    class _BatchClassification(BaseModel):
+        classifications: dict[str, _Entry]
+
+    from .llm import call_claude_json
+    user_prompt = json.dumps({"domains": sorted(set(fresh))}, indent=2)
+    try:
+        out = call_claude_json(
+            prompt=user_prompt,
+            schema=_BatchClassification,
+            system=_MODEL_PRIOR_SYSTEM,
+            reasoning_effort="low",
+            max_tokens=2048,
+        )
+    except Exception:
+        logger.exception("Model-prior classification call failed; %d domains stay unknown.", len(fresh))
+        return {}
+
+    result: dict[str, tuple[SourceTier, str]] = {}
+    with _MODEL_PRIOR_LOCK:
+        for d, entry in out.classifications.items():
+            tier = entry.tier
+            rationale = entry.rationale or "Model parametric prior."
+            _MODEL_PRIOR_CACHE[d] = (tier, rationale)
+            result[d] = (tier, rationale)
+        for d in domains:
+            if d in _MODEL_PRIOR_CACHE and d not in result:
+                result[d] = _MODEL_PRIOR_CACHE[d]
+    return result
+
+
+# ── Public API ──────────────────────────────────────────────────────────────
 
 
 def _normalize_domain(url: str) -> str:
@@ -54,27 +283,105 @@ def _normalize_domain(url: str) -> str:
     return host.lower()
 
 
+def _registered_domain(host: str) -> str:
+    """Strip www. and other common subdomain prefixes."""
+    if not host:
+        return ""
+    if host.startswith("www."):
+        return host[4:]
+    return host
+
+
+def _lookup_curated(host: str) -> tuple[SourceTier, TierSource, str] | None:
+    """Check curated tables with subdomain → parent fallback."""
+    if host in _TIER_BY_DOMAIN:
+        return _TIER_BY_DOMAIN[host]
+    # Strip subdomains one segment at a time and re-check.
+    parts = host.split(".")
+    for i in range(1, len(parts) - 1):
+        parent = ".".join(parts[i:])
+        if parent in _TIER_BY_DOMAIN:
+            return _TIER_BY_DOMAIN[parent]
+    return None
+
+
 def classify_url(url: str) -> SourceQualityEntry:
-    """Return a SourceQualityEntry for a URL. Falls through to `unknown`."""
-    host = _normalize_domain(url)
-    if host in _DOMAIN_TABLE:
-        tier, tier_source, rationale = _DOMAIN_TABLE[host]
+    """Classify a single URL. Equivalent to build_quality_table([url])[0] but
+    skips the batch optimization — prefer the batch entrypoint for multiple URLs."""
+    host = _registered_domain(_normalize_domain(url))
+    if not host:
+        return SourceQualityEntry(
+            url=url, tier="unknown", tier_source="model-prior",
+            rationale="URL has no parseable host.",
+        )
+    hit = _lookup_curated(host)
+    if hit:
+        tier, tier_source, rationale = hit
         return SourceQualityEntry(url=url, tier=tier, tier_source=tier_source, rationale=rationale)
+    classified = _classify_via_model_batch([host])
+    if host in classified:
+        tier, rationale = classified[host]
+        return SourceQualityEntry(
+            url=url, tier=tier, tier_source="model-prior", rationale=rationale,
+        )
     return SourceQualityEntry(
-        url=url,
-        tier="unknown",
-        tier_source="model-prior",
-        rationale=f"No entry for {host!r} in the thin-slice domain table.",
+        url=url, tier="unknown", tier_source="model-prior",
+        rationale=f"No entry for {host!r}; model fallback also returned unknown.",
     )
 
 
 def build_quality_table(urls: list[str]) -> list[SourceQualityEntry]:
-    """Build the source_quality_table for a set of URLs, de-duplicated in input order."""
+    """Build the source_quality_table for a set of URLs, de-duplicated in
+    input order. Unknown domains are batched into a single Claude call."""
     seen: set[str] = set()
-    table: list[SourceQualityEntry] = []
+    ordered_urls: list[str] = []
     for url in urls:
-        if url in seen:
+        if url not in seen:
+            seen.add(url)
+            ordered_urls.append(url)
+
+    # First pass — curated lookup. Collect unknowns for batched model call.
+    cached: dict[str, SourceQualityEntry] = {}
+    unknown_hosts: list[str] = []
+    host_by_url: dict[str, str] = {}
+    for url in ordered_urls:
+        host = _registered_domain(_normalize_domain(url))
+        host_by_url[url] = host
+        if not host:
+            cached[url] = SourceQualityEntry(
+                url=url, tier="unknown", tier_source="model-prior",
+                rationale="URL has no parseable host.",
+            )
             continue
-        seen.add(url)
-        table.append(classify_url(url))
-    return table
+        hit = _lookup_curated(host)
+        if hit:
+            tier, tier_source, rationale = hit
+            cached[url] = SourceQualityEntry(
+                url=url, tier=tier, tier_source=tier_source, rationale=rationale,
+            )
+        elif host not in unknown_hosts:
+            unknown_hosts.append(host)
+
+    # Second pass — single batched model call for unknowns.
+    model_results: dict[str, tuple[SourceTier, str]] = {}
+    if unknown_hosts:
+        logger.info("source classifier: %d unknown host(s) → batch model call", len(unknown_hosts))
+        model_results = _classify_via_model_batch(unknown_hosts)
+
+    out: list[SourceQualityEntry] = []
+    for url in ordered_urls:
+        if url in cached:
+            out.append(cached[url])
+            continue
+        host = host_by_url[url]
+        if host in model_results:
+            tier, rationale = model_results[host]
+            out.append(SourceQualityEntry(
+                url=url, tier=tier, tier_source="model-prior", rationale=rationale,
+            ))
+        else:
+            out.append(SourceQualityEntry(
+                url=url, tier="unknown", tier_source="model-prior",
+                rationale=f"No entry for {host!r}; model fallback returned no classification.",
+            ))
+    return out
