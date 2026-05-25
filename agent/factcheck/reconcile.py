@@ -27,6 +27,7 @@ from .schema import (
     PresentationPayload,
     SourceQualityEntry,
     Stance,
+    UnaddressedProposition,
 )
 
 
@@ -127,13 +128,43 @@ def reconcile(
         ]
 
     user_prompt = json.dumps(payload, indent=2)
-    output = call_claude_json(
-        prompt=user_prompt,
-        schema=ReconciliationOutput,
-        system=_SYSTEM_PROMPT,
-        reasoning_effort="medium",
-        max_tokens=4096,
-    )
+    try:
+        output = call_claude_json(
+            prompt=user_prompt,
+            schema=ReconciliationOutput,
+            system=_SYSTEM_PROMPT,
+            reasoning_effort="medium",
+            max_tokens=4096,
+        )
+    except Exception as exc:
+        # Refusal or parse failure. Degrade to a "could not reason" output —
+        # central claim lands in unaddressed_propositions, no source citations.
+        # The renderer's state becomes "no_sources" and produces a tone-aware
+        # reply via the model. Pipeline keeps going; mention gets a real reply.
+        import logging
+        logging.getLogger(__name__).warning(
+            "reconcile: call_claude_json failed (%s) — degrading to no-sources output", exc,
+        )
+        return ReconciliationOutput(
+            lens_1=Lens1(narrative="Reconciliation failed; central claim could not be analyzed."),
+            consolidated_findings=ConsolidatedFindings(
+                unaddressed_propositions=(
+                    UnaddressedProposition(
+                        proposition=central_claim_text,
+                        reason="evidence retrieved but silent",
+                        is_central=True,
+                    ),
+                ),
+            ),
+            presentation_payload=PresentationPayload(
+                headline_finding="Could not analyze this claim against the available evidence.",
+                counter_fact=None,
+                primary_sources_to_cite=(),
+                load_bearing_evidence_snippet="",
+            ),
+            tone_neutral_justification="The model declined to reason about this claim or returned an unparseable response; no verdict available.",
+            evidence_stances=["neutral"] * len(evidence),
+        )
     # Stance count drift can happen when image-only or evidence list is
     # empty — Claude sometimes stamps stances for image-provenance hits.
     # Don't crash the pipeline; truncate or pad to match the text-evidence
