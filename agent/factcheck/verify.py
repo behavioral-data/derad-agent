@@ -105,13 +105,24 @@ def _make_user_payload(
     return json.dumps(payload, indent=2)
 
 
+class VerifyControllerError(RuntimeError):
+    """Raised when the verify-loop controller fails on its first call.
+
+    Distinct from "controller said stop" — that's a legitimate decision
+    that produces an NEI verdict downstream. This means we couldn't even
+    determine whether to search; the surrounding pipeline should emit
+    `pipeline_error` rather than masquerade as NEI.
+    """
+
+
 def _decide_next(
     claim_text: str,
     history: list[_Step],
     tweet_context: Optional[dict],
     image_summaries: Optional[list[dict]],
-) -> _Decision:
-    """Single Claude call: continue with a question, or stop?"""
+) -> Optional[_Decision]:
+    """Single Claude call: continue with a question, or stop? Returns None on
+    LLM failure so the caller can distinguish from a legitimate stop."""
     user_prompt = _make_user_payload(claim_text, history, tweet_context, image_summaries)
     try:
         return call_claude_json(
@@ -122,8 +133,8 @@ def _decide_next(
             max_tokens=1024,
         )
     except Exception:
-        logger.exception("Verification-loop controller call failed; stopping.")
-        return _Decision(action="stop", next_question=None, reason="controller_call_failed")
+        logger.exception("Verification-loop controller call failed.")
+        return None
 
 
 def iterative_verify(
@@ -151,6 +162,22 @@ def iterative_verify(
             break
 
         decision = _decide_next(claim_text, history, tweet_context, image_summaries)
+        if decision is None:
+            # Controller call failed (LLM outage / parse error / refusal).
+            if not history:
+                # First call failed → no evidence at all → distinguish from
+                # legitimate stop. Surrounding pipeline records pipeline_error
+                # via process_mention's outer try/except.
+                raise VerifyControllerError(
+                    "controller call failed on first iteration; no evidence gathered"
+                )
+            # Later call failed → we have partial evidence; graceful stop.
+            logger.warning(
+                "iterative_verify: controller failed on step %d; stopping gracefully with %d records",
+                step_idx + 1, sum(len(s.hits) for s in history),
+            )
+            break
+
         logger.info(
             "iterative_verify: step %d → action=%s question=%r reason=%r",
             step_idx + 1, decision.action,

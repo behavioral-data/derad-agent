@@ -54,6 +54,10 @@ Use `tweet_context` actively. In particular:
 
 Use the source_quality_table for evidence-source classification; tweet_context informs how you interpret the CLAIM itself, not the evidence.
 
+WHEN TEXT EVIDENCE IS EMPTY BUT IMAGE EVIDENCE IS PRESENT — handle these two cases distinctly:
+- The image IS the central claim's subject (the post claims "this photo shows X", "this image proves Y", or the central proposition is literally about what's depicted). Image-provenance hits in source_quality_table CAN be cited if they directly speak to the image's identity, source, or context.
+- The image is incidental (an illustration / meme / generic visual that accompanies the text claim but doesn't carry it). Image-provenance hits typically address what the image IS, NOT whether the central text claim is true. In that case, do NOT cite image-provenance URLs as evidence for the text claim. Set primary_sources_to_cite=[] and place the central proposition in unaddressed_propositions with reason="evidence retrieved but silent" — the bot will emit a "no credible coverage" reply, not a misleading citation.
+
 Your job is to reconcile all the evidence and emit Lens 1 (text-text) findings. When image evidence is present, also reason about image-text alignment and cross-modal contradictions inline:
 
 1. For each atomic proposition implied by the central claim, decide whether it is verified, refuted, disputed, or unaddressed by the combined evidence. Cite the supporting URLs from the source-quality table. Mark the central proposition with is_central=true.
