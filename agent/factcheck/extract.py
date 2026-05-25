@@ -15,9 +15,9 @@ import json
 import logging
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-from .llm import call_claude_json
+from .llm import call_claude_json, pruned_context
 from .multimodal import ImageEvidence
 from .schema import ClaimType, OverallState
 
@@ -50,6 +50,17 @@ class ExtractionOutput(BaseModel):
         default="",
         description="When overall_state='no_checkable_claim', a short reason (≤ 15 words) the bot can paraphrase. Empty otherwise.",
     )
+
+    @model_validator(mode="after")
+    def _exactly_one_central(self) -> "ExtractionOutput":
+        if not self.claims:
+            raise ValueError("ExtractionOutput must contain at least one claim.")
+        central_count = sum(1 for c in self.claims if c.is_central)
+        if central_count != 1:
+            raise ValueError(
+                f"ExtractionOutput must mark exactly one claim is_central=true (got {central_count})."
+            )
+        return self
 
 
 _SYSTEM_PROMPT = """You are the claim-extraction stage of a fact-checking pipeline. Your job is to decompose a tweet into atomic, fact-checkable propositions — and to identify when there's nothing to check.
@@ -100,23 +111,17 @@ def extract_claims(
     one verifiable central claim (preserves pre-Stage-2 behaviour).
     """
     payload: dict = {"tweet_text": claim_text}
-    if tweet_context:
-        clean = {k: v for k, v in tweet_context.items() if v not in (None, "", [], {})}
-        if clean:
-            payload["tweet_context"] = clean
+    cleaned_ctx = pruned_context(tweet_context)
+    if cleaned_ctx:
+        payload["tweet_context"] = cleaned_ctx
     if image_evidence:
-        payload["image_evidence"] = [
-            {
-                "image_url": img.image_url,
-                "ocr_text": img.ocr_text,
-                "description": img.description,
-            }
-            for img in image_evidence
-        ]
+        payload["image_evidence"] = [img.to_prompt_summary() for img in image_evidence]
 
     user_prompt = json.dumps(payload, indent=2)
     try:
-        out = call_claude_json(
+        # ExtractionOutput's @model_validator enforces exactly-one-central.
+        # call_claude_json raises ValueError on schema failure → fallback below.
+        return call_claude_json(
             prompt=user_prompt,
             schema=ExtractionOutput,
             system=_SYSTEM_PROMPT,
@@ -126,19 +131,6 @@ def extract_claims(
     except Exception:
         logger.exception("Claim extraction call failed; falling back to whole-tweet-as-claim.")
         return _fallback(claim_text)
-
-    central_count = sum(1 for c in out.claims if c.is_central)
-    if central_count != 1:
-        logger.warning(
-            "extract_claims returned %d central claims (expected 1); falling back to whole-tweet-as-claim.",
-            central_count,
-        )
-        return _fallback(claim_text)
-
-    if not out.claims:
-        return _fallback(claim_text)
-
-    return out
 
 
 def _fallback(claim_text: str) -> ExtractionOutput:

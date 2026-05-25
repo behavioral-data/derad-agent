@@ -7,6 +7,9 @@
 - make tables that aahan and trisha need a bit more user friendly
 - the asnwer should be to the question of 'is this true?' during invocation etc
 - how are we handling videos?
+- Verdict label still NEI even though the reply makes a confident refutation — Newsweek + The Source aren't in our 23-domain canned source-quality table (which only covers IFCN signatories + a handful of Wikipedia-RSP entries), so they fall through to unknown tier and don't count toward the ≥2-reliable-tier threshold. The reply text is still good because the renderer reads presentation_payload, not verdict_label. Real fix is to expand the source-quality table — defer.-Ask claude to read all or atleast the few best papers on the @grok phenomeena and compare our work and deisgnsand ersearcher and stufy design with these different studies and their findings
+- someone replued to invoked tweet before the fact check came in, and thefact check shows up under the other person's reply not the invoked one
+- Make the bot slightly more general such that it can find evidence to challenge views.
 
 ## Research Question
 

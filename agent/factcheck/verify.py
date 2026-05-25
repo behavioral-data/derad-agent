@@ -23,7 +23,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from .llm import call_claude_json
+from .llm import call_claude_json, pruned_context
 from .schema import Evidence
 from .search import SearchBackend, SearchHit
 
@@ -97,10 +97,9 @@ def _make_user_payload(
             for step in history
         ],
     }
-    if tweet_context:
-        clean = {k: v for k, v in tweet_context.items() if v not in (None, "", [], {})}
-        if clean:
-            payload["tweet_context"] = clean
+    cleaned_ctx = pruned_context(tweet_context)
+    if cleaned_ctx:
+        payload["tweet_context"] = cleaned_ctx
     if image_summaries:
         payload["image_summaries"] = image_summaries
     return json.dumps(payload, indent=2)

@@ -19,7 +19,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from .llm import call_claude_json
+from .llm import call_claude_json, pruned_context
 from .multimodal import ImageEvidence
 from .schema import (
     ConsolidatedFindings,
@@ -33,6 +33,31 @@ from .schema import (
 
 
 logger = logging.getLogger(__name__)
+
+
+_RECONCILE_SNIPPET_CAP = 240
+_RECONCILE_RATIONALE_CAP = 120
+
+
+def _compact_evidence(e: Evidence) -> dict:
+    """Trim per-evidence snippet to keep the reconcile prompt under control."""
+    snippet = (e.snippet or "")[:_RECONCILE_SNIPPET_CAP]
+    return {
+        "question": e.question,
+        "source_url": e.source_url,
+        "snippet": snippet,
+        "stance": e.stance,
+    }
+
+
+def _compact_quality_entry(s: SourceQualityEntry) -> dict:
+    """Trim rationale for the reconcile prompt — reconcile only needs the tier."""
+    return {
+        "url": s.url,
+        "tier": s.tier,
+        "tier_source": s.tier_source,
+        "rationale": (s.rationale or "")[:_RECONCILE_RATIONALE_CAP],
+    }
 
 
 class ReconciliationOutput(BaseModel):
@@ -112,28 +137,14 @@ def reconcile(
     """
     payload: dict = {
         "central_claim": central_claim_text,
-        "evidence": [e.model_dump() for e in evidence],
-        "source_quality_table": [s.model_dump() for s in source_quality_table],
+        "evidence": [_compact_evidence(e) for e in evidence],
+        "source_quality_table": [_compact_quality_entry(s) for s in source_quality_table],
     }
-    if tweet_context:
-        # Drop None / empty values so the prompt doesn't get noise.
-        clean = {k: v for k, v in tweet_context.items() if v not in (None, "", [], {})}
-        if clean:
-            payload["tweet_context"] = clean
+    cleaned_ctx = pruned_context(tweet_context)
+    if cleaned_ctx:
+        payload["tweet_context"] = cleaned_ctx
     if image_evidence:
-        payload["image_evidence"] = [
-            {
-                "image_url": img.image_url,
-                "ocr_text": img.ocr_text,
-                "description": img.description,
-                "provenance_search_hint": img.search_hint,
-                "provenance_hits": [
-                    {"url": h.url, "title": h.title, "snippet": h.snippet}
-                    for h in img.provenance_hits
-                ],
-            }
-            for img in image_evidence
-        ]
+        payload["image_evidence"] = [img.to_prompt_with_provenance() for img in image_evidence]
 
     user_prompt = json.dumps(payload, indent=2)
     try:

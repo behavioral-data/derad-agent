@@ -39,6 +39,7 @@ from .schema import (
     Lens3,
     Modality,
     PresentationPayload,
+    ProvenanceMatch,
     SourceQualityEntry,
     UnaddressedProposition,
 )
@@ -70,12 +71,36 @@ def _git_sha() -> str:
         return "unknown"
 
 
-def _nei_verdict(reason: str) -> tuple[ConsolidatedFindings, PresentationPayload, str]:
+def _resolve_modality(image_urls: list[str], claim_text: str) -> Modality:
+    if image_urls and claim_text.strip():
+        return "mixed"
+    if image_urls:
+        return "image"
+    return "text"
+
+
+def _thread_context(tweet_context: Optional[dict]) -> str:
+    """Summarize parent-tweet reply/quote/retweet relations into a one-line
+    string for the freeze record. Empty when nothing relevant is present."""
+    if not tweet_context:
+        return ""
+    refs = tweet_context.get("referenced_tweets") or []
+    parts = [
+        f"{r.get('type')}={r.get('id')}"
+        for r in refs
+        if isinstance(r, dict) and r.get("type") and r.get("id")
+    ]
+    return "; ".join(parts)
+
+
+def _nei_verdict(
+    reason: str, *, reason_label: str = "no evidence retrieved"
+) -> tuple[ConsolidatedFindings, PresentationPayload, str]:
     findings = ConsolidatedFindings(
         unaddressed_propositions=(
             UnaddressedProposition(
                 proposition=reason,
-                reason="no evidence retrieved",
+                reason=reason_label,
                 is_central=True,
             ),
         )
@@ -108,17 +133,25 @@ def _run_multimodal(image_urls: list[str], backend: SearchBackend) -> list[Image
 
 
 def _attached_image_records(images: list[ImageEvidence]) -> list[AttachedImage]:
-    """Pack per-image evidence into the frozen schema's AttachedImage rows."""
+    """Pack per-image evidence into the frozen schema's AttachedImage rows.
+
+    `provenance` is populated from the Tier 3 web-search hits — title becomes
+    `match_caption`. `earliest_seen` stays unknown until Track-B image-vector
+    search lands; design §4.1.5.1 marks that as a v2 stretch.
+    """
     records: list[AttachedImage] = []
     for i, img in enumerate(images):
+        provenance = tuple(
+            ProvenanceMatch(match_url=h.url, match_caption=h.title or "")
+            for h in img.provenance_hits
+        )
         records.append(
             AttachedImage(
                 image_id=f"img{i + 1}",
                 image_url=img.image_url,
                 ocr_text=img.ocr_text,
                 vlm_description=img.description,
-                provenance=(),  # Tier 3 hits live in source_quality_table; this field is reserved
-                                # for true reverse-image-search matches with earliest-seen dates.
+                provenance=provenance,
                 manipulation_check="out_of_scope_nei",
             )
         )
@@ -134,6 +167,7 @@ def _short_circuit_no_checkable(
     backend_name: str,
     image_evidence: list[ImageEvidence],
     extraction: ExtractionOutput,
+    thread_context_str: str,
     freeze_root: Optional[Path],
 ) -> FrozenVerdict:
     """Stage 2+3 short-circuit. No search, no reconcile — bot replies with
@@ -141,16 +175,10 @@ def _short_circuit_no_checkable(
     logger.info("run_pipeline[%s]: short-circuit — no_checkable_claim (%s)", invocation_id, extraction.reason)
 
     reason = extraction.reason or "Personal opinion or aesthetic reaction; no factually verifiable claim identified."
-    findings = ConsolidatedFindings(
-        unaddressed_propositions=tuple(
-            UnaddressedProposition(
-                proposition=c.text,
-                reason="no evidence retrieved",
-                is_central=c.is_central,
-            )
-            for c in extraction.claims
-        )
-    )
+    # No evidence is *sought* on this path — the extracted propositions are
+    # logged on Claim objects below; we don't restate them as unaddressed
+    # because they were never put to the test.
+    findings = ConsolidatedFindings(unaddressed_propositions=())
     payload = PresentationPayload(
         headline_finding=reason,
         counter_fact=None,
@@ -173,6 +201,7 @@ def _short_circuit_no_checkable(
         invocation_id=invocation_id,
         target_tweet_id=target_tweet_id,
         invocation_time=invocation_time,
+        thread_context=thread_context_str,
         modality=modality,
         backend_version=BackendVersion(
             model="claude-via-azure-ai-services",
@@ -221,7 +250,8 @@ def run_pipeline(
     invocation_id = str(uuid.uuid4())
     invocation_time = datetime.now(timezone.utc)
     image_urls = image_urls or []
-    modality: Modality = "mixed" if image_urls and claim_text.strip() else ("image" if image_urls else "text")
+    modality = _resolve_modality(image_urls, claim_text)
+    thread_context_str = _thread_context(tweet_context)
     author_log = (tweet_context or {}).get("author_username") or "?"
     logger.info(
         "run_pipeline[%s]: starting (modality=%s, claim_chars=%d, images=%d, author=@%s)",
@@ -256,6 +286,7 @@ def run_pipeline(
             backend_name=backend.name,
             image_evidence=image_evidence,
             extraction=extraction,
+            thread_context_str=thread_context_str,
             freeze_root=freeze_root,
         )
 
@@ -264,16 +295,7 @@ def run_pipeline(
     central_text = central.text
     logger.info("run_pipeline[%s]: Stage 4 — iterative verification (Papelo-style)", invocation_id)
     image_summaries = (
-        [
-            {
-                "image_url": img.image_url,
-                "ocr_text": img.ocr_text,
-                "description": img.description,
-            }
-            for img in image_evidence
-        ]
-        if image_evidence
-        else None
+        [img.to_prompt_summary() for img in image_evidence] if image_evidence else None
     )
     text_evidence = iterative_verify(
         claim_text=central_text,
@@ -305,7 +327,7 @@ def run_pipeline(
             tweet_context=tweet_context,
         )
         logger.info("run_pipeline[%s]: Stage 4.5 done", invocation_id)
-        text_evidence = [
+        stamped_evidence = [
             Evidence(
                 question=e.question,
                 source_url=e.source_url,
@@ -319,7 +341,9 @@ def run_pipeline(
         justification = recon.tone_neutral_justification
         lens_1 = recon.lens_1
         verdict_label = derive_verdict(findings, quality_table)
-    evidence = text_evidence
+        evidence = stamped_evidence
+    if not text_evidence and not image_evidence:
+        evidence = text_evidence  # empty list; bound for the no-recon branch
 
     logger.info("run_pipeline[%s]: Stage 5 — audit (declared=%s)", invocation_id, verdict_label)
     audit_result = audit(
@@ -337,7 +361,8 @@ def run_pipeline(
     if not audit_result.passed:
         verdict_label = "NotEnoughEvidence"
         findings, payload, justification = _nei_verdict(
-            "Audit failed: " + "; ".join(audit_result.failures)
+            "Audit failed: " + "; ".join(audit_result.failures),
+            reason_label="evidence retrieved but silent",
         )
 
     claim_objs: list[Claim] = []
@@ -383,6 +408,7 @@ def run_pipeline(
         invocation_id=invocation_id,
         target_tweet_id=target_tweet_id,
         invocation_time=invocation_time,
+        thread_context=thread_context_str,
         modality=modality,
         backend_version=BackendVersion(
             model="claude-via-azure-ai-services",

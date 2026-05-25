@@ -79,6 +79,27 @@ class ImageEvidence:
     search_hint: str
     provenance_hits: tuple[SearchHit, ...]
 
+    def to_prompt_summary(self) -> dict:
+        """3-key dict for prompts that only need image identity/content."""
+        return {
+            "image_url": self.image_url,
+            "ocr_text": self.ocr_text,
+            "description": self.description,
+        }
+
+    def to_prompt_with_provenance(self) -> dict:
+        """Extended dict for reconcile — includes provenance hits."""
+        return {
+            "image_url": self.image_url,
+            "ocr_text": self.ocr_text,
+            "description": self.description,
+            "provenance_search_hint": self.search_hint,
+            "provenance_hits": [
+                {"url": h.url, "title": h.title, "snippet": h.snippet}
+                for h in self.provenance_hits
+            ],
+        }
+
 
 def fetch_image_bytes(url: str) -> Optional[tuple[bytes, str]]:
     """Download image bytes from a URL. Returns (bytes, media_type) or None."""

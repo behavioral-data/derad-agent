@@ -21,6 +21,15 @@ T = TypeVar("T", bound=BaseModel)
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
 
+def pruned_context(ctx: dict | None) -> dict | None:
+    """Drop None/empty values from a tweet_context payload so the prompt
+    doesn't carry noise. Returns None when nothing remains."""
+    if not ctx:
+        return None
+    clean = {k: v for k, v in ctx.items() if v not in (None, "", [], {})}
+    return clean or None
+
+
 def _extract_json(text: str) -> str:
     """Pull a JSON object out of an LLM response (handles fenced + raw)."""
     match = _JSON_BLOCK_RE.search(text)
