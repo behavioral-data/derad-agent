@@ -104,7 +104,7 @@ Output STRICTLY this shape and nothing else:
 
 Rules:
 - Return between 3 and 6 hits.
-- Use only URLs that came from your Bing search results.
+- **URLs must be COPIED EXACTLY from the bing_grounding tool's results — never construct, guess, complete, or modify a URL based on plausible patterns. Hallucinated URLs (real-looking slugs that don't match a real article) are the worst failure mode of this stage.** If a URL appears truncated in the tool output, copy what you have; do NOT extend it.
 - Do not interpret, opine, or argue about the claim — just report what sources say.
 - Snippets must be drawn from the search results, not invented.
 - No markdown, no prose outside the JSON object.
@@ -200,6 +200,13 @@ class FoundryBingSearchBackend:
             logger.exception("Foundry Bing search failed for query=%r", query)
             return []
 
+        # Annotations from the bing_grounding tool are the source of truth for
+        # which URLs were actually returned by Bing. The JSON text the agent
+        # writes can contain hallucinated URLs (plausible-looking slugs + IDs
+        # that point at non-existent or wrong articles). Filter the JSON hits
+        # to only those whose URL appears in an url_citation annotation.
+        annotated_urls = _extract_url_citations(response)
+
         text = _extract_response_text(response)
         if not text:
             logger.warning("Foundry Bing search returned no text for query=%r", query)
@@ -211,12 +218,43 @@ class FoundryBingSearchBackend:
             logger.warning("Could not parse Foundry hits JSON: %s — text head: %s", exc, text[:200])
             return []
 
-        hits = [
+        candidate_hits = [
             SearchHit(url=h.get("url", ""), title=h.get("title", ""), snippet=h.get("snippet", ""))
             for h in (data.get("hits") or [])
             if isinstance(h, dict) and h.get("url")
         ]
-        return hits[:top_k]
+
+        if annotated_urls:
+            verified, dropped = [], []
+            for h in candidate_hits:
+                if h.url in annotated_urls:
+                    verified.append(h)
+                else:
+                    dropped.append(h.url)
+            if dropped:
+                logger.warning(
+                    "Foundry search: dropped %d hallucinated URL(s) not in Bing annotations: %s",
+                    len(dropped), dropped[:5],
+                )
+            # If the agent only emitted hallucinated URLs (none matched
+            # annotations), surface the annotation URLs directly. We don't
+            # have titles/snippets for them, but they're real.
+            if not verified and annotated_urls:
+                logger.warning(
+                    "Foundry search: agent JSON had 0 verifiable URLs; falling back to %d annotation URLs",
+                    len(annotated_urls),
+                )
+                verified = [
+                    SearchHit(url=u, title="", snippet="")
+                    for u in list(annotated_urls)[:top_k]
+                ]
+            candidate_hits = verified
+        else:
+            # No annotations on this response (Bing tool might not always
+            # attach them). HEAD-validate to catch obvious 404s.
+            candidate_hits = _head_validate(candidate_hits)
+
+        return candidate_hits[:top_k]
 
 
 def _extract_response_text(response) -> str:
@@ -249,6 +287,61 @@ def _parse_hits_json(text: str) -> dict:
     if not match:
         raise ValueError("no JSON object found")
     return json.loads(match.group(0))
+
+
+def _extract_url_citations(response) -> set[str]:
+    """Pull every url_citation annotation URL from a Responses-API response.
+
+    The bing_grounding tool attaches url_citation annotations to message-
+    content blocks. These annotations are anchored to real Bing search
+    results — unlike the JSON URLs the agent writes, they cannot be
+    hallucinated by the model.
+    """
+    urls: set[str] = set()
+    output = getattr(response, "output", None) or []
+    for item in output:
+        item_type = getattr(item, "type", None)
+        if item_type != "message":
+            continue
+        content = getattr(item, "content", None) or []
+        for block in content:
+            annotations = getattr(block, "annotations", None) or []
+            for ann in annotations:
+                ann_type = getattr(ann, "type", None) or (
+                    ann.get("type") if isinstance(ann, dict) else None
+                )
+                if ann_type != "url_citation":
+                    continue
+                url = getattr(ann, "url", None) or (
+                    ann.get("url") if isinstance(ann, dict) else None
+                )
+                if url:
+                    urls.add(url)
+    return urls
+
+
+def _head_validate(hits: list[SearchHit], *, timeout_s: float = 4.0) -> list[SearchHit]:
+    """Drop hits whose URL doesn't resolve to 2xx/3xx. Defense-in-depth when
+    annotation extraction returns nothing; catches obvious 404s but won't
+    detect 'page exists but is a different article'."""
+    import requests
+
+    out: list[SearchHit] = []
+    for h in hits:
+        try:
+            resp = requests.head(
+                h.url,
+                timeout=timeout_s,
+                allow_redirects=True,
+                headers={"User-Agent": "derad-agent-validator/3.0"},
+            )
+            if 200 <= resp.status_code < 400:
+                out.append(h)
+            else:
+                logger.warning("HEAD-validate dropped %s (status %d)", h.url, resp.status_code)
+        except requests.RequestException as exc:
+            logger.warning("HEAD-validate dropped %s (%s)", h.url, type(exc).__name__)
+    return out
 
 
 # ── Default backend selection ─────────────────────────────────────────────────
