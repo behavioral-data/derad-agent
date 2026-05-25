@@ -15,6 +15,7 @@
         <a href="#overview">Overview</a>
         <a href="#pipeline">Pipeline diagram</a>
         <a href="#verify-loop">Iterative loop</a>
+        <a href="#urls">URLs: trust &amp; persistence</a>
         <a href="#stages">Stage details</a>
         <a href="#services">Service inventory</a>
         <a href="#capacity">Capacity &amp; limits</a>
@@ -132,10 +133,99 @@
         </div>
       </section>
 
+      <!-- ───────────────────────── URLS: TRUST & PERSISTENCE ───────────────────────── -->
+      <section id="urls">
+        <div class="section-head">
+          <p class="eyebrow">04 · URLs — trust &amp; persistence</p>
+          <h2>How URLs flow through the pipeline (and what we save)</h2>
+          <p>Honest accounting of where URLs come from, where they can be hallucinated, what we persist, and what we never read.</p>
+        </div>
+
+        <div class="callout warning">
+          <strong>We never fetch page content.</strong> The pipeline trusts Bing's search-result snippet via the Foundry agent + the agent's synthesis. Design §4.4 specifies HTTP + Playwright document fetch; that's intentionally deferred to keep the stack Azure-only. Consequence: a cited URL that resolves to a 200 page can still serve a <em>different article</em> than the snippet claims (the India Today miscite case). HEAD-validation catches 404s; nothing catches "page exists but wrong content".
+        </div>
+
+        <h3 class="mt-24">URL lifecycle per Foundry search call</h3>
+        <ol class="task-list">
+          <li><span class="chip chip-info">1</span> We send a query to the Foundry agent (one of <code class="inline-code">claude-bing-search</code>'s tool-only agents, model gpt-4.1-mini).</li>
+          <li><span class="chip chip-info">2</span> The agent invokes the <code class="inline-code">bing_grounding</code> tool. Bing runs a real web search. Results return server-side with <code class="inline-code">url_citation</code> annotations attached to message-content blocks.</li>
+          <li><span class="chip chip-warning">3 ⚠</span> The agent writes a JSON object summarizing the hits. <strong>This is where URL hallucination happens.</strong> gpt-4.1-mini pattern-matches URL shapes (slugs, IDs, dates) and can fabricate plausible-looking links that don't correspond to any real article.</li>
+          <li><span class="chip chip-done">4</span> Our search backend (<code class="inline-code">FoundryBingSearchBackend.search</code>) now extracts <code class="inline-code">url_citation</code> annotations directly — Bing-anchored, can't be hallucinated.</li>
+          <li><span class="chip chip-done">5</span> JSON-claimed URLs are kept only if they match the annotation set. Hallucinated URLs are dropped with a logged warning. If the agent emitted zero verifiable URLs, we fall back to the annotation URLs directly (no titles/snippets, but real).</li>
+          <li><span class="chip chip-done">6</span> If a response carries no annotations at all (rare), HEAD-validate each URL with a 4-second timeout to drop obvious 404s.</li>
+        </ol>
+
+        <h3 class="mt-24">What gets persisted per mention</h3>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Artifact</th>
+                <th>Where</th>
+                <th>What's in it</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Frozen verdict (full audit trail)</td>
+                <td><code class="inline-code">data/freezes/&lt;invocation_id&gt;.json</code> on App Service disk</td>
+                <td>Every extracted claim, every Evidence record (URL + snippet + question + stance), the source-quality table with tier classifications, the reconcile findings, the rendered presentation_payload, the cited URLs, the pipeline git SHA and model version strings.</td>
+              </tr>
+              <tr>
+                <td>Mention event row</td>
+                <td>Azure Tables <code class="inline-code">MentionEvents</code></td>
+                <td>Outcome (replied / dry_run / empty_reply / pipeline_error / pipeline_queue_timeout / parent_fetch_failed), tone, participant ID, study day, reply tweet ID, pipeline latency, queries issued, cited URLs.</td>
+              </tr>
+              <tr>
+                <td>Mention drop row</td>
+                <td>Azure Tables <code class="inline-code">MentionDrops</code></td>
+                <td>Mentions rejected at the guard chain (self-reply / opt-out / rate-limit) — separate from accepted-but-failed mentions.</td>
+              </tr>
+              <tr>
+                <td>Engagement snapshot</td>
+                <td>Azure Tables <code class="inline-code">EngagementSnapshots</code></td>
+                <td>Hourly poll of likes/reposts/replies on each bot-posted reply, plus downstream sharing-quality on the target user's subsequent posts (Mosleh outcome).</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="mt-24">What we do <em>not</em> persist or read</h3>
+        <div class="grid-2 mt-12">
+          <div class="panel">
+            <div class="panel-head"><h3>Not read</h3></div>
+            <ul class="task-list">
+              <li><span class="chip chip-blocked">no</span> HTTP GET of any cited URL's content</li>
+              <li><span class="chip chip-blocked">no</span> Comparison of fetched page title against the agent's claimed snippet</li>
+              <li><span class="chip chip-blocked">no</span> Playwright-headless rendering of JS-heavy pages (X / Facebook / Instagram)</li>
+              <li><span class="chip chip-blocked">no</span> Archive-Today / Wayback cross-checks</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>Not saved</h3></div>
+            <ul class="task-list">
+              <li><span class="chip chip-blocked">no</span> Raw Bing search results before the agent's JSON re-emission</li>
+              <li><span class="chip chip-blocked">no</span> Foundry response objects (only the parsed hits)</li>
+              <li><span class="chip chip-blocked">no</span> The annotation URLs we used to filter (just the verified hits)</li>
+              <li><span class="chip chip-blocked">no</span> Per-stage Claude conversation transcripts</li>
+            </ul>
+          </div>
+        </div>
+
+        <h3 class="mt-24">Why we don't fetch pages (yet)</h3>
+        <p>Design §4.4 specifies HTTP + Playwright fetching. Three reasons we deferred:</p>
+        <ul class="task-list">
+          <li><span class="chip">cost</span> Playwright adds a ~500MB layer to the Docker image and ~2-4s per page on JS-heavy sites; static HTTP adds ~500ms per URL.</li>
+          <li><span class="chip">scope</span> Azure has no native headless-browser service; running Playwright in Container Apps was a meaningful infra slab we punted on.</li>
+          <li><span class="chip">trust</span> The Foundry+Bing agent's snippet was "good enough" in early tests. The India Today miscite exposed that this isn't safe in the long tail.</li>
+        </ul>
+        <p>Pragmatic next step: fetch the top-1 cited URL per claim, extract title + first 2-3 paragraphs via readability, compare to claimed snippet. If mismatch, drop the citation. ~1-2 hours of code, ~3-5s added latency.</p>
+      </section>
+
       <!-- ───────────────────────── PER-STAGE DETAILS ───────────────────────── -->
       <section id="stages">
         <div class="section-head">
-          <p class="eyebrow">04 · stages in detail</p>
+          <p class="eyebrow">05 · stages in detail</p>
           <h2>What each stage does, with what</h2>
           <p>One card per stage. Service/model is the actual deployment we hit at runtime.</p>
         </div>
@@ -259,7 +349,7 @@
       <!-- ───────────────────────── SERVICE INVENTORY ───────────────────────── -->
       <section id="services">
         <div class="section-head">
-          <p class="eyebrow">05 · services</p>
+          <p class="eyebrow">06 · services</p>
           <h2>Service inventory</h2>
           <p>Everything we actually call at runtime. All Azure-native except the X API (necessary platform integration) and Foundry's gpt-4.1-mini deployment that drives the Bing tool.</p>
         </div>
@@ -347,7 +437,7 @@
       <!-- ───────────────────────── CAPACITY ───────────────────────── -->
       <section id="capacity">
         <div class="section-head">
-          <p class="eyebrow">06 · capacity</p>
+          <p class="eyebrow">07 · capacity</p>
           <h2>Headroom &amp; bottlenecks</h2>
           <p>At 25 concurrent pipelines per minute (peak), each constraint as a fraction of its ceiling.</p>
         </div>
@@ -436,7 +526,7 @@
       <!-- ───────────────────────── FAILURE MODES ───────────────────────── -->
       <section id="failure">
         <div class="section-head">
-          <p class="eyebrow">07 · failure modes</p>
+          <p class="eyebrow">08 · failure modes</p>
           <h2>How each stage degrades</h2>
           <p>Every stage is designed to fail toward NEI rather than toward a confident wrong reply.</p>
         </div>

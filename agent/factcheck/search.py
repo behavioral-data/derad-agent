@@ -200,13 +200,16 @@ class FoundryBingSearchBackend:
             logger.exception("Foundry Bing search failed for query=%r", query)
             return []
 
-        # Annotations from the bing_grounding tool are the source of truth for
-        # which URLs were actually returned by Bing. The JSON text the agent
-        # writes can contain hallucinated URLs (plausible-looking slugs + IDs
-        # that point at non-existent or wrong articles). Filter the JSON hits
-        # to only those whose URL appears in an url_citation annotation.
-        annotated_urls = _extract_url_citations(response)
-
+        # Foundry's bing_grounding tool doesn't reliably populate
+        # url_citation annotations for structured (JSON) output, so we can't
+        # filter agent-claimed URLs by annotation. Instead, every URL the
+        # agent claims is verified by fetching the page and comparing the
+        # actual page title to the agent's claimed title. This catches both
+        # 404s and the more pernicious "same domain, real-looking URL, but
+        # the router redirects to an unrelated article" case (e.g. India
+        # Today, where URL slugs are decorative and only the numeric ID
+        # routes — gpt-4.1-mini can fabricate a plausible slug attached to
+        # a real ID that points elsewhere).
         text = _extract_response_text(response)
         if not text:
             logger.warning("Foundry Bing search returned no text for query=%r", query)
@@ -224,37 +227,14 @@ class FoundryBingSearchBackend:
             if isinstance(h, dict) and h.get("url")
         ]
 
-        if annotated_urls:
-            verified, dropped = [], []
-            for h in candidate_hits:
-                if h.url in annotated_urls:
-                    verified.append(h)
-                else:
-                    dropped.append(h.url)
-            if dropped:
-                logger.warning(
-                    "Foundry search: dropped %d hallucinated URL(s) not in Bing annotations: %s",
-                    len(dropped), dropped[:5],
-                )
-            # If the agent only emitted hallucinated URLs (none matched
-            # annotations), surface the annotation URLs directly. We don't
-            # have titles/snippets for them, but they're real.
-            if not verified and annotated_urls:
-                logger.warning(
-                    "Foundry search: agent JSON had 0 verifiable URLs; falling back to %d annotation URLs",
-                    len(annotated_urls),
-                )
-                verified = [
-                    SearchHit(url=u, title="", snippet="")
-                    for u in list(annotated_urls)[:top_k]
-                ]
-            candidate_hits = verified
-        else:
-            # No annotations on this response (Bing tool might not always
-            # attach them). HEAD-validate to catch obvious 404s.
-            candidate_hits = _head_validate(candidate_hits)
-
-        return candidate_hits[:top_k]
+        verified, rejected = _validate_hits(candidate_hits)
+        if rejected:
+            logger.warning(
+                "Foundry search: dropped %d hallucinated/mismatched URL(s): %s",
+                len(rejected),
+                [f"{u} ({reason})" for u, reason in rejected[:5]],
+            )
+        return verified[:top_k]
 
 
 def _extract_response_text(response) -> str:
@@ -320,28 +300,126 @@ def _extract_url_citations(response) -> set[str]:
     return urls
 
 
-def _head_validate(hits: list[SearchHit], *, timeout_s: float = 4.0) -> list[SearchHit]:
-    """Drop hits whose URL doesn't resolve to 2xx/3xx. Defense-in-depth when
-    annotation extraction returns nothing; catches obvious 404s but won't
-    detect 'page exists but is a different article'."""
+_USER_AGENT = "Mozilla/5.0 (compatible; derad-agent-validator/3.0)"
+
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+
+
+def _fetch_title(url: str, *, timeout_s: float = 6.0) -> tuple[Optional[int], Optional[str], Optional[str]]:
+    """Fetch a URL following redirects, return (status, final_url, page_title).
+    Any element is None on failure."""
     import requests
 
-    out: list[SearchHit] = []
-    for h in hits:
+    try:
+        resp = requests.get(
+            url,
+            timeout=timeout_s,
+            allow_redirects=True,
+            headers={"User-Agent": _USER_AGENT, "Accept": "text/html,*/*"},
+            stream=True,
+        )
+        # Read at most 32KB — page <title> is in the <head> well before that.
+        chunks: list[bytes] = []
+        total = 0
+        for chunk in resp.iter_content(chunk_size=4096):
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total >= 32 * 1024:
+                break
+        resp.close()
+        body = b"".join(chunks)
+        # Best-effort decode; ignore decode errors.
         try:
-            resp = requests.head(
+            text = body.decode(resp.encoding or "utf-8", errors="replace")
+        except (LookupError, TypeError):
+            text = body.decode("utf-8", errors="replace")
+        match = _TITLE_RE.search(text)
+        title = None
+        if match:
+            import html as _html
+            title = _html.unescape(match.group(1)).strip()
+        return resp.status_code, str(resp.url), title
+    except Exception:
+        return None, None, None
+
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _tokenize(text: str) -> set[str]:
+    """Word-tokenize, lowercased, stripped of punctuation, length-filtered."""
+    return {tok for tok in _TOKEN_RE.findall(text.lower()) if len(tok) >= 3}
+
+
+_STOPWORDS = frozenset({
+    "the", "and", "for", "with", "that", "this", "from", "into",
+    "are", "was", "were", "been", "have", "has", "had", "would", "will",
+    "what", "when", "where", "who", "why", "how", "your", "you", "their",
+    "about", "after", "all", "any", "but", "can", "could", "did", "does",
+    "more", "most", "not", "now", "off", "one", "only", "out", "over",
+    "than", "then", "there", "these", "they", "than", "too", "use", "very",
+    "via", "viral", "news", "story", "article", "report", "watch", "video",
+    "photo", "image", "post", "twitter", "tweet",
+})
+
+
+def _title_match_score(claimed: str, actual: str) -> float:
+    """Jaccard overlap of meaningful tokens between claimed and actual titles.
+    Returns 0.0..1.0; ≥0.25 is a passable match for fact-checking purposes."""
+    if not claimed or not actual:
+        return 0.0
+    a = _tokenize(claimed) - _STOPWORDS
+    b = _tokenize(actual) - _STOPWORDS
+    if not a or not b:
+        return 0.0
+    overlap = a & b
+    return len(overlap) / max(len(a | b), 1)
+
+
+_TITLE_MATCH_THRESHOLD = 0.20
+
+
+def _validate_hits(
+    hits: list[SearchHit],
+) -> tuple[list[SearchHit], list[tuple[str, str]]]:
+    """Verify each hit by fetching the page and comparing the actual page
+    title to the agent's claimed title. Returns (verified, rejected).
+    Each rejected entry is (url, reason)."""
+    verified: list[SearchHit] = []
+    rejected: list[tuple[str, str]] = []
+    for h in hits:
+        if not h.url.startswith(("http://", "https://")):
+            rejected.append((h.url, "non-http"))
+            continue
+        status, final_url, page_title = _fetch_title(h.url)
+        if status is None:
+            rejected.append((h.url, "fetch_failed"))
+            continue
+        if status >= 400:
+            rejected.append((h.url, f"http_{status}"))
+            continue
+        if not page_title:
+            # No <title> tag — page exists but we can't verify. Allow with
+            # warning; common for some JS-rendered pages.
+            logger.info("URL %s returned no <title>; passing through unverified.", h.url)
+            verified.append(h)
+            continue
+        # If the agent didn't claim a title (annotation fallback case),
+        # accept what the page actually has and stamp it.
+        if not h.title:
+            verified.append(SearchHit(url=h.url, title=page_title, snippet=h.snippet))
+            continue
+        score = _title_match_score(h.title, page_title)
+        if score >= _TITLE_MATCH_THRESHOLD:
+            verified.append(h)
+        else:
+            rejected.append((
                 h.url,
-                timeout=timeout_s,
-                allow_redirects=True,
-                headers={"User-Agent": "derad-agent-validator/3.0"},
-            )
-            if 200 <= resp.status_code < 400:
-                out.append(h)
-            else:
-                logger.warning("HEAD-validate dropped %s (status %d)", h.url, resp.status_code)
-        except requests.RequestException as exc:
-            logger.warning("HEAD-validate dropped %s (%s)", h.url, type(exc).__name__)
-    return out
+                f"title_mismatch score={score:.2f} claimed={h.title[:40]!r} actual={page_title[:40]!r}",
+            ))
+    return verified, rejected
 
 
 # ── Default backend selection ─────────────────────────────────────────────────
