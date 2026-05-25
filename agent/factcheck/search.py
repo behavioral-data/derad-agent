@@ -181,10 +181,6 @@ class WebSearchResponsesBackend:
         return verified[:top_k]
 
 
-# Backwards-compat alias — callers built against the old class name still work.
-FoundryBingSearchBackend = WebSearchResponsesBackend
-
-
 def _ann_get(ann, key: str):
     """Annotation objects can be SDK models or plain dicts depending on
     SDK version; read fields uniformly."""

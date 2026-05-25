@@ -1,8 +1,9 @@
 """Stage 4 — iterative verification agent (Papelo-style).
 
 Generates verification questions one at a time, conditioning each on the
-evidence already gathered. Foundry+Bing acts as the search-and-snippet
-layer; we don't fetch raw documents in v1.
+evidence already gathered. The configured SearchBackend supplies the
+search-and-snippet layer; we don't fetch raw documents in v1 (design
+§4.4's Playwright path is a follow-up).
 
 Caps per claim:
   * max_questions = 5

@@ -1,11 +1,11 @@
 import logging
-import re
 from dataclasses import dataclass
 from typing import Optional
 
 import requests
 
 from agent.llm.config import get_x_client
+from agent.shared.text import X_TWEET_LIMIT, x_weighted_length
 
 logger = logging.getLogger(__name__)
 
@@ -163,17 +163,13 @@ def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5,
                    image_urls=None, tweet_context=None):
     """Run the fact-check pipeline and render a reply in the requested tone.
 
-    `image_urls`, when provided, triggers Stage 1.5 multimodal extraction.
-    `tweet_context`, when provided, is a dict of supporting metadata pulled
-    from the parent tweet (posted_at, author handle/bio/verified/age, expanded
-    t.co URLs, referenced-tweet relations, language, sensitive flag, public
-    metrics). The reconcile stage uses it to spot parody/aggregator accounts
-    and to date-stamp the claim.
+    `image_urls` triggers Stage 1.5 multimodal extraction.
+    `tweet_context` is metadata from the parent tweet (posted_at, author
+    handle/bio/verified/age, expanded t.co URLs, referenced-tweet relations,
+    language, sensitive flag, public metrics). Reconcile uses it to spot
+    parody/aggregator accounts and to date-stamp the claim.
 
-    Returns the dict shape the X app expects. Community-notes-specific fields
-    (`tweets`, `notes`, `all_cited_*`, `reasons_detail`) are empty by design —
-    they have no analog in the web-evidence pipeline. The /info page falls
-    back to showing just the rendered reply + cited URLs.
+    Returns `{text, sources, verdict_label, queries}`.
     """
     from agent.factcheck.freeze import view_for_renderer
     from agent.factcheck.pipeline import run_pipeline
@@ -210,23 +206,9 @@ def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5,
     return {
         "text": text,
         "sources": sources,
-        "tweets": None,
-        "notes": None,
+        "verdict_label": frozen.verdict_label,
         "queries": [statement],
-        "all_cited_tweet_ids": [],
-        "all_cited_note_ids": [],
-        "reasons_detail": [],
     }
-
-
-_TCO_URL_RE = re.compile(r'https?://\S+')
-_X_TCO_LEN = 23
-_X_TWEET_LIMIT = 280
-
-
-def x_weighted_length(text: str) -> int:
-    """Count characters the way X does: every URL is collapsed to 23 chars."""
-    return len(_TCO_URL_RE.sub("x" * _X_TCO_LEN, text))
 
 
 def post_reply(parent_id, reply_text) -> Optional[str]:
@@ -236,10 +218,10 @@ def post_reply(parent_id, reply_text) -> Optional[str]:
     ``posts.create`` raises because the real signature takes a single ``body``.
     """
     weighted = x_weighted_length(reply_text)
-    if weighted > _X_TWEET_LIMIT:
+    if weighted > X_TWEET_LIMIT:
         logger.warning(
             "post_reply refused: text %d weighted chars > %d (parent=%s)",
-            weighted, _X_TWEET_LIMIT, parent_id,
+            weighted, X_TWEET_LIMIT, parent_id,
         )
         return None
 

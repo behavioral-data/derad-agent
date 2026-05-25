@@ -20,10 +20,10 @@ from agent.app.utils import (
     fetch_tweet,
     generate_reply,
     post_reply,
-    x_weighted_length,
 )
 from agent.app import streamer as _streamer
 from agent.llm.config import _parse_bool_env, _require_env
+from agent.shared.text import X_TCO_LEN, x_weighted_length
 
 _LOG_FILE = os.getenv("DERAD_LOG_FILE", "/tmp/derad_stream.log")
 _log_fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -74,12 +74,11 @@ PIPELINE_MAX_CONCURRENT = int(os.getenv("DERAD_PIPELINE_MAX_CONCURRENT", "5"))
 PIPELINE_QUEUE_TIMEOUT_S = float(os.getenv("DERAD_PIPELINE_QUEUE_TIMEOUT_S", "600"))
 _PIPELINE_SEMAPHORE = threading.BoundedSemaphore(PIPELINE_MAX_CONCURRENT)
 
-# Participant metadata loaded for study tracking only — no longer gates bot access.
+# Participant metadata loaded lazily via _lookup_participant's write-through
+# cache (lines below). No eager preload — every gunicorn worker would
+# otherwise repeat the same Tables scan at fork.
 _participants_store = _participants.get_store()
-_PARTICIPANTS_BY_ID: dict[str, _participants.Participant] = {
-    p.author_id: p for p in _participants_store.list_all()
-}
-logger.info("Loaded %d registered participants (metadata only)", len(_PARTICIPANTS_BY_ID))
+_PARTICIPANTS_BY_ID: dict[str, _participants.Participant] = {}
 
 
 # Info-URL store: token → {tone, reply_text, reasons, parent_id}
@@ -381,13 +380,9 @@ def _build_info_url(tone: str, tweet_ids, note_ids, reply_id: str = "") -> str:
     )
 
 
-# X shortens every URL to 23 chars via t.co regardless of actual length.
-_X_URL_LEN = 23
-
-
 def _append_url(text: str, url: str, limit: int = TWEET_LIMIT) -> str:
     """Append url on its own line, truncating text with ellipsis if needed to stay within limit."""
-    budget = limit - _X_URL_LEN - 1  # -1 for the newline
+    budget = limit - X_TCO_LEN - 1  # -1 for the newline
     if x_weighted_length(text) > budget:
         text = text[:budget - 1] + "…"
     return f"{text}\n{url}"
@@ -519,23 +514,21 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             mention_id, len(reply.get("text") or ""), reply.get("sources"),
         )
         ev.queries = reply.get("queries") or []
-        ev.cited_tweet_ids = reply.get("all_cited_tweet_ids") or []
-        ev.cited_note_ids = reply.get("all_cited_note_ids") or []
 
         if not reply.get("text"):
             logger.info("Empty reply text for mention %s; skipping", mention_id)
             _finalize("empty_reply")
             return
 
-        # Distinguish grounded factcheck replies from no-factcheck fallbacks for
-        # downstream research analysis. reasons_detail is populated only when the
-        # reply was grounded in Community Notes.
-        ev.reply_type = "factcheck" if reply.get("reasons_detail") else "no_factcheck"
+        # Tag the row with the structural verdict (NEI vs grounded). Used by
+        # downstream analysis to bucket by what the pipeline could establish.
+        verdict = reply.get("verdict_label") or "Unknown"
+        ev.reply_type = "no_factcheck" if verdict == "NotEnoughEvidence" else "factcheck"
 
         token = _make_info_token(
             tone,
             reply["text"],
-            reply.get("reasons_detail") or [],
+            reply.get("sources") or [],
             parent_id=parent_id,
             parent_author_username=ev.parent_author_username or "",
             bot_handle=BOT_HANDLE,

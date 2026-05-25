@@ -1,13 +1,13 @@
-"""Source-reliability lookup (design §4.5.2 — four-step lookup).
+"""Source-reliability lookup (design §4.5.2).
 
-Order of resolution per URL:
-  1. Curated `fact-checker` set (IFCN signatories + recognized national/regional
-     fact-checkers).
-  2. Curated `reputable-news` / `primary-source` / `satirical` / `low-quality`
-     sets (Wikipedia perennial-sources style classification).
-  3. Subdomain → parent fallback (`foo.bbc.com` → `bbc.com`).
-  4. Claude classifier (model-prior) for everything else, batched per pipeline
-     invocation and cached for the process lifetime.
+Two phases per URL:
+  1. Curated table (IFCN signatories, Wikipedia RSP "generally reliable" /
+     "primary source" / "satirical" / "generally unreliable", plus
+     subdomain → parent fallback). Each hit's `tier_source` records which
+     list it came from (ifcn, wikipedia-rsp, etc.) — the design's separate
+     IFCN / Wikipedia / MBFC steps collapse to a single lookup here.
+  2. Claude model-prior classifier for everything else, batched per
+     pipeline invocation and cached for the process lifetime.
 
 Failure to classify falls through to `unknown`.
 """

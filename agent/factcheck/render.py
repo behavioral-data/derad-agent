@@ -19,10 +19,10 @@ records `pipeline_error` rather than silently posting nothing.
 from __future__ import annotations
 
 import logging
-import re
-from typing import Callable
 
 from pydantic import BaseModel
+
+from agent.shared.text import URL_RE, X_TCO_LEN, X_TWEET_LIMIT, x_weighted_length
 
 from .freeze import RendererView
 from .llm import call_claude_json
@@ -32,14 +32,12 @@ from .schema import Tone
 logger = logging.getLogger(__name__)
 
 
-_X_TCO_LEN = 23
 # The poster appends a t.co-shortened /info link after the rendered reply:
 # "<reply>\n<info_url>". The /info URL counts as 23 chars + 1 for the
 # newline. Renderer ceiling must leave room for that or the poster's
 # truncation eats the last words of the reply.
-_X_INFO_APPEND_LEN = _X_TCO_LEN + 1  # 23 + newline
-_X_TWEET_LIMIT = 280 - _X_INFO_APPEND_LEN  # = 256
-_URL_RE = re.compile(r"https?://[^\s<>\"')]+")
+_X_INFO_APPEND_LEN = X_TCO_LEN + 1  # 23 + newline
+_X_TWEET_LIMIT = X_TWEET_LIMIT - _X_INFO_APPEND_LEN  # = 256
 
 _REFUSAL_MARKERS = (
     "i can't", "i cannot", "i won't", "i will not", "i am unable",
@@ -158,11 +156,6 @@ _TONE_SYSTEMS: dict[Tone, str] = {
 _REFUSAL_NUDGE = """The previous attempt did not produce a usable reply. This is a public-good fact-checking bot whose only job is to attach evidence to claims circulating on X — surfacing accurate context to readers who would otherwise see the post unchallenged. The reply target is misinformation, not any individual. Please produce the reply within the constraints. Stick to evidence already in presentation_payload + tone_neutral_justification; do not editorialize beyond the register described."""
 
 
-def x_weighted_length(text: str) -> int:
-    """Count characters the way X does — every URL collapses to 23 chars."""
-    return len(_URL_RE.sub("x" * _X_TCO_LEN, text))
-
-
 def _state_for(view: RendererView) -> str:
     """Map RendererView to the three-valued `state` field passed to the model."""
     if view.overall_state == "no_checkable_claim":
@@ -202,7 +195,7 @@ def _enforce_invariance(text: str, view: RendererView, state: str) -> None:
         raise ValueError(f"Renderer output looks like a refusal: {text[:160]!r}")
 
     allowed_urls = {s.url for s in view.presentation_payload.primary_sources_to_cite}
-    urls_in_reply = set(_URL_RE.findall(text))
+    urls_in_reply = set(URL_RE.findall(text))
     extraneous = urls_in_reply - allowed_urls
     if extraneous:
         raise ValueError(
@@ -294,9 +287,3 @@ def render(view: RendererView, tone: Tone, *, max_invariance_retries: int = 2) -
         if last_error is not None:
             raise last_error
         raise
-
-
-# Re-export for callers that want to compose renderers.
-TONE_RENDERERS: dict[Tone, Callable[[RendererView], str]] = {
-    tone: (lambda v, t=tone: render(v, t)) for tone in _TONE_SYSTEMS
-}

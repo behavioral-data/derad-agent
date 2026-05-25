@@ -176,11 +176,8 @@ class TestEventWiring:
         gen = {
             "text": "Here are the facts.",
             "sources": ["https://a.example"],
-            "tweets": ["t1"],
-            "notes": ["n1"],
+            "verdict_label": "Refuted",
             "queries": ["query1", "query2"],
-            "all_cited_tweet_ids": ["t1", "t2", "t3"],
-            "all_cited_note_ids": ["n1", "n2", "n3"],
         }
         ts = events_module.utcnow()
         ev, ts_passed = self._run_process(
@@ -199,8 +196,7 @@ class TestEventWiring:
         assert ev.parent_author_username == "parent_user"
         assert ev.author_username == "alice"
         assert ev.queries == ["query1", "query2"]
-        assert ev.cited_tweet_ids == ["t1", "t2", "t3"]
-        assert ev.cited_note_ids == ["n1", "n2", "n3"]
+        assert ev.reply_type == "factcheck"
         assert ev.reply_text.startswith("Here are the facts.")
         assert ev.pipeline_ms is not None and ev.pipeline_ms >= 0
 
@@ -220,8 +216,8 @@ class TestEventWiring:
         snap = TweetSnapshot(text="claim", author_id="999", author_username="u")
         ev = self._run_process(
             fetch_snap=snap,
-            generate_reply_result={"text": "", "sources": None, "tweets": None, "notes": None,
-                                   "queries": [], "all_cited_tweet_ids": [], "all_cited_note_ids": []},
+            generate_reply_result={"text": "", "sources": None, "verdict_label": "NotEnoughEvidence",
+                                   "queries": []},
             post_reply_returns=[],
             monkeypatch=monkeypatch,
             fake_events_store=fake_events_store,
@@ -233,8 +229,8 @@ class TestEventWiring:
         from agent.app.utils import TweetSnapshot
         snap = TweetSnapshot(text="claim", author_id="999", author_username="u")
         gen = {
-            "text": "the response", "sources": None, "tweets": None, "notes": None,
-            "queries": ["q"], "all_cited_tweet_ids": ["t1"], "all_cited_note_ids": ["n1"],
+            "text": "the response", "sources": None, "verdict_label": "Supported",
+            "queries": ["q"],
         }
         ev = self._run_process(
             fetch_snap=snap,
@@ -304,7 +300,7 @@ class TestTablesEventsStoreSchema:
         ev = events_module.MentionEvent(
             mention_id="abc", parent_id="p1", author_id="u1", tone="neutral",
             received_at_utc=datetime(2026, 5, 18, 12, 0, 0, tzinfo=timezone.utc),
-            queries=["q1"], cited_tweet_ids=["t1", "t2"], cited_note_ids=["n1", "n2"],
+            queries=["q1"],
         )
         store.write_event(ev)
         entity = events_client.create_entity.call_args[0][0]
@@ -312,8 +308,6 @@ class TestTablesEventsStoreSchema:
         assert entity["RowKey"].startswith("2026-05-18T12:00:00")
         assert entity["RowKey"].endswith("_abc")
         assert json.loads(entity["queries_json"]) == ["q1"]
-        assert json.loads(entity["cited_tweet_ids_json"]) == ["t1", "t2"]
-        assert json.loads(entity["cited_note_ids_json"]) == ["n1", "n2"]
 
     def test_drop_row_handles_missing_mention_id(self, monkeypatch):
         store, _, drops_client = _patched_tables_store(monkeypatch)

@@ -1,14 +1,15 @@
 """Stage 5 — verdict audit. Forces NotEnoughEvidence on any failure.
 
-Thin-slice scope: mechanical checks only. The design also calls for a
-CoVe-style Claude pass (re-asking whether the verdict is faithful to the
-evidence); that is a follow-up — for now, the mechanical contract is the
-audit floor.
+Mechanical-checks-only audit (URL provenance, central-claim cardinality,
+verdict-label/findings consistency). The design also calls for a
+CoVe-style Claude pass re-asking whether the verdict is faithful to the
+evidence — follow-up work; for now this mechanical contract is the floor.
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
+
+from agent.shared.text import URL_RE
 
 from .schema import (
     ConsolidatedFindings,
@@ -17,9 +18,6 @@ from .schema import (
     Verdict,
 )
 from .verdict import derive_verdict
-
-
-_URL_RE = re.compile(r"https?://[^\s<>\"')]+")
 
 
 @dataclass
@@ -46,9 +44,12 @@ def audit(
         )
 
     known_urls = {entry.url for entry in source_quality_table}
-    for url in _URL_RE.findall(tone_neutral_justification):
-        if url not in known_urls:
-            failures.append(f"Justification cites URL not in source_quality_table: {url}")
+    # The renderer is contractually allowed to quote load_bearing_evidence_snippet
+    # verbatim, so any URL hiding inside it leaks past audit if we don't scan it.
+    for field in (tone_neutral_justification, presentation_payload.load_bearing_evidence_snippet):
+        for url in URL_RE.findall(field or ""):
+            if url not in known_urls:
+                failures.append(f"Text cites URL not in source_quality_table: {url}")
 
     for src in presentation_payload.primary_sources_to_cite:
         if src.url not in known_urls:

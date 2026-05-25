@@ -64,8 +64,6 @@ class MentionEvent:
 
     # Pipeline output
     queries: list[str] = field(default_factory=list)
-    cited_note_ids: list[str] = field(default_factory=list)
-    cited_tweet_ids: list[str] = field(default_factory=list)
     reply_text: Optional[str] = None
     reply_id: Optional[str] = None
 
@@ -78,8 +76,9 @@ class MentionEvent:
 
     # Outcome
     outcome: str = "replied"  # 'replied' | 'pipeline_error' | 'x_post_error' | 'parent_fetch_failed' | 'empty_reply'
-    # reply_type distinguishes a grounded factcheck reply ('factcheck') from a
-    # planner/empty-notes fallback ('no_factcheck'). None when no reply was sent.
+    # 'factcheck' when the pipeline produced a structural verdict
+    # (Supported/Refuted/Disputed), 'no_factcheck' when it landed on NEI.
+    # None when no reply was sent.
     reply_type: Optional[str] = None
     error_class: Optional[str] = None
     error_detail: Optional[str] = None
@@ -231,9 +230,8 @@ class TablesEventsStore:
 
     Long fields (parent_text, reply_text, error_detail) are truncated to 32 kB
     each — the Tables row limit is ~1 MB total and we want headroom for the
-    JSON-encoded lists. ``queries``, ``cited_note_ids``, ``cited_tweet_ids``,
-    and ``extra`` are JSON-encoded as strings since Tables doesn't natively
-    store lists/dicts.
+    JSON-encoded lists. ``queries`` and ``extra`` are JSON-encoded as strings
+    since Tables doesn't natively store lists/dicts.
     """
 
     _FIELD_CAP = 32_000  # bytes; rough char cap is fine for our text
@@ -315,8 +313,6 @@ class TablesEventsStore:
             "parent_reply_count": ev.parent_reply_count,
             "parent_quote_count": ev.parent_quote_count,
             "queries_json": json.dumps(ev.queries, ensure_ascii=False),
-            "cited_note_ids_json": json.dumps(ev.cited_note_ids, ensure_ascii=False),
-            "cited_tweet_ids_json": json.dumps(ev.cited_tweet_ids, ensure_ascii=False),
             "reply_text": self._truncate(ev.reply_text),
             "reply_id": ev.reply_id,
             "received_at_utc": ev.received_at_utc,

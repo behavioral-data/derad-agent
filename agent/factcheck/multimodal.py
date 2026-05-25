@@ -1,10 +1,10 @@
 """Stage 1.5 — multimodal extraction (design §4.1.5).
 
-Tier 1 (OCR — text in image) and Tier 2 (depicted content) are produced by
-a single Claude VLM call. Tier 3 (provenance approximation) is a Bing-
-grounded text search on Claude's rich image description — true reverse-
-image-search has no Azure-native path post-Bing-API retirement. Tier 4
-(manipulation / AI-gen detection) is forced NEI per design.
+Tier 1 (OCR — text in image) and Tier 2 (depicted content) are produced
+by a single Claude VLM call. Tier 3 (provenance approximation) is a
+web-search text query over Claude's rich image description, using
+whatever SearchBackend is configured. Tier 4 (manipulation / AI-gen
+detection) is forced NEI per design.
 """
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ import base64
 import io
 import json
 import logging
-import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -21,6 +20,7 @@ from pydantic import BaseModel
 
 from agent.llm.config import get_llm
 
+from .llm import _extract_json
 from .search import SearchBackend, SearchHit
 
 
@@ -105,7 +105,6 @@ def fetch_image_bytes(url: str) -> Optional[tuple[bytes, str]]:
 
 
 _SUPPORTED_VLM_MIME = {"image/png", "image/jpeg", "image/gif", "image/webp"}
-_JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
 def _shrink_for_claude(image_bytes: bytes, media_type: str) -> tuple[bytes, str]:
@@ -181,15 +180,10 @@ def _vlm_extract(image_bytes: bytes, media_type: str) -> MultimodalExtraction:
         text_parts = [b.get("text", "") for b in raw if isinstance(b, dict) and b.get("type") == "text"]
         raw = "\n".join(text_parts) if text_parts else json.dumps(raw)
 
-    # Robust JSON extraction.
-    raw = raw.strip()
     try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        match = _JSON_BLOCK_RE.search(raw)
-        if not match:
-            raise ValueError(f"VLM returned no JSON. Head: {raw[:200]}")
-        data = json.loads(match.group(0))
+        data = json.loads(_extract_json(raw))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"VLM returned no parseable JSON. Head: {raw[:200]}") from exc
     return MultimodalExtraction.model_validate(data)
 
 

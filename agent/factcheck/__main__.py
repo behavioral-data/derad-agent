@@ -1,8 +1,9 @@
-"""CLI driver for the thin-slice fact-check pipeline.
+"""CLI driver for the fact-check pipeline.
 
 Usage:
     python -m agent.factcheck "<claim text>"
     python -m agent.factcheck --tone agonistic "<claim text>"
+    python -m agent.factcheck --image <url> "<claim text>"
 
 With no claim, runs the Rosa Camfield worked example from the design doc.
 """

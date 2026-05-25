@@ -13,24 +13,21 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Literal, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
 from .llm import call_claude_json
 from .multimodal import ImageEvidence
+from .schema import ClaimType, OverallState
 
 
 logger = logging.getLogger(__name__)
 
 
-ExtractedClaimType = Literal["verifiable", "opinion", "mixed"]
-OverallState = Literal["checked", "no_checkable_claim"]
-
-
 class ExtractedClaim(BaseModel):
     text: str = Field(description="A single declarative restatement of the proposition.")
-    type: ExtractedClaimType
+    type: ClaimType
     source_span: str = Field(
         default="",
         description="Verbatim quote from the input tweet that motivates this proposition.",

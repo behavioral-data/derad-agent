@@ -12,8 +12,8 @@
 <div class="info-wrap">
 
   <header class="info-masthead">
-    <span class="info-masthead-label">Community Notes Context</span>
-    <span class="info-masthead-tag">X Community Notes</span>
+    <span class="info-masthead-label">Fact-check Context</span>
+    <span class="info-masthead-tag">Web-evidence sources</span>
   </header>
 
   {% if headline %}
@@ -57,41 +57,16 @@
   </section>
   {% endif %}
 
-  {# Supporting evidence #}
+  {# Cited sources #}
   {% if reasons %}
   <section class="info-section">
-    <div class="info-section-hd"><span class="info-section-label">Supporting Evidence</span></div>
-    <div class="info-reasons">
-      {% for r in reasons %}
-      <div class="info-reason">
-        <div class="info-reason-idx">{{ '%02d' % loop.index }}</div>
-        <div class="info-reason-body">
-          <p class="info-reason-text">{{ r.reason }}</p>
-          {% if r.note_text %}
-          <div class="info-note-block">
-            <span class="info-note-label">Community Note</span>
-            <p class="info-note-text">{{ r.note_text }}</p>
-          </div>
-          {% endif %}
-          <div class="info-reason-links">
-            {% if r.evidence_links %}
-            <ul class="info-sources">
-              {% for link in r.evidence_links %}
-              <li><a href="{{ link }}" class="info-src-link" rel="noopener noreferrer">{{ link }}</a></li>
-              {% endfor %}
-            </ul>
-            {% endif %}
-            {% if r.tweet_id %}
-            <a class="info-src-link info-tweet-link" href="https://x.com/i/web/status/{{ r.tweet_id }}" rel="noopener noreferrer">View tweet this note was added to →</a>
-            {% endif %}
-          </div>
-        </div>
-      </div>
+    <div class="info-section-hd"><span class="info-section-label">Cited Sources</span></div>
+    <ul class="info-sources">
+      {% for url in reasons %}
+      <li><a href="{{ url }}" class="info-src-link" rel="noopener noreferrer">{{ url }}</a></li>
       {% endfor %}
-    </div>
+    </ul>
   </section>
-  {% else %}
-  <p class="info-empty"><em>No supporting evidence recorded for this reply.</em></p>
   {% endif %}
 
   {% elif reply %}
@@ -100,15 +75,6 @@
     <div class="info-section-hd"><span class="info-section-label">About this Post</span></div>
     {{ reply | safe }}
   </section>
-  {% if notes %}
-  <section class="info-section sources">
-    <div class="info-section-hd"><span class="info-section-label">Community Notes Sources</span></div>
-    <ul>{{ notes | safe }}</ul>
-  </section>
-  {% else %}
-  <p class="info-empty"><em>No Community Notes sources were retrieved for this post.</em></p>
-  {% endif %}
-
   {% else %}
   <div class="info-not-found">
     <strong>Link not found.</strong> This reply context link is invalid or has been removed.
@@ -117,11 +83,12 @@
 
   <footer class="info-footer">
     <p class="info-disclaimer">
-      This bot generates replies by retrieving and synthesizing data from
-      <a href="https://help.x.com/en/using-x/community-notes" rel="noopener noreferrer">X Community Notes</a>,
-      a crowd-sourced fact-checking platform. Sources include notes from the
-      <a href="https://x.com/i/communitynotes/download-data" rel="noopener noreferrer">public Community Notes archive</a>.
-      Responses may contain inaccuracies — verify claims using the sources above.
+      This bot generates fact-checks by retrieving live web evidence
+      (independent fact-checkers, reputable news outlets, and primary sources)
+      and reconciling that evidence against the post. Source reliability is
+      classified using the IFCN signatory list, Wikipedia perennial-sources
+      ratings, and a model-based fallback for uncovered domains.
+      Responses may contain inaccuracies — verify claims using the cited sources.
     </p>
     <span class="info-copyright">© 2026 University of Washington</span>
   </footer>

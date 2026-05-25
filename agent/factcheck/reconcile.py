@@ -14,6 +14,7 @@ rule in `verdict.py`.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Optional
 
 from pydantic import BaseModel
@@ -29,6 +30,9 @@ from .schema import (
     Stance,
     UnaddressedProposition,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class ReconciliationOutput(BaseModel):
@@ -145,8 +149,7 @@ def reconcile(
         # central claim lands in unaddressed_propositions, no source citations.
         # The renderer's state becomes "no_sources" and produces a tone-aware
         # reply via the model. Pipeline keeps going; mention gets a real reply.
-        import logging
-        logging.getLogger(__name__).warning(
+        logger.warning(
             "reconcile: call_claude_json failed (%s) — degrading to no-sources output", exc,
         )
         return ReconciliationOutput(
@@ -174,8 +177,7 @@ def reconcile(
     # Don't crash the pipeline; truncate or pad to match the text-evidence
     # count so the caller's zip(evidence, stances) is well-defined.
     if len(output.evidence_stances) != len(evidence):
-        import logging
-        logging.getLogger(__name__).warning(
+        logger.warning(
             "reconcile: returned %d stances for %d evidence entries — repairing.",
             len(output.evidence_stances), len(evidence),
         )

@@ -1,16 +1,19 @@
-"""End-to-end orchestrator for the fact-check pipeline (thin slice).
+"""End-to-end orchestrator for the fact-check pipeline (design v0.5).
 
-The thin slice runs: hardcoded claim → stub search → reconcile → structural
-verdict → mechanical audit → freeze → (caller renders via render.py).
-
-Multimodal (1.5), claim extraction (2), check-worthiness gate (3), and the
-iterative verification loop (4) are simplified or skipped — the input string
-IS the central claim and each search hit becomes one Evidence record.
+Runs all stages from the design spec: Stage 1.5 multimodal extraction →
+Stage 2+3 claim extraction & check-worthiness gate → Stage 4 iterative
+verification (Papelo-style) → Stage 4.5 reconciliation (three-lens
+cascade + source-quality table) → Stage 5 mechanical audit → Stage 6
+freeze. The caller invokes Stage 7 rendering separately via render.py
+to preserve the invariance boundary.
 """
 from __future__ import annotations
 
+import functools
+import logging
 import subprocess
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -44,10 +47,16 @@ from .sources import build_quality_table
 from .verdict import derive_verdict
 
 
-_PIPELINE_VERSION = "factcheck-thin-slice-0.1"
+logger = logging.getLogger(__name__)
 
 
+_PIPELINE_VERSION = "factcheck-0.5"
+
+
+@functools.lru_cache(maxsize=1)
 def _git_sha() -> str:
+    """Pipeline commit. Stable for the process lifetime — cache to avoid
+    forking a subprocess on every mention."""
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -80,14 +89,22 @@ def _nei_verdict(reason: str) -> tuple[ConsolidatedFindings, PresentationPayload
     return findings, payload, "Not enough reliable evidence was found to verify or refute this claim."
 
 
+_MULTIMODAL_MAX_WORKERS = 4
+
+
 def _run_multimodal(image_urls: list[str], backend: SearchBackend) -> list[ImageEvidence]:
-    """Stage 1.5 — extract per-image evidence. Skips images we can't fetch/process."""
-    out: list[ImageEvidence] = []
-    for url in image_urls:
-        evidence = extract_image(url, search_backend=backend)
-        if evidence is not None:
-            out.append(evidence)
-    return out
+    """Stage 1.5 — extract per-image evidence concurrently. Skips images we
+    can't fetch/process. Each per-image pipeline does fetch + VLM call +
+    provenance search (all IO-bound), so threading wins on multi-image tweets.
+    """
+    if not image_urls:
+        return []
+    if len(image_urls) == 1:
+        evidence = extract_image(image_urls[0], search_backend=backend)
+        return [evidence] if evidence is not None else []
+    with ThreadPoolExecutor(max_workers=min(_MULTIMODAL_MAX_WORKERS, len(image_urls))) as pool:
+        results = list(pool.map(lambda u: extract_image(u, search_backend=backend), image_urls))
+    return [r for r in results if r is not None]
 
 
 def _attached_image_records(images: list[ImageEvidence]) -> list[AttachedImage]:
@@ -108,9 +125,6 @@ def _attached_image_records(images: list[ImageEvidence]) -> list[AttachedImage]:
     return records
 
 
-_log = __import__("logging").getLogger("agent.factcheck.pipeline")
-
-
 def _short_circuit_no_checkable(
     *,
     invocation_id: str,
@@ -124,7 +138,7 @@ def _short_circuit_no_checkable(
 ) -> FrozenVerdict:
     """Stage 2+3 short-circuit. No search, no reconcile — bot replies with
     a hardcoded tone-appropriate 'nothing to fact-check' template at Stage 7."""
-    _log.info("run_pipeline[%s]: short-circuit — no_checkable_claim (%s)", invocation_id, extraction.reason)
+    logger.info("run_pipeline[%s]: short-circuit — no_checkable_claim (%s)", invocation_id, extraction.reason)
 
     reason = extraction.reason or "Personal opinion or aesthetic reaction; no factually verifiable claim identified."
     findings = ConsolidatedFindings(
@@ -165,7 +179,7 @@ def _short_circuit_no_checkable(
             vlm_model="claude-via-azure-ai-services" if image_evidence else "",
             search_provider=backend_name,
             pipeline_commit=_git_sha(),
-            source_reliability_lists_version={"thin_slice_canned_table": _PIPELINE_VERSION},
+            source_reliability_lists_version={"curated_lists": _PIPELINE_VERSION, "model_prior": "claude-sonnet"},
         ),
         attached_images=tuple(_attached_image_records(image_evidence)),
         claims=claim_objs,
@@ -193,9 +207,9 @@ def run_pipeline(
     """Run the pipeline end-to-end. Returns the frozen verdict.
 
     `image_urls`, when present, triggers Stage 1.5: per-image OCR +
-    description (Claude VLM) + a Bing-grounded provenance approximation
-    search. The results feed Lens 2 / Lens 3 reasoning inside the
-    Stage 4.5 reconciliation call.
+    description (Claude VLM) + a web-search provenance approximation
+    over the configured SearchBackend. The results feed Lens 2 / Lens 3
+    reasoning inside the Stage 4.5 reconciliation call.
 
     `tweet_context` carries fact-checking-relevant metadata pulled from the
     parent tweet (author handle/bio/verified/account-age, posted-at, expanded
@@ -209,26 +223,26 @@ def run_pipeline(
     image_urls = image_urls or []
     modality: Modality = "mixed" if image_urls and claim_text.strip() else ("image" if image_urls else "text")
     author_log = (tweet_context or {}).get("author_username") or "?"
-    _log.info(
+    logger.info(
         "run_pipeline[%s]: starting (modality=%s, claim_chars=%d, images=%d, author=@%s)",
         invocation_id, modality, len(claim_text), len(image_urls), author_log,
     )
 
     image_evidence: list[ImageEvidence] = []
     if image_urls:
-        _log.info("run_pipeline[%s]: Stage 1.5 entering with %d image(s)", invocation_id, len(image_urls))
+        logger.info("run_pipeline[%s]: Stage 1.5 entering with %d image(s)", invocation_id, len(image_urls))
         image_evidence = _run_multimodal(image_urls, backend)
-        _log.info("run_pipeline[%s]: Stage 1.5 complete (%d evidence)", invocation_id, len(image_evidence))
+        logger.info("run_pipeline[%s]: Stage 1.5 complete (%d evidence)", invocation_id, len(image_evidence))
 
     # ── Stage 2 + 3 — claim extraction & check-worthiness gate ──
-    _log.info("run_pipeline[%s]: Stage 2+3 — claim extraction", invocation_id)
+    logger.info("run_pipeline[%s]: Stage 2+3 — claim extraction", invocation_id)
     extraction = extract_claims(
         claim_text,
         tweet_context=tweet_context,
         image_evidence=image_evidence or None,
     )
     central = central_claim(extraction)
-    _log.info(
+    logger.info(
         "run_pipeline[%s]: Stage 2+3 → %d propositions, central type=%s check_worthy=%s, overall=%s",
         invocation_id, len(extraction.claims), central.type, central.check_worthy, extraction.overall_state,
     )
@@ -248,7 +262,7 @@ def run_pipeline(
     # Stage 4+ uses the central proposition's text — typically more focused
     # than the raw tweet (hedges stripped, framing normalized).
     central_text = central.text
-    _log.info("run_pipeline[%s]: Stage 4 — iterative verification (Papelo-style)", invocation_id)
+    logger.info("run_pipeline[%s]: Stage 4 — iterative verification (Papelo-style)", invocation_id)
     image_summaries = (
         [
             {
@@ -267,7 +281,7 @@ def run_pipeline(
         tweet_context=tweet_context,
         image_summaries=image_summaries,
     )
-    _log.info("run_pipeline[%s]: Stage 4 done (%d evidence records)", invocation_id, len(text_evidence))
+    logger.info("run_pipeline[%s]: Stage 4 done (%d evidence records)", invocation_id, len(text_evidence))
 
     # Roll image-provenance hits into the source-quality table too — Claude is
     # told to cite from `source_quality_table` only, and image-derived URLs are
@@ -282,7 +296,7 @@ def run_pipeline(
         lens_1 = Lens1(narrative="No evidence retrieved.")
         verdict_label = "NotEnoughEvidence"
     else:
-        _log.info("run_pipeline[%s]: Stage 4.5 — reconcile", invocation_id)
+        logger.info("run_pipeline[%s]: Stage 4.5 — reconcile", invocation_id)
         recon = reconcile(
             central_claim_text=central_text,
             evidence=text_evidence,
@@ -290,7 +304,7 @@ def run_pipeline(
             image_evidence=image_evidence or None,
             tweet_context=tweet_context,
         )
-        _log.info("run_pipeline[%s]: Stage 4.5 done", invocation_id)
+        logger.info("run_pipeline[%s]: Stage 4.5 done", invocation_id)
         text_evidence = [
             Evidence(
                 question=e.question,
@@ -307,7 +321,7 @@ def run_pipeline(
         verdict_label = derive_verdict(findings, quality_table)
     evidence = text_evidence
 
-    _log.info("run_pipeline[%s]: Stage 5 — audit (declared=%s)", invocation_id, verdict_label)
+    logger.info("run_pipeline[%s]: Stage 5 — audit (declared=%s)", invocation_id, verdict_label)
     audit_result = audit(
         declared_verdict=verdict_label,
         findings=findings,
@@ -315,7 +329,7 @@ def run_pipeline(
         presentation_payload=payload,
         tone_neutral_justification=justification,
     )
-    _log.info(
+    logger.info(
         "run_pipeline[%s]: Stage 5 audit %s (failures=%d)",
         invocation_id, "passed" if audit_result.passed else "FAILED → NEI",
         len(audit_result.failures),
@@ -375,7 +389,7 @@ def run_pipeline(
             vlm_model="claude-via-azure-ai-services" if image_evidence else "",
             search_provider=backend.name,
             pipeline_commit=_git_sha(),
-            source_reliability_lists_version={"thin_slice_canned_table": _PIPELINE_VERSION},
+            source_reliability_lists_version={"curated_lists": _PIPELINE_VERSION, "model_prior": "claude-sonnet"},
         ),
         attached_images=tuple(_attached_image_records(image_evidence)),
         claims=tuple(claim_objs),
