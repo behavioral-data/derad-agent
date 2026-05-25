@@ -17,6 +17,7 @@ import atexit
 import json
 import logging
 import os
+import signal
 import threading
 import time
 from collections.abc import Callable
@@ -28,11 +29,27 @@ logger = logging.getLogger(__name__)
 
 INGEST_MODE = os.getenv("DERAD_INGEST_MODE", "streaming").lower()
 
+# Delay before the streamer attempts its FIRST connect. After a deploy
+# restart, X's filtered-stream rate-limiter can hold the previous
+# worker's slot open for several minutes (X considers half-dead TCP
+# connections still occupying the "1 concurrent stream per app" quota).
+# A pre-connect delay gives X time to release before we provoke a 429.
+# Override via DERAD_STREAMER_STARTUP_DELAY_S; default 60s on a fresh
+# start (cheap), bump to 300+ when chaining redeploys.
+STREAMER_STARTUP_DELAY_S = float(os.getenv("DERAD_STREAMER_STARTUP_DELAY_S", "60"))
+
+# When the first response is 429, X's "another stream is already open"
+# slot-clearance can take 5–10 min in practice. Start with a long backoff
+# so we don't spend the first 10 minutes spamming the endpoint and
+# extending its own enforcement window.
+_INITIAL_429_BACKOFF_S = 300.0
+
 _connected = threading.Event()
 
 # Graceful-shutdown state. When the worker is restarted, we want to actively
 # close the stream connection so X frees the per-app slot immediately —
-# otherwise the next worker's connect gets a 429 and waits 120 s.
+# otherwise the next worker's connect gets a 429 for several minutes while
+# X times out the stale TCP socket on its side.
 _shutting_down = threading.Event()
 _active_resp_lock = threading.Lock()
 _active_resp: requests.Response | None = None
@@ -69,10 +86,40 @@ def _request_shutdown() -> None:
 
 
 def _install_shutdown_hook() -> None:
+    """Register cleanup paths that close the active X-stream response on
+    worker shutdown. Two signals are wired:
+
+    1. atexit — fires on normal interpreter exit.
+    2. SIGTERM — fires under App Service / Container Apps graceful restart,
+       *before* the SIGKILL deadline. atexit alone is unreliable here
+       because gunicorn's worker SIGTERM path can exit the process before
+       atexit handlers run, leaving the X-side TCP socket half-dead and
+       holding the rate-limit slot.
+
+    The SIGTERM handler chains to the previous handler (typically
+    gunicorn's) so normal shutdown still proceeds.
+    """
     global _shutdown_hook_installed
     if _shutdown_hook_installed:
         return
     atexit.register(_request_shutdown)
+    try:
+        prev_handler = signal.getsignal(signal.SIGTERM)
+
+        def _sigterm_handler(signum, frame):
+            logger.info("SIGTERM received — closing X stream before exit")
+            _request_shutdown()
+            # Chain to whatever was registered before (gunicorn's worker
+            # shutdown). If nothing, the default exit semantics apply.
+            if callable(prev_handler) and prev_handler not in (signal.SIG_DFL, signal.SIG_IGN):
+                prev_handler(signum, frame)
+
+        signal.signal(signal.SIGTERM, _sigterm_handler)
+    except (ValueError, OSError) as exc:
+        # signal.signal can only be called from the main thread; under
+        # gunicorn's worker the streamer is started from main, so this
+        # path normally succeeds. Log and continue if it fails.
+        logger.warning("Could not install SIGTERM hook: %s; relying on atexit only", exc)
     _shutdown_hook_installed = True
 
 
@@ -166,6 +213,17 @@ def _reshape(data: dict, includes: dict) -> dict:
 def _stream_loop(dispatch_fn: Callable, token: str) -> None:
     headers = {"Authorization": f"Bearer {token}"}
     backoff = 1.0
+    # Pre-connect delay — gives X time to release any stale per-app slot
+    # left over from a recently-killed previous worker. Skipped only when
+    # explicitly zeroed (e.g. local dev with no prior connection).
+    if STREAMER_STARTUP_DELAY_S > 0:
+        logger.info(
+            "Streamer pre-connect delay: %.0f s (lets X release any stale per-app slot)",
+            STREAMER_STARTUP_DELAY_S,
+        )
+        if _shutting_down.wait(timeout=STREAMER_STARTUP_DELAY_S):
+            logger.info("Stream loop exited during pre-connect delay")
+            return
     while not _shutting_down.is_set():
         try:
             logger.info("Connecting to filtered stream ...")
@@ -177,9 +235,11 @@ def _stream_loop(dispatch_fn: Callable, token: str) -> None:
                 timeout=(10, 90),
             ) as resp:
                 if resp.status_code == 429:
-                    # X rate-limits repeated connection attempts; back off at
-                    # least 120 s and grow exponentially up to 30 minutes.
-                    wait = max(backoff, 120.0)
+                    # X holds the "1 concurrent stream per app" slot until
+                    # it times out the previous worker's stale TCP socket —
+                    # empirically 5–10 minutes. Start with a long initial
+                    # backoff so we don't pummel the endpoint.
+                    wait = max(backoff, _INITIAL_429_BACKOFF_S)
                     logger.warning("Stream rate-limited (429); backing off %.0f s", wait)
                     _connected.clear()
                     if _shutting_down.wait(timeout=wait):

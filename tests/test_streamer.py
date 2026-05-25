@@ -81,6 +81,11 @@ class TestStreamLoopDispatchShape:
                 yield json.dumps(event_payload).encode("utf-8")
 
         monkeypatch.setattr(streamer_module.requests, "get", lambda *a, **kw: _FakeResp())
+        # Skip the production pre-connect delay so the test runs in ms,
+        # not minutes. The delay exists to let X release stale per-app
+        # rate-limit slots after a worker restart — irrelevant in tests
+        # where there's no real X server.
+        monkeypatch.setattr(streamer_module, "STREAMER_STARTUP_DELAY_S", 0)
 
         captured: list[tuple] = []
 
