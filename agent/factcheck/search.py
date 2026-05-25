@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Optional, Protocol
 
@@ -30,6 +31,16 @@ class SearchHit:
     url: str
     title: str
     snippet: str
+    # True when the URL came from a server-stamped url_citation annotation
+    # (authoritative — fabrication is impossible). False when the model
+    # transcribed it as inline markdown (still possibly correct, but
+    # subject to model-typed-URL risk and needs content validation).
+    is_annotation: bool = False
+
+
+# Override to 1 to force HEAD+title validation on every URL even when it's
+# annotation-stamped. Default off — annotated URLs are server-vouched.
+_VALIDATE_ANNOTATIONS = os.getenv("DERAD_VALIDATE_ANNOTATIONS", "0").lower() in ("1", "true", "yes")
 
 
 class SearchBackend(Protocol):
@@ -236,25 +247,25 @@ def _extract_search_hits(response) -> list[SearchHit]:
                     s = max(0, start - 240)
                     e = min(len(full_text), end + 60)
                     snippet = full_text[s:e].strip()
-                hits.append(SearchHit(url=url, title=title, snippet=snippet))
+                hits.append(SearchHit(url=url, title=title, snippet=snippet, is_annotation=True))
 
     if hits or not full_text:
         return hits
 
     # Fallback: parse inline markdown links. Pair each link's surrounding
-    # bullet/sentence as the snippet.
+    # bullet/sentence as the snippet. These are model-typed URLs, so
+    # is_annotation stays False and they get full HEAD+title validation.
     for match in _MARKDOWN_LINK_RE.finditer(full_text):
         title, url = match.group(1).strip(), match.group(2).strip().rstrip(".,;:)")
         if url in seen:
             continue
         seen.add(url)
-        # Use the sentence/bullet containing this link as the snippet.
         s = full_text.rfind("\n", 0, match.start()) + 1
         e = full_text.find("\n", match.end())
         if e == -1:
             e = len(full_text)
         snippet = full_text[s:e].strip().lstrip("- *")
-        hits.append(SearchHit(url=url, title=title, snippet=snippet[:400]))
+        hits.append(SearchHit(url=url, title=title, snippet=snippet[:400], is_annotation=False))
     return hits
 
 
@@ -356,46 +367,68 @@ def _title_match_score(claimed: str, actual: str) -> float:
 
 
 _TITLE_MATCH_THRESHOLD = 0.20
+_VALIDATE_MAX_WORKERS = 8
+
+
+def _classify_hit(h: SearchHit) -> tuple[Optional[SearchHit], Optional[tuple[str, str]]]:
+    """Decide whether one SearchHit is verified, rejected, or passed through.
+
+    Returns (verified_hit, None) on accept and (None, (url, reason)) on
+    reject. Pure-function so it's safe to call from a ThreadPoolExecutor.
+    """
+    if not h.url.startswith(("http://", "https://")):
+        return None, (h.url, "non-http")
+
+    # Annotation-stamped URLs are server-vouched by the tool runtime, so by
+    # default we skip the HEAD+title round-trip. Caller can force validation
+    # via DERAD_VALIDATE_ANNOTATIONS=1 for paranoid mode.
+    if h.is_annotation and not _VALIDATE_ANNOTATIONS:
+        return h, None
+
+    status, final_url, page_title = _fetch_title(h.url)
+    if status is None:
+        return None, (h.url, "fetch_failed")
+    if status >= 400:
+        return None, (h.url, f"http_{status}")
+    if not page_title:
+        # No <title> tag — page exists but we can't verify. Allow.
+        logger.info("URL %s returned no <title>; passing through unverified.", h.url)
+        return h, None
+    if not h.title:
+        return SearchHit(url=h.url, title=page_title, snippet=h.snippet, is_annotation=h.is_annotation), None
+    score = _title_match_score(h.title, page_title)
+    if score >= _TITLE_MATCH_THRESHOLD:
+        return h, None
+    return None, (
+        h.url,
+        f"title_mismatch score={score:.2f} claimed={h.title[:40]!r} actual={page_title[:40]!r}",
+    )
 
 
 def _validate_hits(
     hits: list[SearchHit],
 ) -> tuple[list[SearchHit], list[tuple[str, str]]]:
-    """Verify each hit by fetching the page and comparing the actual page
-    title to the agent's claimed title. Returns (verified, rejected).
-    Each rejected entry is (url, reason)."""
+    """Verify each hit in parallel (HEAD/title fetch is IO-bound).
+
+    Annotation-stamped hits short-circuit with no network call. Returned
+    `verified` preserves input order so reconcile sees the highest-ranked
+    hits first.
+    """
+    if not hits:
+        return [], []
+
+    workers = min(_VALIDATE_MAX_WORKERS, len(hits))
+    results: list[tuple[Optional[SearchHit], Optional[tuple[str, str]]]]
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(pool.map(_classify_hit, hits))
+
     verified: list[SearchHit] = []
     rejected: list[tuple[str, str]] = []
-    for h in hits:
-        if not h.url.startswith(("http://", "https://")):
-            rejected.append((h.url, "non-http"))
-            continue
-        status, final_url, page_title = _fetch_title(h.url)
-        if status is None:
-            rejected.append((h.url, "fetch_failed"))
-            continue
-        if status >= 400:
-            rejected.append((h.url, f"http_{status}"))
-            continue
-        if not page_title:
-            # No <title> tag — page exists but we can't verify. Allow with
-            # warning; common for some JS-rendered pages.
-            logger.info("URL %s returned no <title>; passing through unverified.", h.url)
-            verified.append(h)
-            continue
-        # If the agent didn't claim a title (annotation fallback case),
-        # accept what the page actually has and stamp it.
-        if not h.title:
-            verified.append(SearchHit(url=h.url, title=page_title, snippet=h.snippet))
-            continue
-        score = _title_match_score(h.title, page_title)
-        if score >= _TITLE_MATCH_THRESHOLD:
-            verified.append(h)
-        else:
-            rejected.append((
-                h.url,
-                f"title_mismatch score={score:.2f} claimed={h.title[:40]!r} actual={page_title[:40]!r}",
-            ))
+    for ok, bad in results:
+        if ok is not None:
+            verified.append(ok)
+        elif bad is not None:
+            rejected.append(bad)
     return verified, rejected
 
 
