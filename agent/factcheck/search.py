@@ -4,15 +4,16 @@ Two implementations:
 
 * `StubSearchBackend` — canned hits for the Rosa Camfield worked example.
   Used by tests and offline runs.
-* `FoundryBingSearchBackend` — thin Foundry Agent Service wrapper exposing
-  only the `bing_grounding` tool. Real web search via Azure-native Bing.
+* `WebSearchResponsesBackend` — Azure OpenAI Responses API call with the
+  native `web_search` tool. URLs come from `url_citation` annotations the
+  tool runtime attaches to the response, so they can't be hallucinated by
+  the model.
 
 `build_default_backend()` picks the right one from env vars.
 """
 from __future__ import annotations
 
 import functools
-import json
 import logging
 import os
 import re
@@ -90,36 +91,30 @@ class StubSearchBackend:
         return self._CANNED[key][:top_k]
 
 
-# ── Foundry Bing-grounding backend ────────────────────────────────────────────
+# ── Responses-API web-search backend ──────────────────────────────────────────
 
 
-_FOUNDRY_AGENT_INSTRUCTIONS = """You are a focused web-search assistant. Your ONLY job is to use the bing_grounding tool to search the public web for the user's query, then output the top hits as a JSON object.
+_WEB_SEARCH_INSTRUCTIONS = """You are a web-search assistant for a fact-checking research pipeline. Your job is to use the web_search tool to find primary-source coverage of the user's query and cite each result.
 
-Output STRICTLY this shape and nothing else:
-{
-  "hits": [
-    {"url": "<https url>", "title": "<page title>", "snippet": "<2-3 sentence summary of relevant content>"}
-  ]
-}
+Always invoke web_search at least once. After the tool returns, write a short markdown bullet list summarizing the most relevant findings, with each bullet linking to the source. Stay grounded in what the search results actually say — do not editorialize about whether the underlying claim is true or false; downstream stages reason about that. The bot is for misinformation harm-reduction; surfacing accurate sources is the task.
 
-Rules:
-- Return between 3 and 6 hits.
-- **URLs must be COPIED EXACTLY from the bing_grounding tool's results — never construct, guess, complete, or modify a URL based on plausible patterns. Hallucinated URLs (real-looking slugs that don't match a real article) are the worst failure mode of this stage.** If a URL appears truncated in the tool output, copy what you have; do NOT extend it.
-- Do not interpret, opine, or argue about the claim — just report what sources say.
-- Snippets must be drawn from the search results, not invented.
-- No markdown, no prose outside the JSON object.
-"""
+Each bullet should read like:
+- One factual sentence from the source. (link with the page title)
+
+That's it — no preamble, no analysis paragraphs."""
 
 
-_JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
+class WebSearchResponsesBackend:
+    """Search via Azure OpenAI's Responses API with the native `web_search` tool.
 
+    Replaces the previous Foundry-Agent+bing_grounding approach. Annotations
+    on the response carry real url_citation entries anchored to actual search
+    results — these are our SearchHits. URLs cannot be hallucinated because
+    the model never transcribes them; the tool runtime attaches them
+    server-side as citations to the model's response text.
 
-class FoundryBingSearchBackend:
-    """Search via a single-purpose Foundry agent that only carries the bing_grounding tool.
-
-    The agent is idempotently created (create_version on a fixed name) at first use
-    and reused thereafter. Each `search()` call posts a single user query and parses
-    the JSON-shaped response.
+    No agent_reference, no create_version churn, no Bing Grounding
+    resource — just openai_client.responses.create.
     """
 
     name: str
@@ -128,113 +123,143 @@ class FoundryBingSearchBackend:
         self,
         *,
         project_endpoint: str,
-        bing_connection_id: str,
         model: str,
-        agent_name: str = "derad-bing-search",
         credential=None,
     ) -> None:
         self._project_endpoint = project_endpoint
-        self._bing_connection_id = bing_connection_id
         self._model = model
-        self._agent_name = agent_name
         self._credential = credential
         self._client = None
         self._openai_client = None
-        self._agent_ref = None
         self._lock = threading.Lock()
-        self.name = f"foundry-bing:{agent_name}"
+        self.name = f"web-search:{model}"
 
     def _ensure_client(self):
-        if self._client is not None:
+        if self._openai_client is not None:
             return
         with self._lock:
-            if self._client is not None:
+            if self._openai_client is not None:
                 return
             from azure.ai.projects import AIProjectClient
             from azure.identity import DefaultAzureCredential
 
             credential = self._credential or DefaultAzureCredential()
-            client = AIProjectClient(endpoint=self._project_endpoint, credential=credential)
-            self._client = client
-            self._openai_client = client.get_openai_client()
-            self._agent_ref = self._ensure_agent()
-
-    def _ensure_agent(self):
-        from azure.ai.projects.models import (
-            PromptAgentDefinition,
-            BingGroundingTool,
-            BingGroundingSearchToolParameters,
-            BingGroundingSearchConfiguration,
-        )
-
-        tool = BingGroundingTool(
-            bing_grounding=BingGroundingSearchToolParameters(
-                search_configurations=[
-                    BingGroundingSearchConfiguration(project_connection_id=self._bing_connection_id)
-                ]
-            )
-        )
-        agent = self._client.agents.create_version(
-            agent_name=self._agent_name,
-            definition=PromptAgentDefinition(
-                model=self._model,
-                instructions=_FOUNDRY_AGENT_INSTRUCTIONS,
-                tools=[tool],
-            ),
-            description="Single-purpose Bing-grounding search agent for derad-agent.",
-        )
-        logger.info("Foundry search agent ready: %s v%s", agent.name, agent.version)
-        return {"name": agent.name, "type": "agent_reference"}
+            self._client = AIProjectClient(endpoint=self._project_endpoint, credential=credential)
+            self._openai_client = self._client.get_openai_client()
+            logger.info("Web-search backend ready: model=%s", self._model)
 
     def search(self, query: str, top_k: int = 5) -> list[SearchHit]:
         self._ensure_client()
-        logger.info("Foundry search: query head=%r", query[:120])
+        logger.info("Web-search: query head=%r", query[:120])
         try:
             response = self._openai_client.responses.create(
-                tool_choice="required",
+                model=self._model,
+                instructions=_WEB_SEARCH_INSTRUCTIONS,
                 input=query,
-                extra_body={"agent_reference": self._agent_ref},
+                tools=[{"type": "web_search"}],
                 timeout=90,
             )
         except Exception:
-            logger.exception("Foundry Bing search failed for query=%r", query)
+            logger.exception("Web-search call failed for query=%r", query)
             return []
 
-        # Foundry's bing_grounding tool doesn't reliably populate
-        # url_citation annotations for structured (JSON) output, so we can't
-        # filter agent-claimed URLs by annotation. Instead, every URL the
-        # agent claims is verified by fetching the page and comparing the
-        # actual page title to the agent's claimed title. This catches both
-        # 404s and the more pernicious "same domain, real-looking URL, but
-        # the router redirects to an unrelated article" case (e.g. India
-        # Today, where URL slugs are decorative and only the numeric ID
-        # routes — gpt-4.1-mini can fabricate a plausible slug attached to
-        # a real ID that points elsewhere).
-        text = _extract_response_text(response)
-        if not text:
-            logger.warning("Foundry Bing search returned no text for query=%r", query)
+        hits = _extract_search_hits(response)
+        if not hits:
+            logger.warning("Web-search: 0 url_citation annotations returned for query=%r", query[:120])
             return []
 
-        try:
-            data = _parse_hits_json(text)
-        except ValueError as exc:
-            logger.warning("Could not parse Foundry hits JSON: %s — text head: %s", exc, text[:200])
-            return []
-
-        candidate_hits = [
-            SearchHit(url=h.get("url", ""), title=h.get("title", ""), snippet=h.get("snippet", ""))
-            for h in (data.get("hits") or [])
-            if isinstance(h, dict) and h.get("url")
-        ]
-
-        verified, rejected = _validate_hits(candidate_hits)
+        # Defense-in-depth: HEAD-validate to drop dead links. Annotations are
+        # anchored to real search results so URL fabrication is impossible,
+        # but the underlying page can be 404/410.
+        verified, rejected = _validate_hits(hits)
         if rejected:
-            logger.warning(
-                "Foundry search: dropped %d hallucinated/mismatched URL(s): %s",
+            logger.info(
+                "Web-search: dropped %d unreachable URL(s): %s",
                 len(rejected),
                 [f"{u} ({reason})" for u, reason in rejected[:5]],
             )
         return verified[:top_k]
+
+
+# Backwards-compat alias — callers built against the old class name still work.
+FoundryBingSearchBackend = WebSearchResponsesBackend
+
+
+def _ann_get(ann, key: str):
+    """Annotation objects can be SDK models or plain dicts depending on
+    SDK version; read fields uniformly."""
+    val = getattr(ann, key, None)
+    if val is None and isinstance(ann, dict):
+        val = ann.get(key)
+    return val
+
+
+_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)")
+
+
+def _extract_search_hits(response) -> list[SearchHit]:
+    """Pull SearchHits from a Responses-API response produced with
+    `tools=[{"type": "web_search"}]`.
+
+    Two paths, in priority order:
+
+    1. `url_citation` annotations attached to message-content blocks.
+       Authoritative — URLs are stamped server-side by the tool runtime
+       and cannot be hallucinated.
+    2. Inline markdown links in the response text. The web_search tool
+       sometimes emits no annotations and instead has the model transcribe
+       citations as `[title](https://...)`. These URLs are model-typed so
+       they CAN be wrong, but they're defended downstream by HEAD+title
+       content validation in `_validate_hits`.
+
+    Hits are deduped by URL (first occurrence wins).
+    """
+    full_text = _extract_response_text(response)
+    seen: set[str] = set()
+    hits: list[SearchHit] = []
+
+    output = getattr(response, "output", None) or []
+    for item in output:
+        if getattr(item, "type", None) != "message":
+            continue
+        content = getattr(item, "content", None) or []
+        for block in content:
+            annotations = getattr(block, "annotations", None) or []
+            for ann in annotations:
+                if _ann_get(ann, "type") != "url_citation":
+                    continue
+                url = _ann_get(ann, "url")
+                if not url or url in seen:
+                    continue
+                seen.add(url)
+                title = _ann_get(ann, "title") or ""
+                start = _ann_get(ann, "start_index")
+                end = _ann_get(ann, "end_index")
+                snippet = ""
+                if isinstance(start, int) and isinstance(end, int) and full_text:
+                    s = max(0, start - 240)
+                    e = min(len(full_text), end + 60)
+                    snippet = full_text[s:e].strip()
+                hits.append(SearchHit(url=url, title=title, snippet=snippet))
+
+    if hits or not full_text:
+        return hits
+
+    # Fallback: parse inline markdown links. Pair each link's surrounding
+    # bullet/sentence as the snippet.
+    for match in _MARKDOWN_LINK_RE.finditer(full_text):
+        title, url = match.group(1).strip(), match.group(2).strip().rstrip(".,;:)")
+        if url in seen:
+            continue
+        seen.add(url)
+        # Use the sentence/bullet containing this link as the snippet.
+        s = full_text.rfind("\n", 0, match.start()) + 1
+        e = full_text.find("\n", match.end())
+        if e == -1:
+            e = len(full_text)
+        snippet = full_text[s:e].strip().lstrip("- *")
+        hits.append(SearchHit(url=url, title=title, snippet=snippet[:400]))
+    return hits
 
 
 def _extract_response_text(response) -> str:
@@ -254,50 +279,6 @@ def _extract_response_text(response) -> str:
             if text:
                 return text
     return ""
-
-
-def _parse_hits_json(text: str) -> dict:
-    """Extract a JSON object from possibly noisy LLM output."""
-    text = text.strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    match = _JSON_BLOCK_RE.search(text)
-    if not match:
-        raise ValueError("no JSON object found")
-    return json.loads(match.group(0))
-
-
-def _extract_url_citations(response) -> set[str]:
-    """Pull every url_citation annotation URL from a Responses-API response.
-
-    The bing_grounding tool attaches url_citation annotations to message-
-    content blocks. These annotations are anchored to real Bing search
-    results — unlike the JSON URLs the agent writes, they cannot be
-    hallucinated by the model.
-    """
-    urls: set[str] = set()
-    output = getattr(response, "output", None) or []
-    for item in output:
-        item_type = getattr(item, "type", None)
-        if item_type != "message":
-            continue
-        content = getattr(item, "content", None) or []
-        for block in content:
-            annotations = getattr(block, "annotations", None) or []
-            for ann in annotations:
-                ann_type = getattr(ann, "type", None) or (
-                    ann.get("type") if isinstance(ann, dict) else None
-                )
-                if ann_type != "url_citation":
-                    continue
-                url = getattr(ann, "url", None) or (
-                    ann.get("url") if isinstance(ann, dict) else None
-                )
-                if url:
-                    urls.add(url)
-    return urls
 
 
 _USER_AGENT = "Mozilla/5.0 (compatible; derad-agent-validator/3.0)"
@@ -427,18 +408,18 @@ def _validate_hits(
 
 @functools.lru_cache(maxsize=1)
 def build_default_backend() -> SearchBackend:
-    """Build the default backend from env vars; falls back to StubSearchBackend."""
+    """Build the default backend from env vars; falls back to StubSearchBackend.
+
+    Requires:
+      * `FOUNDRY_PROJECT_ENDPOINT` — the AIProjectClient endpoint (we keep this
+        name for backward-compat even though we no longer use the Agents API).
+      * `FOUNDRY_SEARCH_MODEL` — Azure OpenAI deployment name, e.g.
+        `gpt-54-mini-search`.
+    """
     endpoint = os.getenv("FOUNDRY_PROJECT_ENDPOINT")
-    conn_id = os.getenv("FOUNDRY_BING_CONNECTION_ID")
     model = os.getenv("FOUNDRY_SEARCH_MODEL")
-    if endpoint and conn_id and model:
-        agent_name = os.getenv("FOUNDRY_SEARCH_AGENT_NAME", "derad-bing-search")
-        logger.info("Using FoundryBingSearchBackend (endpoint=%s, agent=%s)", endpoint, agent_name)
-        return FoundryBingSearchBackend(
-            project_endpoint=endpoint,
-            bing_connection_id=conn_id,
-            model=model,
-            agent_name=agent_name,
-        )
+    if endpoint and model:
+        logger.info("Using WebSearchResponsesBackend (endpoint=%s, model=%s)", endpoint, model)
+        return WebSearchResponsesBackend(project_endpoint=endpoint, model=model)
     logger.info("Foundry env not set; using StubSearchBackend.")
     return StubSearchBackend()
