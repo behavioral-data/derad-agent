@@ -743,7 +743,7 @@ def api_activity():
     recent_drops = ev_store.list_recent_drops(20)
 
     outcome_counts: dict[str, int] = {}
-    tone_counts: dict[str, int] = {"agreeable": 0, "neutral": 0, "satirical": 0}
+    tone_counts: dict[str, int] = {t: 0 for t in _participants.VALID_TONES}
     latencies: list[int] = []
     for ev in recent_events:
         outcome = ev.get("outcome") or "unknown"
@@ -757,7 +757,7 @@ def api_activity():
 
     part_store = _participants.get_store()
     all_parts = part_store.list_all()
-    participant_tone_counts = {"agreeable": 0, "neutral": 0, "satirical": 0}
+    participant_tone_counts = {t: 0 for t in _participants.VALID_TONES}
     for p in all_parts:
         if p.tone in participant_tone_counts:
             participant_tone_counts[p.tone] += 1

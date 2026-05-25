@@ -155,7 +155,9 @@ def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
 _APP_TO_FACTCHECK_TONE = {
     "agreeable": "agreeable",
     "neutral": "neutral",
-    "satirical": "agonistic",  # design uses 'agonistic'; app's legacy label is 'satirical'
+    "agonistic": "agonistic",
+    "satirical": "agonistic",  # legacy alias — any pre-rename participant
+                                # records still resolve correctly.
 }
 
 
