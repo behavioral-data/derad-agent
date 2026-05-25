@@ -38,11 +38,15 @@ INGEST_MODE = os.getenv("DERAD_INGEST_MODE", "streaming").lower()
 # start (cheap), bump to 300+ when chaining redeploys.
 STREAMER_STARTUP_DELAY_S = float(os.getenv("DERAD_STREAMER_STARTUP_DELAY_S", "60"))
 
-# When the first response is 429, X's "another stream is already open"
-# slot-clearance can take 5–10 min in practice. Start with a long backoff
-# so we don't spend the first 10 minutes spamming the endpoint and
-# extending its own enforcement window.
-_INITIAL_429_BACKOFF_S = 300.0
+# Per X's filtered-stream docs:
+# "Every HTTP 429 received increases the time you must wait until rate
+# limiting will no longer be in effect."
+# So we deliberately keep retries SLOW — each one we make pushes X's edge
+# lockout further out. TooManyConnections (slot held by stale edge state)
+# is empirically much slower to release than the request-rate 429, so it
+# gets a much longer initial wait.
+_TOO_MANY_CONNECTIONS_INITIAL_S = 1800.0   # 30 min — X edge slot release
+_RATE_LIMIT_INITIAL_S = 60.0               # X docs: "starting with a 1 minute wait"
 
 _connected = threading.Event()
 
@@ -67,11 +71,15 @@ def _set_active_resp(resp: requests.Response | None) -> None:
 
 
 def _request_shutdown() -> None:
-    """atexit hook: signal the streamer loop and force-close any open response.
+    """atexit / SIGTERM hook: signal the streamer loop and force a real TCP
+    FIN on any open response.
 
-    Closing the Response unblocks the in-flight `iter_lines()` read in the
-    streamer thread (raising a RequestException) and tells X our end of the
-    connection is gone, so the next worker's connect doesn't 429.
+    requests.Response.close() only RELEASES the connection back to urllib3's
+    pool — it doesn't actually close the socket. To tell X "we're gone" at
+    the TCP layer we need to reach into the urllib3 internals and close the
+    underlying HTTPConnection. Empirically X's filtered-stream edge ignores
+    TCP state for slot-release decisions, but doing this correctly removes
+    one variable from the debugging picture.
     """
     _shutting_down.set()
     with _active_resp_lock:
@@ -79,6 +87,19 @@ def _request_shutdown() -> None:
     if resp is None:
         return
     try:
+        # Force a real socket close via urllib3's internals.
+        raw = getattr(resp, "raw", None)
+        if raw is not None:
+            try:
+                connection = getattr(raw, "_connection", None) or getattr(raw, "connection", None)
+                if connection is not None:
+                    connection.close()
+            except Exception:
+                pass
+            try:
+                raw.close()
+            except Exception:
+                pass
         resp.close()
         logger.info("Closed active stream response on shutdown")
     except Exception:
@@ -210,6 +231,40 @@ def _reshape(data: dict, includes: dict) -> dict:
     }
 
 
+def _diagnose_429(resp) -> dict:
+    """Pick apart an X 429 response into a diagnostic dict.
+
+    Two distinct 429 variants matter:
+      - TooManyConnections — X's edge thinks the slot is held by a stale
+        previous connection. Per X docs, only escape is to wait it out;
+        retries push the lockout further. No x-rate-limit-* headers.
+      - Request-rate (50/15min on Basic) — standard rate-limit response
+        WITH x-rate-limit-remaining / x-rate-limit-reset headers.
+    """
+    info = {
+        "rl_limit": resp.headers.get("x-rate-limit-limit") or "",
+        "rl_remaining": resp.headers.get("x-rate-limit-remaining") or "",
+        "rl_reset": resp.headers.get("x-rate-limit-reset") or "",
+        "body_head": (resp.text or "")[:400],
+        "connection_issue": "",
+        "title": "",
+        "is_slot_held": False,
+    }
+    try:
+        body = resp.json()
+        if isinstance(body, dict):
+            info["connection_issue"] = body.get("connection_issue") or ""
+            info["title"] = body.get("title") or ""
+            detail = body.get("detail") or ""
+            info["is_slot_held"] = (
+                info["connection_issue"] == "TooManyConnections"
+                or "maximum allowed connection" in detail.lower()
+            )
+    except Exception:
+        pass
+    return info
+
+
 def _stream_loop(dispatch_fn: Callable, token: str) -> None:
     headers = {"Authorization": f"Bearer {token}"}
     backoff = 1.0
@@ -235,12 +290,31 @@ def _stream_loop(dispatch_fn: Callable, token: str) -> None:
                 timeout=(10, 90),
             ) as resp:
                 if resp.status_code == 429:
-                    # X holds the "1 concurrent stream per app" slot until
-                    # it times out the previous worker's stale TCP socket —
-                    # empirically 5–10 minutes. Start with a long initial
-                    # backoff so we don't pummel the endpoint.
-                    wait = max(backoff, _INITIAL_429_BACKOFF_S)
-                    logger.warning("Stream rate-limited (429); backing off %.0f s", wait)
+                    # Pick apart the 429 — slot-held vs request-rate need
+                    # different backoff strategies and we want the body
+                    # logged so we can tell them apart in production.
+                    diag = _diagnose_429(resp)
+                    if diag["is_slot_held"]:
+                        # X edge holds a stale per-app slot. Per X docs,
+                        # the slot can take "many minutes to hours" to
+                        # release and EVERY retry extends the lockout —
+                        # so we wait long and retry sparingly.
+                        wait = max(backoff, _TOO_MANY_CONNECTIONS_INITIAL_S)
+                        logger.warning(
+                            "Stream 429 TooManyConnections (X edge holds a stale slot) — "
+                            "backing off %.0f s. body=%r",
+                            wait, diag["body_head"][:200],
+                        )
+                    else:
+                        # Standard request-rate 429. Honor the docs' 1-min
+                        # initial wait and double from there.
+                        wait = max(backoff, _RATE_LIMIT_INITIAL_S)
+                        logger.warning(
+                            "Stream 429 rate-limited — backing off %.0f s. "
+                            "rl_remaining=%s rl_reset=%s body=%r",
+                            wait, diag["rl_remaining"], diag["rl_reset"],
+                            diag["body_head"][:200],
+                        )
                     _connected.clear()
                     if _shutting_down.wait(timeout=wait):
                         break
