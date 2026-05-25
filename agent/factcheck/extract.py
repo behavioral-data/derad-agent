@@ -13,12 +13,11 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Optional
 
 from pydantic import BaseModel, Field, model_validator
 
+from .context import PipelineContext
 from .llm import call_claude_json, pruned_context
-from .multimodal import ImageEvidence
 from .schema import ClaimType, OverallState
 
 
@@ -99,23 +98,18 @@ OUTPUT: one JSON object matching the schema. EXACTLY one claim must have is_cent
 """
 
 
-def extract_claims(
-    claim_text: str,
-    *,
-    tweet_context: Optional[dict] = None,
-    image_evidence: Optional[list[ImageEvidence]] = None,
-) -> ExtractionOutput:
+def extract_claims(claim_text: str, ctx: PipelineContext) -> ExtractionOutput:
     """Run Stage 2 + 3. Returns the structured ExtractionOutput.
 
     On LLM failure, returns a safe fallback that treats the whole input as
     one verifiable central claim (preserves pre-Stage-2 behaviour).
     """
     payload: dict = {"tweet_text": claim_text}
-    cleaned_ctx = pruned_context(tweet_context)
+    cleaned_ctx = pruned_context(ctx.tweet_context)
     if cleaned_ctx:
         payload["tweet_context"] = cleaned_ctx
-    if image_evidence:
-        payload["image_evidence"] = [img.to_prompt_summary() for img in image_evidence]
+    if ctx.image_evidence:
+        payload["image_evidence"] = [img.to_prompt_summary() for img in ctx.image_evidence]
 
     user_prompt = json.dumps(payload, indent=2)
     try:

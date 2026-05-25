@@ -23,6 +23,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from .context import PipelineContext
 from .llm import call_claude_json, pruned_context
 from .schema import Evidence
 from .search import SearchBackend, SearchHit
@@ -132,11 +133,10 @@ def _decide_next(
 
 
 def iterative_verify(
-    *,
     claim_text: str,
+    ctx: PipelineContext,
+    *,
     backend: SearchBackend,
-    tweet_context: Optional[dict] = None,
-    image_summaries: Optional[list[dict]] = None,
     max_questions: int = 5,
     max_hits_per_question: int = 3,
     wall_clock_budget_s: float = 60.0,
@@ -171,7 +171,7 @@ def iterative_verify(
             )
             break
 
-        decision = _decide_next(claim_text, history, tweet_context, image_summaries)
+        decision = _decide_next(claim_text, history, ctx.tweet_context, ctx.image_summaries)
         if decision is None:
             # Controller call failed (LLM outage / parse error / refusal).
             # We have at least one step of evidence from the seed search,

@@ -19,8 +19,8 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from .context import PipelineContext
 from .llm import call_claude_json, pruned_context
-from .multimodal import ImageEvidence
 from .schema import (
     ConsolidatedFindings,
     Evidence,
@@ -115,21 +115,20 @@ Hard rules:
 
 
 def reconcile(
-    *,
     central_claim_text: str,
+    *,
     evidence: list[Evidence],
     source_quality_table: list[SourceQualityEntry],
-    image_evidence: Optional[list[ImageEvidence]] = None,
-    tweet_context: Optional[dict] = None,
+    ctx: PipelineContext,
 ) -> ReconciliationOutput:
     """Run Stage 4.5; returns the structured output.
 
-    `image_evidence` (when non-empty) folds Lens 2 / Lens 3 reasoning into
-    the same Claude call. Per-image OCR text, description, and provenance
-    search hits are passed alongside the text evidence; Claude is
-    instructed to reason about cross-modal alignment inline.
+    `ctx.image_evidence` (when non-empty) folds Lens 2 / Lens 3 reasoning
+    into the same Claude call. Per-image OCR text, description, and
+    provenance search hits are passed alongside the text evidence; Claude
+    is instructed to reason about cross-modal alignment inline.
 
-    `tweet_context` carries the parent tweet's surrounding metadata —
+    `ctx.tweet_context` carries the parent tweet's surrounding metadata —
     author handle/bio/verified/account-age, posted-at, expanded t.co URLs,
     referenced-tweet relations, language, sensitive flag, public metrics.
     Reconcile uses it to interpret the claim (parody account, third-party
@@ -140,11 +139,13 @@ def reconcile(
         "evidence": [_compact_evidence(e) for e in evidence],
         "source_quality_table": [_compact_quality_entry(s) for s in source_quality_table],
     }
-    cleaned_ctx = pruned_context(tweet_context)
+    cleaned_ctx = pruned_context(ctx.tweet_context)
     if cleaned_ctx:
         payload["tweet_context"] = cleaned_ctx
-    if image_evidence:
-        payload["image_evidence"] = [img.to_prompt_with_provenance() for img in image_evidence]
+    if ctx.image_evidence:
+        payload["image_evidence"] = [
+            img.to_prompt_with_provenance() for img in ctx.image_evidence
+        ]
 
     user_prompt = json.dumps(payload, indent=2)
     try:

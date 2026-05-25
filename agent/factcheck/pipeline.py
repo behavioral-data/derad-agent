@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 from .audit import audit
+from .context import PipelineContext
 from .extract import ExtractionOutput, central_claim, extract_claims
 from .freeze import freeze_to_disk
 from .multimodal import ImageEvidence, extract_image
@@ -273,13 +274,11 @@ def run_pipeline(
         image_evidence = _run_multimodal(image_urls, backend)
         logger.info("run_pipeline[%s]: Stage 1.5 complete (%d evidence)", invocation_id, len(image_evidence))
 
+    ctx = PipelineContext(tweet_context=tweet_context, image_evidence=image_evidence)
+
     # ── Stage 2 + 3 — claim extraction & check-worthiness gate ──
     logger.info("run_pipeline[%s]: Stage 2+3 — claim extraction", invocation_id)
-    extraction = extract_claims(
-        claim_text,
-        tweet_context=tweet_context,
-        image_evidence=image_evidence or None,
-    )
+    extraction = extract_claims(claim_text, ctx)
     central = central_claim(extraction)
     logger.info(
         "run_pipeline[%s]: Stage 2+3 → %d propositions, central type=%s check_worthy=%s, overall=%s",
@@ -303,15 +302,7 @@ def run_pipeline(
     # than the raw tweet (hedges stripped, framing normalized).
     central_text = central.text
     logger.info("run_pipeline[%s]: Stage 4 — iterative verification (Papelo-style)", invocation_id)
-    image_summaries = (
-        [img.to_prompt_summary() for img in image_evidence] if image_evidence else None
-    )
-    text_evidence = iterative_verify(
-        claim_text=central_text,
-        backend=backend,
-        tweet_context=tweet_context,
-        image_summaries=image_summaries,
-    )
+    text_evidence = iterative_verify(central_text, ctx, backend=backend)
     logger.info("run_pipeline[%s]: Stage 4 done (%d evidence records)", invocation_id, len(text_evidence))
 
     # Roll image-provenance hits into the source-quality table too — Claude is
@@ -345,11 +336,10 @@ def run_pipeline(
     else:
         logger.info("run_pipeline[%s]: Stage 4.5 — reconcile", invocation_id)
         recon = reconcile(
-            central_claim_text=central_text,
+            central_text,
             evidence=text_evidence,
             source_quality_table=quality_table,
-            image_evidence=image_evidence or None,
-            tweet_context=tweet_context,
+            ctx=ctx,
         )
         logger.info("run_pipeline[%s]: Stage 4.5 done", invocation_id)
         stamped_evidence = [
