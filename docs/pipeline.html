@@ -141,18 +141,22 @@
           <p>Honest accounting of where URLs come from, where they can be hallucinated, what we persist, and what we never read.</p>
         </div>
 
-        <div class="callout warning">
-          <strong>We never fetch page content.</strong> The pipeline trusts Bing's search-result snippet via the Foundry agent + the agent's synthesis. Design §4.4 specifies HTTP + Playwright document fetch; that's intentionally deferred to keep the stack Azure-only. Consequence: a cited URL that resolves to a 200 page can still serve a <em>different article</em> than the snippet claims (the India Today miscite case). HEAD-validation catches 404s; nothing catches "page exists but wrong content".
+        <div class="callout info">
+          <strong>Content-based URL validation is now mandatory.</strong> Every URL the Foundry+Bing agent claims is fetched (first 32KB, redirects followed); the page's actual <code class="inline-code">&lt;title&gt;</code> is tokenized and Jaccard-overlapped against the agent's claimed title. Match score ≥ 0.20 → accepted; below → rejected as <code class="inline-code">title_mismatch</code> with the score logged. 4xx/5xx → rejected by status. This catches the India Today miscite class: gpt-4.1-mini fabricated a Neuralink-themed slug attached to a real numeric ID that India Today's router resolved to an unrelated 2023 Samantha/Vijay Deverakonda movie article (HTTP 301). The title-match validator dropped it with score=0.00 in offline reproduction.
+        </div>
+        <div class="callout warning mt-12">
+          <strong>What we still don't do.</strong> We don't extract or reason about the article body — only the page title is used for validation. Design §4.4's full HTTP + Playwright + snippet-extraction pipeline (where Claude reads the document text and pulls supporting/refuting passages) is still deferred. We trust the agent's claimed snippet; if the agent paraphrased incorrectly, downstream stages can't catch it. Playwright-rendered pages (X, Facebook, Instagram, archive sites) are out of scope.
         </div>
 
         <h3 class="mt-24">URL lifecycle per Foundry search call</h3>
         <ol class="task-list">
-          <li><span class="chip chip-info">1</span> We send a query to the Foundry agent (one of <code class="inline-code">claude-bing-search</code>'s tool-only agents, model gpt-4.1-mini).</li>
-          <li><span class="chip chip-info">2</span> The agent invokes the <code class="inline-code">bing_grounding</code> tool. Bing runs a real web search. Results return server-side with <code class="inline-code">url_citation</code> annotations attached to message-content blocks.</li>
-          <li><span class="chip chip-warning">3 ⚠</span> The agent writes a JSON object summarizing the hits. <strong>This is where URL hallucination happens.</strong> gpt-4.1-mini pattern-matches URL shapes (slugs, IDs, dates) and can fabricate plausible-looking links that don't correspond to any real article.</li>
-          <li><span class="chip chip-done">4</span> Our search backend (<code class="inline-code">FoundryBingSearchBackend.search</code>) now extracts <code class="inline-code">url_citation</code> annotations directly — Bing-anchored, can't be hallucinated.</li>
-          <li><span class="chip chip-done">5</span> JSON-claimed URLs are kept only if they match the annotation set. Hallucinated URLs are dropped with a logged warning. If the agent emitted zero verifiable URLs, we fall back to the annotation URLs directly (no titles/snippets, but real).</li>
-          <li><span class="chip chip-done">6</span> If a response carries no annotations at all (rare), HEAD-validate each URL with a 4-second timeout to drop obvious 404s.</li>
+          <li><span class="chip chip-info">1</span> We send a query to a single-purpose Foundry agent (model gpt-4.1-mini wrapped with only the <code class="inline-code">bing_grounding</code> tool).</li>
+          <li><span class="chip chip-info">2</span> The agent invokes the bing_grounding tool. Bing runs a real web search. Tool output is returned to the model internally; raw results are not exposed to the API caller.</li>
+          <li><span class="chip chip-warning">3 ⚠</span> The agent writes a JSON object summarizing the hits. <strong>This is where URL hallucination happens.</strong> gpt-4.1-mini pattern-matches URL shapes (slugs, IDs, dates) and can fabricate plausible-looking links. Empirical: the bot's India Today miscite was a 2025-dated Neuralink slug attached to a real ID that India Today's router resolved to a 2023 movie article.</li>
+          <li><span class="chip chip-info">4</span> Empirical: Foundry's <code class="inline-code">url_citation</code> annotations are reliably empty for the structured-JSON output mode. Annotation-only filtering would zero out every search, so we don't depend on them.</li>
+          <li><span class="chip chip-done">5</span> For every URL in the agent's JSON: HTTP GET with redirect-following (≤ 32 KB body, 6 s timeout, browser User-Agent). Extract the page's <code class="inline-code">&lt;title&gt;</code> tag.</li>
+          <li><span class="chip chip-done">6</span> Tokenize both the agent's claimed title and the actual page title (lowercase alphanumeric, ≥3 chars, stopwords + framing words filtered). Jaccard overlap ≥ 0.20 → accepted. Below → rejected as <code class="inline-code">title_mismatch</code> with the score logged.</li>
+          <li><span class="chip chip-done">7</span> 4xx/5xx → rejected by status. No <code class="inline-code">&lt;title&gt;</code> tag found → passed through unverified (common for JS-rendered pages) and logged.</li>
         </ol>
 
         <h3 class="mt-24">What gets persisted per mention</h3>
@@ -193,33 +197,34 @@
         <h3 class="mt-24">What we do <em>not</em> persist or read</h3>
         <div class="grid-2 mt-12">
           <div class="panel">
-            <div class="panel-head"><h3>Not read</h3></div>
+            <div class="panel-head"><h3>What we read</h3></div>
             <ul class="task-list">
-              <li><span class="chip chip-blocked">no</span> HTTP GET of any cited URL's content</li>
-              <li><span class="chip chip-blocked">no</span> Comparison of fetched page title against the agent's claimed snippet</li>
-              <li><span class="chip chip-blocked">no</span> Playwright-headless rendering of JS-heavy pages (X / Facebook / Instagram)</li>
-              <li><span class="chip chip-blocked">no</span> Archive-Today / Wayback cross-checks</li>
+              <li><span class="chip chip-done">yes</span> HTTP GET of each cited URL — first 32 KB only, for title extraction.</li>
+              <li><span class="chip chip-done">yes</span> Page <code class="inline-code">&lt;title&gt;</code> compared against the agent's claimed title for validation.</li>
+              <li><span class="chip chip-blocked">no</span> Article body / paragraphs are not parsed; no snippet extraction from real page content (yet).</li>
+              <li><span class="chip chip-blocked">no</span> Playwright-headless rendering of JS-heavy pages (X, Facebook, Instagram, archive sites). These either fail validation (no title) or pass through unverified.</li>
+              <li><span class="chip chip-blocked">no</span> Archive-Today / Wayback cross-checks.</li>
             </ul>
           </div>
           <div class="panel">
             <div class="panel-head"><h3>Not saved</h3></div>
             <ul class="task-list">
-              <li><span class="chip chip-blocked">no</span> Raw Bing search results before the agent's JSON re-emission</li>
-              <li><span class="chip chip-blocked">no</span> Foundry response objects (only the parsed hits)</li>
-              <li><span class="chip chip-blocked">no</span> The annotation URLs we used to filter (just the verified hits)</li>
-              <li><span class="chip chip-blocked">no</span> Per-stage Claude conversation transcripts</li>
+              <li><span class="chip chip-blocked">no</span> Raw Bing search results (Foundry hides the tool's raw output from API callers).</li>
+              <li><span class="chip chip-blocked">no</span> Foundry response objects (only the parsed + validated hits).</li>
+              <li><span class="chip chip-blocked">no</span> Fetched page HTML / titles used for validation (the rejection reason is logged, not stored).</li>
+              <li><span class="chip chip-blocked">no</span> Per-stage Claude conversation transcripts.</li>
             </ul>
           </div>
         </div>
 
-        <h3 class="mt-24">Why we don't fetch pages (yet)</h3>
-        <p>Design §4.4 specifies HTTP + Playwright fetching. Three reasons we deferred:</p>
+        <h3 class="mt-24">Why we don't extract page bodies (yet)</h3>
+        <p>Design §4.4 specifies HTTP + Playwright fetching with snippet extraction from the actual document. We do the HTTP-GET half (for title-based URL validation) but not the snippet-extraction half. Three reasons:</p>
         <ul class="task-list">
-          <li><span class="chip">cost</span> Playwright adds a ~500MB layer to the Docker image and ~2-4s per page on JS-heavy sites; static HTTP adds ~500ms per URL.</li>
-          <li><span class="chip">scope</span> Azure has no native headless-browser service; running Playwright in Container Apps was a meaningful infra slab we punted on.</li>
-          <li><span class="chip">trust</span> The Foundry+Bing agent's snippet was "good enough" in early tests. The India Today miscite exposed that this isn't safe in the long tail.</li>
+          <li><span class="chip">cost</span> Reading + chunking ~10 KB of HTML per URL through Claude for snippet extraction adds ~3-8 s per cited URL × multiple URLs per pipeline. Latency cost is real.</li>
+          <li><span class="chip">scope</span> Playwright would unlock JS-rendered sites (X, FB, IG, archives) but it's a ~500 MB Docker layer + Container Apps infra slab.</li>
+          <li><span class="chip">redundancy</span> The agent's claimed snippet is usually accurate even when the URL is hallucinated — fixing the URL hallucination at the validation step is most of the value. Real-document snippet extraction is incremental.</li>
         </ul>
-        <p>Pragmatic next step: fetch the top-1 cited URL per claim, extract title + first 2-3 paragraphs via readability, compare to claimed snippet. If mismatch, drop the citation. ~1-2 hours of code, ~3-5s added latency.</p>
+        <p>Pragmatic next step: when the agent's snippet doesn't appear (case-insensitive substring) in the validated page's first 4 KB of text, drop the citation as snippet-mismatch. ~30 min of code, adds ~100 ms per URL (we already fetched the body for title extraction).</p>
       </section>
 
       <!-- ───────────────────────── PER-STAGE DETAILS ───────────────────────── -->
@@ -262,9 +267,10 @@
               <span class="chip chip-suggest">Claude + Foundry+Bing</span>
             </div>
             <p><strong>Service.</strong> Claude Sonnet 4.6 (controller, low reasoning) + Azure AI Foundry agent (gpt-4.1-mini wrapping the bing_grounding tool).</p>
-            <p><strong>What.</strong> Papelo-style loop. Each iteration: controller sees claim + history → decides <em>continue</em> (issues next question) or <em>stop</em>. The next question runs through Foundry+Bing, hits return as Evidence.</p>
+            <p><strong>What.</strong> Papelo-style loop. Each iteration: controller sees claim + history → decides <em>continue</em> (issues next question) or <em>stop</em>. The next question runs through Foundry+Bing.</p>
+            <p><strong>URL validation.</strong> Every hit URL is fetched (≤32&nbsp;KB, 6&nbsp;s timeout, follow redirects); page <code class="inline-code">&lt;title&gt;</code> is Jaccard-matched against the agent's claimed title (threshold 0.20). Hallucinated URLs are dropped before they enter the evidence bundle. See <a href="#urls">URLs: trust &amp; persistence</a> for the full lifecycle.</p>
             <p><strong>Caps.</strong> ≤5 questions · ≤3 hits/question · 60 s wall-clock · 120 s per LLM call.</p>
-            <p class="meta">~15–40 s · 1–3 questions typical · early-stops when ≥2 reliable-tier hits agree</p>
+            <p class="meta">~20–50 s with validation · 1–3 questions typical · early-stops when ≥2 reliable-tier hits agree</p>
           </div>
 
           <div class="panel">
