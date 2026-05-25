@@ -185,6 +185,8 @@ def _run_multimodal(image_urls: list[str], backend: SearchBackend) -> list[Image
 def _attached_image_records(images: list[ImageEvidence]) -> list[AttachedImage]:
     """Pack per-image evidence into the frozen schema's AttachedImage rows.
 
+    `canonical_image_match` is forwarded from Stage 1.5's VLM (when the
+    photograph itself is a known artifact — Tank Man, Pope Balenciaga, etc).
     `provenance` is populated from the Tier 3 web-search hits — title becomes
     `match_caption`. `earliest_seen` stays unknown until Track-B image-vector
     search lands; design §4.1.5.1 marks that as a v2 stretch.
@@ -201,6 +203,7 @@ def _attached_image_records(images: list[ImageEvidence]) -> list[AttachedImage]:
                 image_url=img.image_url,
                 ocr_text=img.ocr_text,
                 vlm_description=img.description,
+                canonical_image_match=img.canonical_image_match,
                 provenance=provenance,
                 manipulation_check="out_of_scope_nei",
             )
@@ -228,11 +231,17 @@ def _short_circuit_decline(
 
     reason = extraction.reason or "No factually verifiable claim and no clear angle to push back or contextualize."
     findings = ConsolidatedFindings(unaddressed_propositions=())
+    # If the invoker asked for one of the other actions and the bot
+    # pivoted to decline, surface the pivot in the rendered reply too
+    # (the happy path does this near line 460; the decline short-circuit
+    # was previously missing it).
+    pivot_text = _build_pivot_disclosure(extraction)
     payload = PresentationPayload(
         headline_finding=reason,
         counter_fact=None,
         primary_sources_to_cite=(),
         load_bearing_evidence_snippet="",
+        pivot_disclosure=pivot_text,
     )
     claim_objs = tuple(
         Claim(

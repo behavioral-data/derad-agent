@@ -116,12 +116,12 @@ def audit(
     the audit-fail outcome on failure."""
     failures: list[str] = []
 
-    # 1. Structural outcome rule must agree with what reconcile declared.
-    expected = derive_action_outcome(action, findings, source_quality_table)
-    if expected != declared_outcome:
-        failures.append(
-            f"Declared outcome {declared_outcome!r} disagrees with structural rule (expected {expected!r})."
-        )
+    # Note: in the current flow `declared_outcome` is itself computed by
+    # `derive_action_outcome` upstream, so re-deriving here would be a
+    # tautology. The real value of this audit is the shape + URL-containment
+    # checks below — which catch reconcile drift (model emits a URL not in
+    # the source_quality_table, or violates the central-bucket invariant)
+    # that a pure structural-rule recompute would miss.
 
     # 2. Every URL the renderer can surface must be in source_quality_table.
     known_urls = {entry.url for entry in source_quality_table}

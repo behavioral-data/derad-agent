@@ -238,7 +238,20 @@ def _get_info_params(token: str) -> dict | None:
             info_payload = json.loads(entity["payload_json"])
         else:
             legacy_urls = json.loads(entity.get("reasons_json", "[]"))
+            # Pre-action-rewrite tokens were all verify-mode. Derive a
+            # plausible action_outcome from the legacy verdict_label if
+            # stored on the row, else fall back to verified_nei.
+            legacy_verdict = entity.get("verdict_label") or ""
+            legacy_outcome = {
+                "Supported": "verified_supported",
+                "Refuted": "verified_refuted",
+                "Conflicting": "verified_conflicting",
+                "NotEnoughEvidence": "verified_nei",
+            }.get(legacy_verdict, "verified_nei")
             info_payload = {
+                "action": "verify",
+                "action_source": "inferred",
+                "action_outcome": legacy_outcome,
                 "primary_sources": [{"url": u, "display_name": u} for u in (legacy_urls or [])],
                 "source_quality_table": [],
                 "counterpoints": [],
