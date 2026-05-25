@@ -231,6 +231,17 @@ def _reshape(data: dict, includes: dict) -> dict:
     }
 
 
+def _parse_rl_reset(raw: str) -> float | None:
+    """Parse the `x-rate-limit-reset` header (unix epoch in seconds) into
+    a float. Returns None on missing / unparseable values."""
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def _diagnose_429(resp) -> dict:
     """Pick apart an X 429 response into a diagnostic dict.
 
@@ -306,13 +317,25 @@ def _stream_loop(dispatch_fn: Callable, token: str) -> None:
                             wait, diag["body_head"][:200],
                         )
                     else:
-                        # Standard request-rate 429. Honor the docs' 1-min
-                        # initial wait and double from there.
-                        wait = max(backoff, _RATE_LIMIT_INITIAL_S)
+                        # Standard request-rate 429. X recommends:
+                        # (a) read `x-rate-limit-reset` (unix epoch) for the
+                        #     actual window-end and wait until then, OR
+                        # (b) exponential backoff from a 1-min floor.
+                        # Use the header when it's a sensible value; else fall
+                        # back to the doubling-backoff strategy.
+                        reset_at = _parse_rl_reset(diag["rl_reset"])
+                        if reset_at is not None:
+                            now = time.time()
+                            until_reset = max(0.0, reset_at - now) + 5.0  # +5s buffer
+                            wait = max(min(until_reset, 1800.0), _RATE_LIMIT_INITIAL_S)
+                            source = "rl_reset"
+                        else:
+                            wait = max(backoff, _RATE_LIMIT_INITIAL_S)
+                            source = "exp_backoff"
                         logger.warning(
-                            "Stream 429 rate-limited — backing off %.0f s. "
+                            "Stream 429 rate-limited — backing off %.0f s (via %s). "
                             "rl_remaining=%s rl_reset=%s body=%r",
-                            wait, diag["rl_remaining"], diag["rl_reset"],
+                            wait, source, diag["rl_remaining"], diag["rl_reset"],
                             diag["body_head"][:200],
                         )
                     _connected.clear()
