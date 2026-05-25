@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Reply Context</title>
+  <title>Fact-check context</title>
   <link rel="stylesheet" href="/static/dash/html-design-system.css">
   <link rel="stylesheet" href="{{ url_for('static', filename='info.css') }}">
 </head>
@@ -12,16 +12,54 @@
 <div class="info-wrap">
 
   <header class="info-masthead">
-    <span class="info-masthead-label">Fact-check Context</span>
+    <span class="info-masthead-label">Fact-check context</span>
     <span class="info-masthead-tag">Web-evidence sources</span>
   </header>
 
-  {% if headline %}
-  {# ── Short URL mode ── #}
+  {% if info %}
+  {%- set action = info.get('action', 'verify') -%}
+  {%- set outcome = info.get('action_outcome', '') -%}
+  {%- set action_label = {
+        'verify': 'Verify',
+        'provide_context': 'Provide context',
+        'challenge_opinion': 'Challenge opinion',
+        'surface_perspectives': 'Surface perspectives',
+        'decline': 'Decline'
+    }.get(action, action) -%}
+  {%- set outcome_label = {
+        'verified_supported': 'Supported',
+        'verified_refuted': 'Refuted',
+        'verified_conflicting': 'Conflicting',
+        'verified_nei': 'Not enough evidence',
+        'context_provided': 'Context provided',
+        'context_unavailable': 'Context unavailable',
+        'challenged': 'Challenged',
+        'challenge_unavailable': 'Push-back unavailable',
+        'perspectives_surfaced': 'Perspectives surfaced',
+        'perspectives_insufficient': 'Perspectives insufficient',
+        'declined': 'Declined'
+    }.get(outcome, outcome) -%}
 
-  {# Conversation: parent tweet + bot reply #}
-  {% if parent_id or reply_tweet_id %}
+  {# ── 1. What the bot was asked + what it did ── #}
   <section class="info-section info-section-first">
+    <div class="info-section-hd"><span class="info-section-label">What this is</span></div>
+    <div class="info-task-header">
+      <span class="info-action-pill">{{ action_label }}</span>
+      {% if outcome_label %}<span class="info-outcome-pill">{{ outcome_label }}</span>{% endif %}
+    </div>
+    {% if info.get('invoker_instruction_text') %}
+    <p class="info-invoker-ask">Invoker asked: &ldquo;{{ info.invoker_instruction_text }}&rdquo;</p>
+    {% endif %}
+    {% if info.get('pivoted_from') %}
+    <div class="info-pivot-note">
+      The invoker asked for <strong>{{ info.pivoted_from.replace('_', ' ') }}</strong>, but the claim doesn't support that. The bot pivoted to <strong>{{ action.replace('_', ' ') }}</strong> and discloses the pivot in the reply.
+    </div>
+    {% endif %}
+  </section>
+
+  {# ── 2. Conversation embed ── #}
+  {% if parent_id or reply_tweet_id %}
+  <section class="info-section">
     <div class="info-section-hd"><span class="info-section-label">Conversation</span></div>
     <div class="info-tweet-col">
       {% if parent_id %}
@@ -42,42 +80,130 @@
         {% endif %}
       </blockquote>
       {% else %}
-      {# Fallback if reply not yet posted #}
-      {% set parts = headline.split('\n\n') %}
       <blockquote class="info-reply">
-        {% if parts | length > 1 %}
-        <p class="info-reply-lead">{{ parts[0] }}</p>
-        <p class="info-reply-body">{{ parts[1:] | join(' ') }}</p>
-        {% else %}
-        <p class="info-reply-body">{{ headline }}</p>
-        {% endif %}
+        <p class="info-reply-body">{{ reply_text }}</p>
       </blockquote>
       {% endif %}
     </div>
   </section>
   {% endif %}
 
-  {# Cited sources #}
-  {% if reasons %}
+  {# ── 3. Reasoning ── #}
+  {% if info.get('headline_finding') or info.get('tone_neutral_justification') %}
   <section class="info-section">
-    <div class="info-section-hd"><span class="info-section-label">Cited Sources</span></div>
-    <ul class="info-sources">
-      {% for url in reasons %}
-      <li><a href="{{ url }}" class="info-src-link" rel="noopener noreferrer">{{ url }}</a></li>
-      {% endfor %}
-    </ul>
+    <div class="info-section-hd"><span class="info-section-label">Reasoning</span></div>
+    {% if info.get('headline_finding') %}
+    <p class="info-headline">{{ info.headline_finding }}</p>
+    {% endif %}
+    {% if info.get('tone_neutral_justification') %}
+    <p class="info-justification">{{ info.tone_neutral_justification }}</p>
+    {% endif %}
+    {% if info.get('counter_fact') %}
+    <div class="info-counter-fact">
+      <strong>Correction:</strong> {{ info.counter_fact }}
+    </div>
+    {% endif %}
+    {% if info.get('load_bearing_evidence_snippet') %}
+    <blockquote class="info-evidence-quote">&ldquo;{{ info.load_bearing_evidence_snippet }}&rdquo;</blockquote>
+    {% endif %}
   </section>
   {% endif %}
 
-  {% elif reply %}
-  {# ── Long URL / legacy mode ── #}
-  <section class="info-section info-section-first">
-    <div class="info-section-hd"><span class="info-section-label">About this Post</span></div>
-    {{ reply | safe }}
+  {# ── 4. Per-action structured content ── #}
+  {% if info.get('context_note') %}
+  <section class="info-section">
+    <div class="info-section-hd"><span class="info-section-label">Missing context</span></div>
+    <div class="info-card">
+      <p class="info-card-text">{{ info.context_note }}</p>
+    </div>
   </section>
+  {% endif %}
+
+  {% if info.get('counterpoints') %}
+  <section class="info-section">
+    <div class="info-section-hd"><span class="info-section-label">Counterpoints</span></div>
+    {% for cp in info.counterpoints %}
+    <div class="info-card">
+      <div class="info-card-label">
+        Counterpoint {{ loop.index }} · weight: {{ cp.get('weight', 'moderate') }}
+      </div>
+      <p class="info-card-text">{{ cp.summary }}</p>
+      {% if cp.get('citing_sources') %}
+      <ul class="info-sources">
+        {% for src in cp.citing_sources %}
+        <li><a href="{{ src.url }}" class="info-src-link" rel="noopener noreferrer">{{ src.url }}</a></li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if info.get('perspectives') %}
+  <section class="info-section">
+    <div class="info-section-hd"><span class="info-section-label">Perspectives</span></div>
+    {% for p in info.perspectives %}
+    <div class="info-card">
+      <div class="info-card-label">{{ p.label }}</div>
+      <p class="info-card-text">{{ p.summary }}</p>
+      {% if p.get('citing_sources') %}
+      <ul class="info-sources">
+        {% for src in p.citing_sources %}
+        <li><a href="{{ src.url }}" class="info-src-link" rel="noopener noreferrer">{{ src.url }}</a></li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {# ── 5. Primary sources (the URLs the reply talks about by name) ── #}
+  {% if info.get('primary_sources') %}
+  <section class="info-section">
+    <div class="info-section-hd"><span class="info-section-label">Cited sources</span></div>
+    <div class="info-reasons">
+      {% for src in info.primary_sources %}
+      <div class="info-reason">
+        <div class="info-reason-idx">{{ '%02d' % loop.index }}</div>
+        <div class="info-reason-body">
+          <p class="info-reason-text">{{ src.display_name or src.url }}</p>
+          <ul class="info-sources">
+            <li><a href="{{ src.url }}" class="info-src-link" rel="noopener noreferrer">{{ src.url }}</a></li>
+          </ul>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {# ── 6. Full source-quality table (transparency) ── #}
+  {% if info.get('source_quality_table') %}
+  <section class="info-section">
+    <div class="info-section-hd"><span class="info-section-label">All sources retrieved</span></div>
+    <table class="info-source-table">
+      <thead>
+        <tr><th>Source</th><th>Tier</th><th>Why</th></tr>
+      </thead>
+      <tbody>
+        {% for row in info.source_quality_table %}
+        <tr>
+          <td><a href="{{ row.url }}" class="info-src-link" rel="noopener noreferrer">{{ row.url }}</a></td>
+          <td><span class="info-tier-pill info-tier-{{ row.tier }}">{{ row.tier }}</span></td>
+          <td>{{ row.rationale or '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+
   {% else %}
+  {# Token not found / expired #}
   <div class="info-not-found">
-    <strong>Link not found.</strong> This reply context link is invalid or has been removed.
+    <strong>Link not found.</strong> This reply context link is invalid or has expired.
   </div>
   {% endif %}
 
@@ -95,7 +221,7 @@
 
 </div>
 
-{% if parent_id or reply_tweet_id or reply %}
+{% if parent_id or reply_tweet_id %}
 <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
 {% endif %}
 

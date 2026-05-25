@@ -272,6 +272,170 @@ body[data-theme="light"] {
   color: #bbb;
 }
 
+/* ── Action header + outcome ─────────────────────────────────────────────── */
+
+.info-task-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.info-action-pill {
+  font-family: var(--mono, monospace);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border: 1px solid #1a1a1a;
+  color: #1a1a1a;
+  background: #fff;
+}
+
+.info-outcome-pill {
+  font-family: var(--mono, monospace);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  background: #1a1a1a;
+  color: #f7f5f0;
+}
+
+.info-invoker-ask {
+  font-family: var(--serif, "IBM Plex Serif", Georgia, serif);
+  font-size: 0.82rem;
+  font-style: italic;
+  color: #555;
+  margin: 8px 0 0;
+}
+
+.info-pivot-note {
+  margin: 12px 0;
+  padding: 10px 14px;
+  background: #fffbf2;
+  border-left: 3px solid #c8a84b;
+  font-family: var(--serif, "IBM Plex Serif", Georgia, serif);
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: #3a3020;
+}
+
+.info-headline {
+  font-family: var(--serif, "IBM Plex Serif", Georgia, serif);
+  font-size: 1.15rem;
+  line-height: 1.45;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin: 0 0 12px;
+}
+
+.info-justification {
+  font-size: 0.92rem;
+  line-height: 1.65;
+  color: #333;
+  margin: 0 0 12px;
+}
+
+.info-counter-fact {
+  font-family: var(--serif, "IBM Plex Serif", Georgia, serif);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  margin: 12px 0;
+  padding: 12px 14px;
+  background: #f4fbf6;
+  border-left: 3px solid #4a7c59;
+  color: #1a3a26;
+}
+
+.info-evidence-quote {
+  font-family: var(--serif, "IBM Plex Serif", Georgia, serif);
+  font-style: italic;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: #555;
+  margin: 12px 0;
+  padding: 10px 14px;
+  border-left: 2px solid #888;
+}
+
+/* ── Per-action content cards ────────────────────────────────────────────── */
+
+.info-card {
+  margin: 12px 0;
+  padding: 14px 16px;
+  background: #faf8f4;
+  border: 1px solid #ede9e1;
+}
+
+.info-card-label {
+  font-family: var(--mono, monospace);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #888;
+  margin-bottom: 6px;
+}
+
+.info-card-text {
+  font-size: 0.92rem;
+  line-height: 1.6;
+  color: #222;
+  margin: 0 0 8px;
+}
+
+.info-card-meta {
+  font-family: var(--mono, monospace);
+  font-size: 0.65rem;
+  color: #888;
+  letter-spacing: 0.04em;
+}
+
+/* ── Source-quality table ────────────────────────────────────────────────── */
+
+.info-source-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  margin-top: 8px;
+}
+
+.info-source-table th,
+.info-source-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid #ede9e1;
+  vertical-align: top;
+}
+
+.info-source-table th {
+  font-family: var(--mono, monospace);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #888;
+  font-weight: normal;
+  border-bottom: 2px solid #1a1a1a;
+}
+
+.info-tier-pill {
+  font-family: var(--mono, monospace);
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  display: inline-block;
+}
+
+.info-tier-fact-checker  { background: #e8f0e6; color: #1a3a26; }
+.info-tier-reputable-news{ background: #e6f0f6; color: #143a5a; }
+.info-tier-primary-source{ background: #f0ece2; color: #4a3a1a; }
+.info-tier-low-quality   { background: #f6e8e6; color: #6a1a1a; }
+.info-tier-satirical     { background: #fbf2e8; color: #6a3a1a; }
+.info-tier-aggregator    { background: #ededed; color: #555; }
+.info-tier-unknown       { background: #ededed; color: #888; }
+
 /* ── Entry animations ────────────────────────────────────────────────────── */
 
 @keyframes fade-down {

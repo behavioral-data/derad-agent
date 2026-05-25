@@ -86,66 +86,71 @@ _VERIFY_TEMPLATE = """You are the fact-check bot writing ONE reply tweet.
 INPUT: RendererView with `presentation_payload` + `tone_neutral_justification`. The pipeline has VERIFIED the claim against evidence. The substance of your reply MUST come from `presentation_payload.headline_finding` and `tone_neutral_justification`.
 
 YOUR JOB BY STATE:
-- state="actionable": communicate the headline_finding. Cite ≥1 URL from `primary_sources_to_cite` as a plain http(s) link. If `counter_fact` is set (verify-refuted), incorporate the corrective.
-- state="no_evidence": briefly acknowledge the claim is testable but credible coverage wasn't found. NO URL.
-- state="declined": (handled by the decline template — this template shouldn't see it.)
+- state="actionable": communicate the headline_finding plainly. NAME the source(s) by their `display_name` from `primary_sources_to_cite` (e.g. "Snopes", "AP News"). If `counter_fact` is set (verify-refuted), incorporate the corrective.
+- state="no_evidence": briefly acknowledge the claim is testable but credible coverage wasn't found.
+
+A separate `/info` short link is appended to your reply automatically; that page carries all source URLs + reasoning. DO NOT include any URL in your reply body.
 
 STYLE EXAMPLES (do not copy verbatim; match the actual evidence):
-- "This is not accurate. According to [source], …"
-- "Real photo, miscaptioned: [source] documented the original context."
-- (no_evidence) "Not enough credible coverage to verify this claim either way."
+- "This is not accurate. According to Snopes, …"
+- "Real photo, miscaptioned: AP News documented the original context."
+- (no_evidence) "Not enough credible coverage to verify this either way."
 """
 
 _PROVIDE_CONTEXT_TEMPLATE = """You are a fact-check bot writing ONE reply tweet to SUPPLY MISSING CONTEXT. The literal claim may be accurate, but the framing leaves out something material.
 
-INPUT: RendererView. Read `presentation_payload.context_note` for the missing piece, `primary_sources_to_cite` for sources backing it.
+INPUT: RendererView. Read `presentation_payload.context_note` for the missing piece, `primary_sources_to_cite` for sources backing it (use their `display_name` only — no URLs in your body).
 
 YOUR JOB BY STATE:
-- state="actionable": surface the missing context plainly. Cite ≥1 URL from `primary_sources_to_cite`. Don't argue the literal claim is wrong — frame as "what this leaves out is …" or "important context here: …".
-- state="no_evidence": acknowledge the framing seems incomplete but credible context coverage wasn't found. NO URL.
+- state="actionable": surface the missing context plainly. Name the source by display_name. Don't argue the literal claim is wrong — frame as "what this leaves out is …" or "important context here: …".
+- state="no_evidence": acknowledge the framing seems incomplete but credible context coverage wasn't found.
 
-DO NOT phrase your reply as a fact-check verdict (Supported / Refuted) — this is context-supply mode. The reader should leave with the missing piece in hand.
+A separate `/info` short link is appended automatically; that page carries the source URLs. DO NOT include any URL in your reply body.
 
 STYLE EXAMPLES:
-- "Worth noting the context [source] reports: the base rate here was …"
-- "The figure is real, but [source] documents that the comparison period excludes …"
+- "Worth noting the context Reuters reports: the base rate here was …"
+- "The figure is real, but the WSJ documents that the comparison period excludes …"
 """
 
 _CHALLENGE_OPINION_TEMPLATE = """You are a fact-check bot writing ONE reply tweet to PUSH BACK on a strongly-stated opinion.
 
-INPUT: RendererView. Read `presentation_payload.counterpoints` for the credible counter-arguments and their citing sources, `primary_sources_to_cite` for the URLs used.
+INPUT: RendererView. Read `presentation_payload.counterpoints` for the credible counter-arguments. The `citing_sources` field on each counterpoint identifies the source — use the URL's display name from `primary_sources_to_cite` in your text (no URLs in the body itself).
 
 YOUR JOB BY STATE:
-- state="actionable": present the strongest counterpoint from `counterpoints`. NAME the credible critic / outlet / study by name. Cite ≥1 URL from `primary_sources_to_cite`. Be substantive — your job is to put credible push-back in front of the reader.
-- state="no_evidence": acknowledge the opinion is contested but credible push-back wasn't found in this window. NO URL.
+- state="actionable": present the strongest counterpoint from `counterpoints`. NAME the credible critic / outlet / study by name. Be substantive — your job is to put credible push-back in front of the reader.
+- state="no_evidence": acknowledge the opinion is contested but credible push-back wasn't found in this window.
 
-TONE-NEUTRAL POSTURE: push back on the OPINION, not the person. "Researchers at [outlet] argue …" / "[Critic] published a rebuttal …" — focus on the empirical counter.
+A separate `/info` short link is appended automatically; that page lists every counterpoint with its source URLs. DO NOT include any URL in your reply body.
+
+TONE-NEUTRAL POSTURE: push back on the OPINION, not the person. "Researchers at NEJM argue …" / "Cochrane published a meta-analysis showing …" — focus on the empirical counter.
 
 STYLE EXAMPLES:
-- "Worth weighing the counter: [credible critic] argues that … [source]."
-- "[Outlet] documented evidence that …, which complicates this take."
+- "Worth weighing the counter: NIH-funded research argues that …"
+- "The Atlantic's review documented evidence that …, which complicates this take."
 """
 
 _SURFACE_PERSPECTIVES_TEMPLATE = """You are a fact-check bot writing ONE reply tweet to SURFACE MULTIPLE PERSPECTIVES on a contested topic.
 
-INPUT: RendererView. Read `presentation_payload.perspectives` (≥2 distinct credible viewpoints, each with `citing_sources`), `primary_sources_to_cite` for URLs.
+INPUT: RendererView. Read `presentation_payload.perspectives` (≥2 distinct credible viewpoints, each with `citing_sources`). Name each perspective's outlets by display_name from `primary_sources_to_cite`.
 
 YOUR JOB BY STATE:
-- state="actionable": present 2 perspectives in tension. Use the perspective LABELS verbatim. Cite ≥1 URL from `primary_sources_to_cite` across the perspectives. DO NOT take a side — frame each viewpoint in its own terms.
-- state="no_evidence": acknowledge the topic is contested but credible perspectives weren't surfaced. NO URL.
+- state="actionable": present 2 perspectives in tension. Use each perspective's `label` verbatim. DO NOT take a side — frame each viewpoint in its own terms.
+- state="no_evidence": acknowledge the topic is contested but credible perspectives weren't surfaced.
+
+A separate `/info` short link is appended automatically; that page lists each perspective with its source URLs. DO NOT include any URL in your reply body.
 
 STRICT NEUTRALITY: every perspective gets the same charitable framing. Don't editorialize about which side is "right".
 
 STYLE EXAMPLES:
-- "Two views in play: [Label-A] argues … [Label-B] argues … [source]."
-- "Contested space — [Label-A] cites [source]; [Label-B] cites the same data differently."
+- "Two views in play: [Label-A] argues … (Brookings); [Label-B] argues … (AEI)."
+- "Contested space — [Label-A] cites NEJM; [Label-B] cites the same data differently in The Lancet."
 """
 
 _DECLINE_TEMPLATE = """You are a fact-check bot writing ONE reply tweet when the parent post has NO actionable angle — no factually verifiable claim, no opinion worth contesting, no contested space to surface.
 
 INPUT: RendererView with `presentation_payload.headline_finding` carrying a short reason (e.g. "Personal opinion, no checkable claim.").
 
-YOUR JOB: a brief acknowledgment that there's nothing to fact-check / push back on / contextualize. Don't editorialize. NO URL. Keep it short — ≤ 120 chars is fine.
+YOUR JOB: a brief acknowledgment that there's nothing to fact-check / push back on / contextualize. Don't editorialize. NO URL — keep it short (≤ 120 chars is fine).
 
 STYLE EXAMPLES:
 - "No factual claim to check here — reads as opinion."
@@ -220,25 +225,19 @@ def _hard_constraints_for(
         "HARD CONSTRAINTS (violations are rejected and retried):",
         "- Communicate the headline_finding faithfully.",
         '- Reproduce every proper noun (people, places, organizations, dates, publications) that appears in tone_neutral_justification or presentation_payload VERBATIM. Do not generalize: keep names like "World News Daily Report", "Buzz Aldrin", "Snopes", and dates like "March 2015" intact.',
-        "- Never introduce a URL outside primary_sources_to_cite.",
+        "- ZERO URLs in your reply body. The runtime appends a separate /info short link that carries all source URLs + structured reasoning. Name sources by their display_name (e.g. \"Snopes\", \"AP News\") in your text — never as a link.",
         "- Never introduce facts outside presentation_payload + tone_neutral_justification.",
         "- No emojis, no hashtags, no @-mentions.",
-        f"- ≤{body_limit} X-weighted chars total (X counts every URL as 23 chars). Aim a few chars under.",
+        f"- ≤{body_limit} X-weighted chars total. Aim a few chars under.",
         '- Output a JSON object with a single "text" field. No preamble, no prose around the JSON.',
         "- DO NOT prepend any disclosure / 'You asked for X' clause to your reply. If the pipeline pivoted, the runtime prepends that clause for you; just write the substantive body.",
     ]
 
-    # URL rule per state
-    if state == "actionable":
-        base.append("- URL rule: state=actionable requires at least one URL from primary_sources_to_cite as a plain http(s) link.")
-    else:
-        base.append("- URL rule: state=no_evidence / declined — DO NOT include any URL. The bot's follow-up /info link is appended by the poster.")
-
-    # Action-specific URL counter-rules (already covered above, but reinforce)
+    # Action-specific reinforcements
     if action == "verify" and state == "actionable":
         base.append("- This is a verify action — quoting load_bearing_evidence_snippet (when present and short) inside quotes is encouraged.")
     if action == "challenge_opinion" and state == "actionable":
-        base.append("- This is a challenge_opinion action — explicitly NAME the credible critic / outlet whose counterpoint you're citing (not just the publication).")
+        base.append("- This is a challenge_opinion action — explicitly NAME the credible critic / outlet whose counterpoint you're citing.")
     if action == "surface_perspectives" and state == "actionable":
         base.append("- This is a surface_perspectives action — present ≥ 2 distinct perspectives. Use each perspective's `label` verbatim.")
 
@@ -284,43 +283,27 @@ def _looks_like_refusal(text: str) -> bool:
 def _enforce_invariance(
     text: str, view: RendererView, state: _RenderState, body_limit: int
 ) -> None:
-    """Action-aware invariance.
+    """Invariance check.
 
-    state="actionable": ≥1 URL from allowed_urls, no extraneous URLs.
-    state in {no_evidence, declined}: 0 URLs.
+    All URLs are forbidden in the body — sources live on the /info page,
+    which is reached via the short link the runtime appends after the
+    rendered text. The body talks about sources by their display_name only.
+
     Always: non-empty, not a refusal, body ≤ body_limit X-weighted chars.
 
     body_limit reflects the available room AFTER the runtime-prepended
-    pivot_disclosure (when applicable), so the renderer's own output
-    must fit inside that tighter budget.
+    pivot_disclosure (when applicable).
     """
     if not text:
         raise ValueError("Renderer returned empty text.")
     if _looks_like_refusal(text):
         raise ValueError(f"Renderer output looks like a refusal: {text[:160]!r}")
 
-    payload = view.presentation_payload
-    allowed_urls = {s.url for s in payload.primary_sources_to_cite}
-    for cp in payload.counterpoints:
-        allowed_urls.update(s.url for s in cp.citing_sources)
-    for p in payload.perspectives:
-        allowed_urls.update(s.url for s in p.citing_sources)
-
-    urls_in_reply = set(URL_RE.findall(text))
-    extraneous = urls_in_reply - allowed_urls
-    if extraneous:
+    urls_in_reply = URL_RE.findall(text)
+    if urls_in_reply:
         raise ValueError(
-            f"Renderer emitted URL(s) not in allowed sources: {sorted(extraneous)}"
+            f"Renderer emitted URL(s) in the body — sources belong on /info, not in the tweet: {sorted(set(urls_in_reply))}"
         )
-
-    if state == "actionable":
-        if not (urls_in_reply & allowed_urls):
-            raise ValueError("state=actionable renderer emitted no URL from primary_sources_to_cite / action sources.")
-    else:
-        if urls_in_reply:
-            raise ValueError(
-                f"state={state} renderer emitted URL(s) (none should be present): {sorted(urls_in_reply)}"
-            )
 
     if x_weighted_length(text) > body_limit:
         raise ValueError(

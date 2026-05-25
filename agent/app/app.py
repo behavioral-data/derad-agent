@@ -152,17 +152,22 @@ def _get_info_table():
 def _make_info_token(
     tone: str,
     reply_text: str,
-    reasons: list,
+    info_payload: dict,
     *,
     parent_id: str = "",
     parent_author_username: str = "",
     bot_handle: str = "",
 ) -> str:
+    """Create a /info token. `info_payload` is the rich projection of the
+    FrozenVerdict (action + outcome + counterpoints + perspectives +
+    sources + source_quality_table — see utils._info_payload_from_frozen).
+    Persisted as one `payload_json` Tables column for read-back.
+    """
     token = secrets.token_urlsafe(6)
     payload = {
         "tone": tone,
         "reply_text": reply_text,
-        "reasons": reasons,
+        "info_payload": info_payload,
         "parent_id": parent_id,
         "parent_author_username": parent_author_username,
         "bot_handle": bot_handle,
@@ -175,42 +180,34 @@ def _make_info_token(
         table = _get_info_table()
         if table is None:
             return
-        # Azure Tables enforces a 64 KiB cap per string property. Verbose notes
-        # can blow past this and silently lose the persisted token. Stay well
-        # under the limit; truncate the longest field first, then bail out
-        # entirely if it's still too large.
-        reasons_json = json.dumps(reasons, ensure_ascii=False)
+        # Tables enforces 64 KiB per string property. The structured payload
+        # for an active mention is typically 4–10 KiB; trim source-quality
+        # rationales first if we exceed the cap, then drop the source table
+        # entirely as a last resort.
+        payload_json = json.dumps(info_payload, ensure_ascii=False)
         _LIMIT = 60_000
-        if len(reasons_json.encode("utf-8")) > _LIMIT:
+        if len(payload_json.encode("utf-8")) > _LIMIT:
             logger.warning(
-                "reasons_json for token %s exceeds %d bytes; truncating note_text fields",
+                "info_payload for token %s exceeds %d bytes; trimming rationales",
                 token, _LIMIT,
             )
-            truncated = []
-            for r in reasons or []:
-                if isinstance(r, dict):
-                    r2 = dict(r)
-                    nt = r2.get("note_text")
-                    if isinstance(nt, str) and len(nt) > 500:
-                        r2["note_text"] = nt[:500]
-                    truncated.append(r2)
-                else:
-                    truncated.append(r)
-            reasons_json = json.dumps(truncated, ensure_ascii=False)
-            if len(reasons_json.encode("utf-8")) > _LIMIT:
-                logger.error(
-                    "reasons_json for token %s still exceeds %d bytes after truncation; "
-                    "persisting empty reasons list",
-                    token, _LIMIT,
-                )
-                reasons_json = "[]"
+            trimmed = dict(info_payload)
+            sqt = [
+                {**row, "rationale": (row.get("rationale") or "")[:200]}
+                for row in (trimmed.get("source_quality_table") or [])
+            ]
+            trimmed["source_quality_table"] = sqt
+            payload_json = json.dumps(trimmed, ensure_ascii=False)
+            if len(payload_json.encode("utf-8")) > _LIMIT:
+                trimmed["source_quality_table"] = []
+                payload_json = json.dumps(trimmed, ensure_ascii=False)
         try:
             table.upsert_entity({
                 "PartitionKey": "info",
                 "RowKey": token,
                 "tone": tone,
                 "reply_text": reply_text,
-                "reasons_json": reasons_json,
+                "payload_json": payload_json,
                 "parent_id": parent_id,
                 "parent_author_username": parent_author_username,
                 "bot_handle": bot_handle,
@@ -234,10 +231,23 @@ def _get_info_params(token: str) -> dict | None:
         return None
     try:
         entity = table.get_entity("info", token)
+        # New rows carry payload_json; legacy rows carry reasons_json (a
+        # plain list of URL strings). Synthesize a minimal info_payload
+        # from the legacy field so old tokens still render something.
+        if "payload_json" in entity:
+            info_payload = json.loads(entity["payload_json"])
+        else:
+            legacy_urls = json.loads(entity.get("reasons_json", "[]"))
+            info_payload = {
+                "primary_sources": [{"url": u, "display_name": u} for u in (legacy_urls or [])],
+                "source_quality_table": [],
+                "counterpoints": [],
+                "perspectives": [],
+            }
         params = {
             "tone": entity.get("tone", ""),
             "reply_text": entity.get("reply_text", ""),
-            "reasons": json.loads(entity.get("reasons_json", "[]")),
+            "info_payload": info_payload,
             "parent_id": entity.get("parent_id", ""),
             "parent_author_username": entity.get("parent_author_username", ""),
             "bot_handle": entity.get("bot_handle", ""),
@@ -604,7 +614,7 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         token = _make_info_token(
             tone,
             reply["text"],
-            reply.get("sources") or [],
+            reply.get("info_payload") or {},
             parent_id=parent_id,
             parent_author_username=ev.parent_author_username or "",
             bot_handle=BOT_HANDLE,
@@ -753,8 +763,8 @@ def info_short(token: str):
     tone = params.get("tone", "")
     return render_template(
         "info.html",
-        headline=params.get("reply_text", ""),
-        reasons=params.get("reasons", []),
+        info=params.get("info_payload") or {},
+        reply_text=params.get("reply_text", ""),
         tone=tone,
         bot_handle=params.get("bot_handle") or BOT_HANDLE,
         parent_id=params.get("parent_id", ""),

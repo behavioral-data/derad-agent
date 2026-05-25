@@ -161,19 +161,63 @@ _APP_TO_FACTCHECK_TONE = {
 }
 
 
+def _info_payload_from_frozen(frozen) -> dict:
+    """Project the FrozenVerdict to the JSON-serializable payload the
+    `/info` page renders. All sources + reasoning + per-action structured
+    content live here — none of it appears in the tweet body itself."""
+    pp = frozen.presentation_payload
+    return {
+        "action": frozen.action,
+        "action_outcome": frozen.action_outcome,
+        "action_source": frozen.action_source,
+        "pivoted_from": frozen.pivoted_from,
+        "invoker_instruction_text": frozen.invoker_instruction_text,
+        "headline_finding": pp.headline_finding,
+        "tone_neutral_justification": frozen.tone_neutral_justification,
+        "counter_fact": pp.counter_fact,
+        "context_note": pp.context_note,
+        "load_bearing_evidence_snippet": pp.load_bearing_evidence_snippet,
+        "pivot_disclosure": pp.pivot_disclosure,
+        "counterpoints": [
+            {
+                "summary": cp.summary,
+                "weight": cp.weight,
+                "citing_sources": [{"url": s.url, "tier": s.tier} for s in cp.citing_sources],
+            }
+            for cp in pp.counterpoints
+        ],
+        "perspectives": [
+            {
+                "label": p.label,
+                "summary": p.summary,
+                "citing_sources": [{"url": s.url, "tier": s.tier} for s in p.citing_sources],
+            }
+            for p in pp.perspectives
+        ],
+        "primary_sources": [
+            {"url": s.url, "display_name": s.display_name}
+            for s in pp.primary_sources_to_cite
+        ],
+        "source_quality_table": [
+            {"url": s.url, "tier": s.tier, "tier_source": s.tier_source, "rationale": s.rationale}
+            for s in frozen.source_quality_table
+        ],
+        "verdict_label": frozen.verdict_label,
+        "invocation_id": frozen.invocation_id,
+    }
+
+
 def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5,
                    image_urls=None, tweet_context=None, invoker_instruction=""):
     """Run the fact-check pipeline and render a reply in the requested tone.
 
-    `image_urls` triggers Stage 1.5 multimodal extraction.
-    `tweet_context` is metadata from the parent tweet (posted_at, author
-    handle/bio/verified/age, expanded t.co URLs, referenced-tweet relations,
-    language, sensitive flag, public metrics).
-    `invoker_instruction` is what the invoker wrote in the mention itself
-    after the bot handle was stripped. Empty when they only tagged. The
-    extractor uses it to choose the bot's action.
+    The rendered text contains NO URLs — sources + reasoning live on the
+    /info page reached via the short link appended downstream. Returns
+    `{text, sources, info_payload, verdict_label, action, action_outcome, queries}`.
 
-    Returns `{text, sources, verdict_label, action, action_outcome, queries}`.
+    `info_payload` carries everything the /info page renders: action +
+    outcome + counterpoints / perspectives / context_note + every cited
+    source + the source-quality table.
     """
     from agent.factcheck.freeze import view_for_renderer
     from agent.factcheck.pipeline import run_pipeline
@@ -188,8 +232,7 @@ def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5,
 
     # Let pipeline + render exceptions propagate. The streamer's
     # process_mention wraps the whole flow in try/except and emits
-    # `pipeline_error` — that's the outcome we want for telemetry, NOT a
-    # silent `empty_reply` (which previously hid render refusals).
+    # `pipeline_error` — that's the outcome we want for telemetry.
     frozen = run_pipeline(
         statement,
         target_tweet_id=target_tweet_id,
@@ -204,14 +247,14 @@ def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5,
     ][:max_sources] or None
 
     logger.info(
-        "Fact-check produced action=%s outcome=%s verdict=%s for invocation=%s tone=%s",
-        frozen.action, frozen.action_outcome, frozen.verdict_label,
-        frozen.invocation_id, factcheck_tone,
+        "Fact-check produced action=%s outcome=%s for invocation=%s tone=%s",
+        frozen.action, frozen.action_outcome, frozen.invocation_id, factcheck_tone,
     )
 
     return {
         "text": text,
         "sources": sources,
+        "info_payload": _info_payload_from_frozen(frozen),
         "verdict_label": frozen.verdict_label,
         "action": frozen.action,
         "action_outcome": frozen.action_outcome,
