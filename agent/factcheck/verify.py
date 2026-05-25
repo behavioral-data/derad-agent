@@ -105,16 +105,6 @@ def _make_user_payload(
     return json.dumps(payload, indent=2)
 
 
-class VerifyControllerError(RuntimeError):
-    """Raised when the verify-loop controller fails on its first call.
-
-    Distinct from "controller said stop" — that's a legitimate decision
-    that produces an NEI verdict downstream. This means we couldn't even
-    determine whether to search; the surrounding pipeline should emit
-    `pipeline_error` rather than masquerade as NEI.
-    """
-
-
 def _decide_next(
     claim_text: str,
     history: list[_Step],
@@ -150,11 +140,27 @@ def iterative_verify(
     max_hits_per_question: int = 3,
     wall_clock_budget_s: float = 60.0,
 ) -> list[Evidence]:
-    """Run the Papelo-style loop. Returns Evidence records for Stage 4.5."""
+    """Run the Papelo-style loop. Returns Evidence records for Stage 4.5.
+
+    Step 0 is a canned initial search on the claim text itself — the
+    controller's first question on a cold history is structurally the
+    same thing, so we skip one Claude call by issuing it directly.
+    Steps 1..max_questions-1 ask the controller to condition on history.
+    """
     start = time.monotonic()
     history: list[_Step] = []
 
-    for step_idx in range(max_questions):
+    # Step 0 — initial search with the claim text directly. Saves one
+    # Claude controller call on every pipeline run.
+    initial_query = f"fact check: {claim_text}"
+    initial_hits = backend.search(initial_query, top_k=max_hits_per_question)
+    history.append(_Step(question=initial_query, hits=list(initial_hits)))
+    logger.info(
+        "iterative_verify: step 1 (seed) → query=%r hits=%d",
+        initial_query[:120], len(initial_hits),
+    )
+
+    for step_idx in range(1, max_questions):
         elapsed = time.monotonic() - start
         remaining = wall_clock_budget_s - elapsed
         if remaining <= 0:
@@ -167,14 +173,9 @@ def iterative_verify(
         decision = _decide_next(claim_text, history, tweet_context, image_summaries)
         if decision is None:
             # Controller call failed (LLM outage / parse error / refusal).
-            if not history:
-                # First call failed → no evidence at all → distinguish from
-                # legitimate stop. Surrounding pipeline records pipeline_error
-                # via process_mention's outer try/except.
-                raise VerifyControllerError(
-                    "controller call failed on first iteration; no evidence gathered"
-                )
-            # Later call failed → we have partial evidence; graceful stop.
+            # We have at least one step of evidence from the seed search,
+            # so this is always the partial-evidence path now — never the
+            # zero-evidence path that raises VerifyControllerError.
             logger.warning(
                 "iterative_verify: controller failed on step %d; stopping gracefully with %d records",
                 step_idx + 1, sum(len(s.hits) for s in history),
