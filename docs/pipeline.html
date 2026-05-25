@@ -3,23 +3,117 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>derad-agent Pipeline — Architecture & Service Map</title>
+  <title>derad-agent · Pipeline flowchart</title>
   <link rel="stylesheet" href="assets/html-design-system.css">
+  <style>
+    /* ── Flowchart styling: vertical sequence with arrows between ── */
+    .flow {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      margin: 32px 0;
+    }
+    .stage {
+      border: var(--border);
+      background: var(--white);
+      padding: 20px 24px;
+      display: grid;
+      grid-template-columns: 56px 1fr;
+      gap: 18px;
+    }
+    .stage-num {
+      font-family: var(--serif);
+      font-weight: 500;
+      font-size: 40px;
+      color: var(--slate);
+      line-height: 1;
+    }
+    .stage-num-sub {
+      font-family: var(--mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--gray-500);
+      margin-top: 6px;
+    }
+    .stage-name {
+      font-family: var(--serif);
+      font-weight: 500;
+      font-size: 22px;
+      color: var(--slate);
+      margin: 0 0 4px;
+    }
+    .stage-chips {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .stage-row {
+      display: grid;
+      grid-template-columns: 110px 1fr;
+      gap: 12px;
+      padding: 6px 0;
+      border-bottom: 1px dashed var(--gray-300);
+    }
+    .stage-row:last-child { border-bottom: 0; }
+    .stage-key {
+      font-family: var(--mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--gray-500);
+      padding-top: 2px;
+    }
+    .stage-val { color: var(--slate); font-size: 14px; line-height: 1.55; }
+    .stage-val code { font-family: var(--mono); font-size: 12px; background: var(--gray-300); padding: 1px 5px; }
+    .arrow {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 8px 0;
+      color: var(--gray-500);
+      font-size: 18px;
+      font-family: var(--mono);
+    }
+    .arrow-branch {
+      display: grid;
+      grid-template-columns: 1fr 24px 1fr;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 0;
+      color: var(--gray-500);
+      font-size: 11px;
+      font-family: var(--mono);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .arrow-branch-line { height: 1px; background: var(--gray-300); }
+    .stage-cond {
+      border-left: 4px solid var(--sky);
+      background: var(--oat);
+    }
+    .stage-skip {
+      border-left: 4px solid var(--clay);
+      background: var(--gray-300);
+      opacity: 0.85;
+    }
+    [data-theme="dark"] .stage,
+    [data-theme="dark"] .stage-cond,
+    [data-theme="dark"] .stage-skip { background: #1f1f1f; }
+    [data-theme="dark"] .stage-row { border-bottom-color: #333; }
+  </style>
 </head>
 <body>
   <div class="layout">
     <aside class="sidebar">
       <div class="eyebrow">derad-agent</div>
-      <h3>Architecture</h3>
+      <h3>Pipeline</h3>
       <nav>
-        <a href="#overview">Overview</a>
-        <a href="#pipeline">Pipeline diagram</a>
-        <a href="#verify-loop">Iterative loop</a>
-        <a href="#urls">URLs: trust &amp; persistence</a>
-        <a href="#stages">Stage details</a>
-        <a href="#services">Service inventory</a>
-        <a href="#capacity">Capacity &amp; limits</a>
-        <a href="#optimizations">Optimizations</a>
+        <a href="#summary">Summary</a>
+        <a href="#contract">Invariance contract</a>
+        <a href="#flowchart">Flowchart</a>
+        <a href="#services">Services</a>
         <a href="#failure">Failure modes</a>
       </nav>
       <div class="theme-toggle" onclick="toggleTheme()">
@@ -30,713 +124,529 @@
 
     <main class="main">
       <header class="page-head">
-        <p class="eyebrow">spec v0.5 · Azure stack locked · live on Azure App Service</p>
+        <p class="eyebrow">spec v0.5 · live on Azure App Service</p>
         <h1>Fact-check pipeline</h1>
-        <p>An invoked-bot architecture for fact-checking X posts. Nine stages move a mention from the X filtered stream through web-grounded verification, multimodal extraction, and tone-controlled rendering to a posted reply.</p>
+        <p>How one X mention becomes one tone-rendered, evidence-cited reply. Each stage below shows the model it uses, the goal, a one-line prompt summary, and the tools it touches.</p>
       </header>
 
-      <!-- ───────────────────────── OVERVIEW ───────────────────────── -->
-      <section id="overview">
-        <div class="section-head">
-          <p class="eyebrow">01 · snapshot</p>
-          <h2>What's in the box</h2>
-          <p>The numbers that describe the deployed pipeline today.</p>
-        </div>
-
+      <!-- ───── SUMMARY ───── -->
+      <section id="summary">
         <div class="stat-row">
-          <div class="stat">
-            <div class="stat-num">9</div>
-            <div class="stat-label">pipeline stages</div>
-          </div>
-          <div class="stat">
-            <div class="stat-num">4</div>
-            <div class="stat-label">Azure services</div>
-          </div>
-          <div class="stat">
-            <div class="stat-num">50–90 s</div>
-            <div class="stat-label">avg latency / mention</div>
-          </div>
-          <div class="stat">
-            <div class="stat-num">25</div>
-            <div class="stat-label">concurrent pipelines</div>
-          </div>
-          <div class="stat">
-            <div class="stat-num">243</div>
-            <div class="stat-label">curated source tiers</div>
-          </div>
+          <div class="stat"><div class="stat-num">9</div><div class="stat-label">stages</div></div>
+          <div class="stat"><div class="stat-num">2</div><div class="stat-label">models</div></div>
+          <div class="stat"><div class="stat-num">50–90&nbsp;s</div><div class="stat-label">p50 latency</div></div>
+          <div class="stat"><div class="stat-num">25</div><div class="stat-label">concurrent pipelines</div></div>
+          <div class="stat"><div class="stat-num">~$0.12</div><div class="stat-label">/ mention</div></div>
         </div>
+      </section>
 
+      <!-- ───── INVARIANCE CONTRACT ───── -->
+      <section id="contract">
         <div class="callout info mt-24">
-          <strong>Invariance contract.</strong> Stages&nbsp;1–6 produce a deep-immutable <code class="inline-code">FrozenVerdict</code> object. The tone renderer at stage&nbsp;7 reads <em>only</em> <code class="inline-code">presentation_payload</code> + <code class="inline-code">tone_neutral_justification</code>; reasoning fields are off-limits by contract and enforced by a runtime URL-allowlist check. Three tones → identical facts, identical sources, different affect.
+          <strong>Invariance contract.</strong> Stages 1–6 produce a deep-immutable <code class="inline-code">FrozenVerdict</code>. The renderer at stage 7 reads <em>only</em> <code class="inline-code">presentation_payload</code> + <code class="inline-code">tone_neutral_justification</code> — reasoning fields are off-limits by contract. Three tones → identical facts, identical sources, different affect.
         </div>
       </section>
 
-      <!-- ───────────────────────── HERO DIAGRAM ───────────────────────── -->
-      <section id="pipeline">
+      <!-- ───── THE SINGLE FLOWCHART ───── -->
+      <section id="flowchart">
         <div class="section-head">
-          <p class="eyebrow">02 · architecture</p>
-          <h2>The full pipeline</h2>
-          <p>Click any node for a one-line summary. Color encodes role: <span class="chip chip-info">data plumbing</span> <span class="chip chip-active">Claude reasoning</span> <span class="chip chip-suggest">Claude + web_search</span> <span class="chip chip-warning">structural rule</span>.</p>
+          <p class="eyebrow">flow</p>
+          <h2>One mention, end to end</h2>
         </div>
 
-        <div class="diagram-wrap">
-          <svg id="flow" class="diagram-svg" viewBox="0 0 1240 480"></svg>
-          <div id="flow-ann" class="diagram-ann"></div>
-        </div>
+        <div class="flow">
 
-        <div class="meta mt-12">
-          Solid edges are the always-fires text path. The image branch (top) only fires when the parent tweet carries one or more photos; its outputs feed into Stage&nbsp;4.5 alongside text evidence and are reconciled cross-modally in one call.
+          <!-- Stage 1 -->
+          <div class="stage">
+            <div>
+              <div class="stage-num">1</div>
+              <div class="stage-num-sub">Ingest</div>
+            </div>
+            <div>
+              <div class="stage-name">Fetch mention + parent</div>
+              <div class="stage-chips">
+                <span class="chip chip-info">X API v2</span>
+                <span class="chip">no LLM</span>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">goal</div>
+                <div class="stage-val">Pull the parent tweet's text, author, photos, expanded URLs, and reply/quote relations so downstream stages can reason about who said it and when.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">prompt</div>
+                <div class="stage-val">— (HTTP fetch, no model call)</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">tools</div>
+                <div class="stage-val">filtered stream · <code>posts.get_by_id</code> (text, author, public_metrics, entities, referenced_tweets, attachments)</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">output</div>
+                <div class="stage-val"><code>TweetSnapshot</code> + <code>tweet_context</code> dict</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="arrow">↓</div>
+
+          <!-- Branch indicator for image vs text -->
+          <div class="arrow-branch">
+            <div class="arrow-branch-line"></div>
+            <div>if photos</div>
+            <div class="arrow-branch-line"></div>
+          </div>
+
+          <!-- Stage 1.5 (conditional) -->
+          <div class="stage stage-cond">
+            <div>
+              <div class="stage-num">1.5</div>
+              <div class="stage-num-sub">Multimodal · per image</div>
+            </div>
+            <div>
+              <div class="stage-name">OCR + describe + provenance</div>
+              <div class="stage-chips">
+                <span class="chip chip-suggest">Claude Sonnet 4.6 (VLM)</span>
+                <span class="chip chip-suggest">gpt-5.4-mini + web_search</span>
+                <span class="chip">parallel × 4</span>
+                <span class="chip">60 s VLM · 90 s search</span>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">goal</div>
+                <div class="stage-val">Identify <em>who</em> and <em>what</em> is in each photo (named entities, not generic descriptions), and surface articles that have written about this image before.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">prompt</div>
+                <div class="stage-val">"You are the multimodal extraction stage. Produce <code>ocr_text</code> (verbatim), <code>description</code> (name people / landmarks / events when you recognize them — hedging is fine, generic is not), and <code>search_hint</code> (entity-rich query to find articles about this image)."</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">tools</div>
+                <div class="stage-val">Claude VLM (one call per image; concurrent across images) → <code>search_hint</code> fed to <code>web_search</code> for Tier 3 provenance</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">output</div>
+                <div class="stage-val"><code>ImageEvidence(image_url, ocr_text, description, search_hint, provenance_hits)</code></div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">degrades</div>
+                <div class="stage-val">Image fetch / VLM / search failure → skip this image, others continue</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="arrow">↓</div>
+
+          <!-- Stage 2+3 -->
+          <div class="stage">
+            <div>
+              <div class="stage-num">2&nbsp;+&nbsp;3</div>
+              <div class="stage-num-sub">Extract &amp; gate</div>
+            </div>
+            <div>
+              <div class="stage-name">Claim decomposition + check-worthiness</div>
+              <div class="stage-chips">
+                <span class="chip chip-active">Claude Sonnet 4.6</span>
+                <span class="chip">reasoning_effort=low</span>
+                <span class="chip">45 s timeout</span>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">goal</div>
+                <div class="stage-val">Decompose the tweet into atomic propositions, label each as <code>verifiable / opinion / mixed</code>, mark the one central claim, and decide if any is worth fact-checking.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">prompt</div>
+                <div class="stage-val">"You are the claim-extraction stage. Be CONSERVATIVE on 'verifiable' — spurious fact-checks of opinion are worse than missed ones. Output ExtractionOutput JSON. EXACTLY one claim is_central=true."</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">tools</div>
+                <div class="stage-val">Claude reasoning (no external tools). Sees <code>tweet_text</code> + <code>tweet_context</code> (author bio, posted_at, expanded URLs) + per-image OCR/description.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">output</div>
+                <div class="stage-val"><code>ExtractionOutput(claims, overall_state ∈ {checked, no_checkable_claim})</code></div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">degrades</div>
+                <div class="stage-val">Parse / timeout → fallback treats whole tweet as one verifiable central claim</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="arrow">↓</div>
+
+          <!-- Branch: short-circuit on no_checkable_claim -->
+          <div class="arrow-branch">
+            <div class="arrow-branch-line"></div>
+            <div>if no_checkable_claim · skip 4 + 4.5 + 5</div>
+            <div class="arrow-branch-line"></div>
+          </div>
+
+          <div class="stage stage-skip">
+            <div>
+              <div class="stage-num">↘</div>
+              <div class="stage-num-sub">Short-circuit</div>
+            </div>
+            <div>
+              <div class="stage-name">Render "no claim to check" reply directly</div>
+              <div class="stage-chips">
+                <span class="chip">skips Stages 4, 4.5, 5</span>
+                <span class="chip">straight to render</span>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">goal</div>
+                <div class="stage-val">When extraction says "this is opinion / aesthetic / personal reflection", don't run search or reconcile — go straight to a tone-aware "nothing to fact-check here" reply.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">freeze</div>
+                <div class="stage-val">FrozenVerdict has <code>verdict_label=NotEnoughEvidence</code> and <code>overall_state=no_checkable_claim</code>; renderer sees this state and matches register.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="arrow">↓ otherwise</div>
+
+          <!-- Stage 4 -->
+          <div class="stage">
+            <div>
+              <div class="stage-num">4</div>
+              <div class="stage-num-sub">Verify (Papelo)</div>
+            </div>
+            <div>
+              <div class="stage-name">Iterative search loop · seed + controller</div>
+              <div class="stage-chips">
+                <span class="chip chip-suggest">gpt-5.4-mini + web_search</span>
+                <span class="chip chip-active">Claude controller</span>
+                <span class="chip">≤5 questions</span>
+                <span class="chip">60 s wall-clock</span>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">goal</div>
+                <div class="stage-val">Gather text evidence about the central claim through a question-at-a-time loop. Skip the controller call for the first iteration — issue the claim text itself as the seed query.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">seed prompt</div>
+                <div class="stage-val">— (no LLM. Query is literally <code>"fact check: {central_claim}"</code>.)</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">controller</div>
+                <div class="stage-val">"You decide if enough evidence has been gathered. If not, issue the SINGLE next question that closes the biggest gap. Bias toward primary-source / fact-checker / publisher angles. Don't repeat history."</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">search</div>
+                <div class="stage-val">"You are a web-search assistant for fact-checking. Always invoke web_search at least once; cite each bullet with the source." (gpt-5.4-mini + native <code>web_search</code> tool. URLs come from <code>url_citation</code> annotations — fabrication impossible — or markdown fallback.)</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">validate</div>
+                <div class="stage-val">8-worker thread pool. Annotation URLs short-circuit (server-vouched). Markdown URLs: GET + first 32 KB + <code>&lt;title&gt;</code> + Jaccard ≥ 0.20.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">stop when</div>
+                <div class="stage-val">≥2 fact-checker / reputable-news hits agree · OR no relevant coverage · OR cap hit</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">output</div>
+                <div class="stage-val">list of <code>Evidence(question, source_url, snippet, stance="neutral")</code> — stances re-stamped by Stage 4.5</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="arrow">↓</div>
+
+          <!-- Stage 4.5.2 (source quality) -->
+          <div class="stage">
+            <div>
+              <div class="stage-num">4.5.2</div>
+              <div class="stage-num-sub">Source tier</div>
+            </div>
+            <div>
+              <div class="stage-name">Classify every URL into a reliability tier</div>
+              <div class="stage-chips">
+                <span class="chip chip-warning">structural</span>
+                <span class="chip">L1 dict · L2 Tables · L3 Claude</span>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">goal</div>
+                <div class="stage-val">Tag every URL as <code>fact-checker / reputable-news / primary-source / aggregator / low-quality / satirical / unknown</code> so the structural verdict rule can read off it.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">L1</div>
+                <div class="stage-val">In-memory: 243 curated domains across the tiers, plus subdomain → parent fallback. ~0 ms.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">L2</div>
+                <div class="stage-val">Azure Tables <code>SourceTierCache</code> — fleet-wide; survives worker / pod restarts. One classification ever per domain.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">L3 prompt</div>
+                <div class="stage-val">"Classify each input domain into ONE tier from this exact set. Be conservative — return 'unknown' if unsure." (Claude · low reasoning · 30 s timeout; only fires on L1+L2 miss; result writes back to both caches.)</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">output</div>
+                <div class="stage-val"><code>SourceQualityEntry(url, tier, tier_source, rationale)</code> for every URL</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="arrow">↓</div>
+
+          <!-- Stage 4.5 -->
+          <div class="stage">
+            <div>
+              <div class="stage-num">4.5</div>
+              <div class="stage-num-sub">Reconcile</div>
+            </div>
+            <div>
+              <div class="stage-name">Three-lens cascade in one Claude call</div>
+              <div class="stage-chips">
+                <span class="chip chip-active">Claude Sonnet 4.6</span>
+                <span class="chip">reasoning_effort=medium · 4096 thinking</span>
+                <span class="chip">90 s timeout</span>
+                <span class="chip chip-warning">skipped on structural NEI</span>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">goal</div>
+                <div class="stage-val">Reason across the evidence + image OCR + image provenance + author context. Classify every atomic proposition as verified / refuted / disputed / unaddressed. Emit a renderer-facing payload.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">prompt</div>
+                <div class="stage-val">"Use tweet_context actively — parody handles, recycled-event tweets, third-party aggregators. Image is incidental vs image IS the claim. Lens 1 = text-text, Lens 2 = image-text, Lens 3 = cross-modal. Don't invent sources; cite only from source_quality_table. Conservative when evidence is thin."</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">tools</div>
+                <div class="stage-val">Pure Claude reasoning. Input prompt carries evidence (snippets capped at 240 chars), source-quality table, image OCR + description + provenance, tweet_context.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">skip when</div>
+                <div class="stage-val">No text evidence AND no image-provenance URL in a credible tier → structurally NEI before reconcile fires; saves ~5–10 s + the Claude call.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">output</div>
+                <div class="stage-val"><code>consolidated_findings · presentation_payload · tone_neutral_justification · evidence_stances</code> (re-stamped per evidence). Stance-count drift emits <code>reconcile_stance_drift</code> metric.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="arrow">↓</div>
+
+          <!-- Stage 5 -->
+          <div class="stage">
+            <div>
+              <div class="stage-num">5</div>
+              <div class="stage-num-sub">Audit</div>
+            </div>
+            <div>
+              <div class="stage-name">Mechanical verdict check + URL containment</div>
+              <div class="stage-chips">
+                <span class="chip chip-info">pure Python</span>
+                <span class="chip">&lt; 50 ms</span>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">goal</div>
+                <div class="stage-val">Catch reconcile drift before the reply is rendered. Force NotEnoughEvidence if anything is off.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">checks</div>
+                <div class="stage-val">(1) Reconciled verdict matches the structural rule. (2) Every URL in <code>tone_neutral_justification</code> AND <code>load_bearing_evidence_snippet</code> AND <code>primary_sources_to_cite</code> is in <code>source_quality_table</code>. (3) Central proposition lives in exactly one verified/refuted/disputed/unaddressed bucket. (4) Refuted ⇒ counter_fact present.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">on fail</div>
+                <div class="stage-val">Verdict overwritten to <code>NotEnoughEvidence</code>; NEI payload swapped in with reason "evidence retrieved but silent".</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="arrow">↓</div>
+
+          <!-- Stage 6 -->
+          <div class="stage">
+            <div>
+              <div class="stage-num">6</div>
+              <div class="stage-num-sub">Freeze</div>
+            </div>
+            <div>
+              <div class="stage-name">Serialize the FrozenVerdict</div>
+              <div class="stage-chips">
+                <span class="chip chip-info">Pydantic JSON</span>
+                <span class="chip">deep-immutable</span>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">goal</div>
+                <div class="stage-val">Persist a complete, immutable record of everything the backend produced before the renderer sees it. Stages 7+ are forbidden from issuing new searches or model calls that touch evidence.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">contents</div>
+                <div class="stage-val">All claims · all Evidence records · source-quality table · consolidated findings · presentation payload · image OCR + descriptions + provenance · thread context · pipeline git SHA · model + VLM version strings</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">where</div>
+                <div class="stage-val"><code>data/freezes/&lt;invocation_id&gt;.json</code> (Blob upload is a follow-up per design §4.7)</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="arrow">↓ stage-7 read only · presentation_payload + tone_neutral_justification</div>
+
+          <!-- Stage 7 -->
+          <div class="stage">
+            <div>
+              <div class="stage-num">7</div>
+              <div class="stage-num-sub">Render</div>
+            </div>
+            <div>
+              <div class="stage-name">Tone-controlled reply · agreeable / neutral / agonistic</div>
+              <div class="stage-chips">
+                <span class="chip chip-active">Claude Sonnet 4.6</span>
+                <span class="chip">no thinking · 30 s timeout</span>
+                <span class="chip">≤256 X-weighted chars</span>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">goal</div>
+                <div class="stage-val">Write ONE reply tweet in the requested register. Three tones share the same factual payload; only affect varies.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">prompts</div>
+                <div class="stage-val">Three independent system prompts share a common <code>_INPUT_CONTRACT</code> + <code>_HARD_CONSTRAINTS</code>. Tone-specific register guidance: <strong>neutral</strong> = Bode &amp; Vraga 2020 "straightforward, evidence-first, detached"; <strong>agreeable</strong> = Lewandowsky Debunking Handbook "affirm impulse, lead with alternative fact, never condescending"; <strong>agonistic</strong> = Boukes &amp; Hameleers 2022 "pointed, sarcastic — target the claim or source's credibility, never the person."</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">state-aware</div>
+                <div class="stage-val">Prompt receives <code>state ∈ {verified, no_sources, no_checkable_claim}</code>. URL inclusion is conditional: verified ⇒ ≥1 URL from <code>primary_sources_to_cite</code>; otherwise no URL.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">tools</div>
+                <div class="stage-val">Reads only <code>RendererView</code> (presentation_payload + tone_neutral_justification + state). Reasoning fields are unreachable by contract.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">enforce</div>
+                <div class="stage-val">Runtime invariance check: rejects renders that introduce URLs outside <code>primary_sources_to_cite</code>, miss the required URL when state=verified, exceed 256 chars, or look like a refusal.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">degrades</div>
+                <div class="stage-val">Pass 1: ≤2 invariance-feedback retries. Pass 2: one retry with harm-reduction nudge. Pass 3: raise → <code>pipeline_error</code>.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="arrow">↓</div>
+
+          <!-- Stage 8 -->
+          <div class="stage">
+            <div>
+              <div class="stage-num">8</div>
+              <div class="stage-num-sub">Post</div>
+            </div>
+            <div>
+              <div class="stage-name">Reply on X</div>
+              <div class="stage-chips">
+                <span class="chip chip-info">X API v2 posts.create</span>
+                <span class="chip">OAuth 1.0a</span>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">goal</div>
+                <div class="stage-val">Post the rendered text as a reply to the original mention from <code>@eddiexbot</code>. Append a t.co-shortened <code>/info</code> URL for transparency.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">guards</div>
+                <div class="stage-val"><code>DERAD_DRY_RUN</code> gates the actual POST; 280-char X-weighted hard cap; 100 posts/day X Basic plan.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="arrow">↓</div>
+
+          <!-- Stage 9 -->
+          <div class="stage">
+            <div>
+              <div class="stage-num">9</div>
+              <div class="stage-num-sub">Outcome</div>
+            </div>
+            <div>
+              <div class="stage-name">Event row + engagement polling</div>
+              <div class="stage-chips">
+                <span class="chip chip-info">Azure Tables</span>
+                <span class="chip">15 s finalize timeout</span>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">goal</div>
+                <div class="stage-val">Write a research-grade event row per mention. Cron job polls engagement on each posted reply hourly for the study window.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">tables</div>
+                <div class="stage-val"><code>MentionEvents</code> (outcome, tone, participant, pipeline_ms, reply_type derived from verdict) · <code>MentionDrops</code> · <code>EngagementSnapshots</code> · <code>BotReplyReplies</code></div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">degrades</div>
+                <div class="stage-val">Persist runs on a daemon thread with a 15 s hard join — if Tables is degraded, the pipeline-semaphore slot still releases.</div>
+              </div>
+            </div>
+          </div>
+
         </div>
       </section>
 
-      <!-- ───────────────────────── ITERATIVE LOOP ZOOM ───────────────────────── -->
-      <section id="verify-loop">
-        <div class="section-head">
-          <p class="eyebrow">03 · zoom — stage 4</p>
-          <h2>Inside the iterative verification loop</h2>
-          <p>Stage 4 isn't a single search. A Claude controller decides — one step at a time — whether to keep searching, what to search for next, or whether the evidence is sufficient.</p>
-        </div>
-
-        <div class="diagram-wrap">
-          <svg id="loop" class="diagram-svg" viewBox="0 0 1100 340"></svg>
-          <div id="loop-ann" class="diagram-ann"></div>
-        </div>
-
-        <div class="grid-3 mt-24">
-          <div class="panel">
-            <div class="panel-head"><h3>Caps</h3></div>
-            <ul class="task-list">
-              <li><span class="chip chip-info">5</span> max questions per claim</li>
-              <li><span class="chip chip-info">3</span> hits per question (top-k)</li>
-              <li><span class="chip chip-info">60 s</span> wall-clock budget</li>
-              <li><span class="chip chip-info">30 s</span> controller call (was 120 s)</li>
-              <li><span class="chip chip-info">seed</span> step 0 = claim text → search (no controller call)</li>
-            </ul>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head"><h3>Stop signals</h3></div>
-            <ul class="task-list">
-              <li><span class="chip chip-done">stop</span> ≥2 fact-checker or reputable-news hits with consistent stance</li>
-              <li><span class="chip chip-done">stop</span> multiple searches, no relevant coverage → declare NEI</li>
-              <li><span class="chip chip-done">stop</span> wall-clock or question cap hit</li>
-            </ul>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head"><h3>Continue signals</h3></div>
-            <ul class="task-list">
-              <li><span class="chip chip-active">go</span> primary source not yet checked (e.g. official press release)</li>
-              <li><span class="chip chip-active">go</span> originating publisher unknown — look for retraction</li>
-              <li><span class="chip chip-active">go</span> date/context detail would settle ambiguity</li>
-              <li><span class="chip chip-active">go</span> author handle's authenticity not yet checked</li>
-            </ul>
-          </div>
-        </div>
-      </section>
-
-      <!-- ───────────────────────── URLS: TRUST & PERSISTENCE ───────────────────────── -->
-      <section id="urls">
-        <div class="section-head">
-          <p class="eyebrow">04 · URLs — trust &amp; persistence</p>
-          <h2>Where URLs come from and how we keep them honest</h2>
-          <p>Where Bing's URLs become evidence, where the small model can fabricate, and what's read vs. saved at every step.</p>
-        </div>
-
-        <div class="callout info">
-          <strong>Search backend is now gpt-5.4-mini + the native <code class="inline-code">web_search</code> tool via Azure OpenAI Responses API.</strong> URLs arrive via two paths, validated differently. Annotation URLs (server-stamped by the tool runtime) skip HEAD validation by default; markdown-fallback URLs always go through the full title-match validator.
-        </div>
-
-        <h3 class="mt-24">URL lifecycle per search call</h3>
-        <div class="timeline mt-12">
-          <div class="tl-row">
-            <div class="tl-dot tl-dot-gray"></div>
-            <div class="tl-time">step 1</div>
-            <div class="tl-text"><strong>Query out.</strong> Sent to <code class="inline-code">responses.create(model=gpt-5.4-mini, tools=[{type: web_search}])</code>. Per-call timeout 90 s.</div>
-          </div>
-          <div class="tl-row">
-            <div class="tl-dot tl-dot-gray"></div>
-            <div class="tl-time">step 2</div>
-            <div class="tl-text"><strong>Web search.</strong> Tool runtime issues the search and feeds results back to the model along with a system-instructed fact-check framing (avoids gpt-5.4-mini refusing on misinformation queries).</div>
-          </div>
-          <div class="tl-row">
-            <div class="tl-dot tl-dot-ok"></div>
-            <div class="tl-time">step 3a</div>
-            <div class="tl-text"><strong>Annotation path (preferred).</strong> Model emits a bullet-list reply; the tool runtime attaches <code class="inline-code">url_citation</code> annotations to each bullet. URL + title come from the runtime, not the model — fabrication is impossible. Marked <code class="inline-code">is_annotation=True</code>.</div>
-          </div>
-          <div class="tl-row">
-            <div class="tl-dot tl-dot-warn"></div>
-            <div class="tl-time">step 3b</div>
-            <div class="tl-text"><strong>Markdown-fallback path.</strong> Some runs emit zero annotations and the model transcribes citations inline as <code class="inline-code">[title](https://…)</code>. URLs are model-typed → still possibly correct but subject to fabrication. Marked <code class="inline-code">is_annotation=False</code>.</div>
-          </div>
-          <div class="tl-row">
-            <div class="tl-dot tl-dot-ok"></div>
-            <div class="tl-time">step 4</div>
-            <div class="tl-text"><strong>Validation in parallel.</strong> <code class="inline-code">ThreadPoolExecutor(max_workers=8)</code> fans out per-URL classification: annotation hits short-circuit (no fetch); markdown-fallback hits get GET + first 32 KB + <code class="inline-code">&lt;title&gt;</code> extract + Jaccard match (threshold 0.20). Worst-case validation latency dropped from O(top_k × 6 s) serial to O(6 s) parallel.</div>
-          </div>
-          <div class="tl-row">
-            <div class="tl-dot tl-dot-ok"></div>
-            <div class="tl-time">step 5</div>
-            <div class="tl-text"><strong>Status &amp; title match.</strong> HTTP 4xx/5xx → rejected. Token-overlap below 0.20 → rejected as <code class="inline-code">title_mismatch</code>. No <code class="inline-code">&lt;title&gt;</code> (JS-rendered) → passed through unverified.</div>
-          </div>
-          <div class="tl-row">
-            <div class="tl-dot tl-dot-gray"></div>
-            <div class="tl-time">override</div>
-            <div class="tl-text"><strong>Paranoid mode.</strong> <code class="inline-code">DERAD_VALIDATE_ANNOTATIONS=1</code> forces HEAD-validation even on annotation-stamped URLs — useful when investigating whether the tool runtime is emitting bad citations.</div>
-          </div>
-        </div>
-
-        <h3 class="mt-24">Persisted per mention</h3>
-        <div class="table-wrap mt-12">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Artifact</th>
-                <th>Where</th>
-                <th>What it carries</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><strong>Frozen verdict</strong></td>
-                <td><code class="inline-code">data/freezes/&lt;invocation_id&gt;.json</code></td>
-                <td>Every extracted claim, every <code class="inline-code">Evidence</code> record, source-quality table, reconcile findings, presentation payload, cited URLs, image provenance (URL + caption), thread context, pipeline git SHA, model versions.</td>
-              </tr>
-              <tr>
-                <td><strong>Mention event</strong></td>
-                <td>Tables <code class="inline-code">MentionEvents</code></td>
-                <td>Outcome + tone + participant ID + study day + reply tweet ID + pipeline latency + queries + <code class="inline-code">reply_type</code> derived from verdict_label (factcheck / no_factcheck).</td>
-              </tr>
-              <tr>
-                <td><strong>Mention drop</strong></td>
-                <td>Tables <code class="inline-code">MentionDrops</code></td>
-                <td>Mentions rejected before pipeline (self-reply, opt-out, rate-limit, pipeline_queue_timeout).</td>
-              </tr>
-              <tr>
-                <td><strong>Engagement snapshot</strong></td>
-                <td>Tables <code class="inline-code">EngagementSnapshots</code></td>
-                <td>Hourly likes / RT / reply counts on the bot's reply + downstream sharing-quality on the target user (Mosleh outcome).</td>
-              </tr>
-              <tr>
-                <td><strong>Source-tier cache</strong></td>
-                <td>Tables <code class="inline-code">SourceTierCache</code></td>
-                <td>Domain → tier classifications from the Claude model-prior fallback. Fleet-wide so one classification ever per domain across worker / pod restarts.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="grid-2 grid-loose mt-24">
-          <div class="panel">
-            <div class="panel-head"><h3>What we read</h3></div>
-            <ul class="task-list">
-              <li><span class="chip chip-done">yes</span> <code class="inline-code">url_citation</code> annotations on every Responses API call — server-stamped URL + title.</li>
-              <li><span class="chip chip-done">yes</span> HTTP GET (first 32 KB) of every markdown-fallback URL — for title extraction.</li>
-              <li><span class="chip chip-done">yes</span> Page <code class="inline-code">&lt;title&gt;</code> compared against the model's claimed title via Jaccard.</li>
-              <li><span class="chip chip-blocked">no</span> Article body / paragraphs (no snippet extraction from real content yet).</li>
-              <li><span class="chip chip-blocked">no</span> Playwright rendering for JS-heavy sites — they fail validation or pass through unverified.</li>
-              <li><span class="chip chip-blocked">no</span> Archive-Today / Wayback cross-checks.</li>
-            </ul>
-          </div>
-          <div class="panel">
-            <div class="panel-head"><h3>What we don't save</h3></div>
-            <ul class="task-list">
-              <li><span class="chip chip-blocked">no</span> Raw web-search results (only parsed + validated hits land in evidence).</li>
-              <li><span class="chip chip-blocked">no</span> Responses API response objects (only the SearchHit projection).</li>
-              <li><span class="chip chip-blocked">no</span> Fetched HTML / titles used during validation (rejection reasons are logged, not stored).</li>
-              <li><span class="chip chip-blocked">no</span> Per-stage Claude conversation transcripts.</li>
-            </ul>
-          </div>
-        </div>
-      </section>
-
-      <!-- ───────────────────────── PER-STAGE DETAILS ───────────────────────── -->
-      <section id="stages">
-        <div class="section-head">
-          <p class="eyebrow">05 · stages in detail</p>
-          <h2>What each stage does, with what</h2>
-          <p>One card per stage. Service/model is the actual deployment we hit at runtime.</p>
-        </div>
-
-        <div class="grid-3 grid-loose">
-
-          <div class="panel">
-            <div class="panel-head">
-              <h3>Stage 1 — Ingestion</h3>
-              <span class="chip chip-info">data plumbing</span>
-            </div>
-            <p>The streamer matches <code class="inline-code">@eddiexbot</code> mentions on the X filtered stream; the bot fetches the parent tweet with full author + media + URL context.</p>
-            <ul class="task-list">
-              <li><span class="chip">service</span> X API v2 — filtered stream + posts.get_by_id</li>
-              <li><span class="chip">out</span> <code class="inline-code">TweetSnapshot</code> + <code class="inline-code">tweet_context</code> (handle, bio, verified, created_at, followers, posted_at, expanded URLs, referenced tweets, photos)</li>
-            </ul>
-            <p class="meta">~2 s · capped by X read-rate-limit</p>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head">
-              <h3>Stage 1.5 — Multimodal</h3>
-              <span class="chip chip-suggest">Claude + web_search</span>
-            </div>
-            <p>Per-image extraction; only fires when the parent carries ≥1 photo. Multi-image tweets run images concurrently via <code class="inline-code">ThreadPoolExecutor(max_workers=4)</code>.</p>
-            <ul class="task-list">
-              <li><span class="chip chip-info">tier 1</span> OCR — Claude VLM transcribes every visible string</li>
-              <li><span class="chip chip-info">tier 2</span> Description — names public figures, landmarks, events, brands with reasonable confidence</li>
-              <li><span class="chip chip-info">tier 3</span> Provenance approx — description fed back through web_search</li>
-              <li><span class="chip chip-warning">tier 4</span> Manipulation / AI-gen detection — forced NEI per spec</li>
-              <li><span class="chip">timeout</span> 60 s VLM call · 90 s provenance search</li>
-            </ul>
-            <p class="meta">~7–13 s per image (concurrent across images) · 5 MB base64 cap (Pillow-resized)</p>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head">
-              <h3>Stage 4 — Iterative verify</h3>
-              <span class="chip chip-suggest">Claude + web_search</span>
-            </div>
-            <p>Papelo-style loop with a Claude controller. <strong>Step 0 is a canned seed search on the claim text directly</strong> (no controller call — saves one Claude reasoning round-trip per mention). Steps 1..N let the controller condition on history and issue the next question.</p>
-            <ul class="task-list">
-              <li><span class="chip">controller</span> Claude Sonnet 4.6, reasoning_effort=low, timeout 30 s</li>
-              <li><span class="chip">search</span> web_search via Responses API (gpt-5.4-mini)</li>
-              <li><span class="chip">caps</span> ≤5 questions · ≤3 hits/q · 60 s wall-clock</li>
-            </ul>
-            <p class="meta">~15–40 s · 1–3 questions typical · early-stops when ≥2 reliable hits agree</p>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head">
-              <h3>Stage 4.5 — Reconcile</h3>
-              <span class="chip chip-active">Claude reasoning</span>
-            </div>
-            <p>One Claude call folds Lens 1 (text-text), Lens 2 (image-text), and Lens 3 (cross-modal) over the full evidence + tweet_context bundle. Emits atomic propositions, presentation payload, and per-evidence stances.</p>
-            <ul class="task-list">
-              <li><span class="chip">model</span> Claude Sonnet 4.6, extended thinking (<code class="inline-code">budget=4096</code>), timeout 90 s</li>
-              <li><span class="chip">author signal</span> handle + bio + verified + account-age → parody / fan / aggregator detection</li>
-              <li><span class="chip chip-warning">skip</span> Structural NEI shortcut: when text_evidence is empty AND no image-provenance URL is in a credible tier, reconcile is bypassed (saves ~5–10 s)</li>
-              <li><span class="chip chip-info">prompt diet</span> evidence snippets truncated to 240 chars, source-quality rationales to 120 chars</li>
-              <li><span class="chip">drift</span> stance-count mismatches emit a <code class="inline-code">reconcile_stance_drift</code> metric for observability</li>
-            </ul>
-            <p class="meta">~20–40 s · heaviest single LLM call when it fires</p>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head">
-              <h3>Stage 4.5.2 — Source reliability</h3>
-              <span class="chip chip-warning">structural rule</span>
-            </div>
-            <p>Three-layer cache feeds a structural verdict rule.</p>
-            <ul class="task-list">
-              <li><span class="chip chip-info">L1</span> Curated table: 243 domains across IFCN / Wikipedia RSP / primary-source / satirical / low-quality, plus subdomain → parent fallback (in-memory, O(1))</li>
-              <li><span class="chip chip-info">L2</span> Azure Tables <code class="inline-code">SourceTierCache</code> — fleet-wide, survives worker / pod restarts</li>
-              <li><span class="chip chip-info">L3</span> Batched Claude model-prior for anything still unknown; result writes back to L1 + L2</li>
-              <li><span class="chip">verdict</span> Refuted / Supported needs ≥2 fact-checker / reputable-news on the central claim</li>
-            </ul>
-            <p class="meta">curated lookup is &lt; 1 ms; model-prior call (rare) is 30 s timeout</p>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head">
-              <h3>Stage 5 — Audit</h3>
-              <span class="chip chip-info">mechanical</span>
-            </div>
-            <p>Pure-Python audit re-derives the verdict and validates every URL the renderer might surface is in the source-quality table. CoVe-style Claude audit is a planned follow-up.</p>
-            <ul class="task-list">
-              <li><span class="chip">checks</span> verdict consistency · URL containment in justification AND <code class="inline-code">load_bearing_evidence_snippet</code> · one-bucket rule</li>
-              <li><span class="chip chip-blocked">on fail</span> forces <code class="inline-code">NotEnoughEvidence</code>; NEI-shaped payload swapped in with <code class="inline-code">reason="evidence retrieved but silent"</code></li>
-            </ul>
-            <p class="meta">&lt; 50 ms</p>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head">
-              <h3>Stage 6 — Freeze</h3>
-              <span class="chip chip-info">data plumbing</span>
-            </div>
-            <p>Serializes the complete <code class="inline-code">FrozenVerdict</code> Pydantic tree to disk + an event row in Tables. Deep-immutable: nested models are <code class="inline-code">frozen=True</code> and every collection is a tuple.</p>
-            <ul class="task-list">
-              <li><span class="chip">disk</span> <code class="inline-code">data/freezes/&lt;invocation_id&gt;.json</code></li>
-              <li><span class="chip">tables</span> <code class="inline-code">MentionEvents</code> row</li>
-              <li><span class="chip">pins</span> Claude version · VLM version · source-list snapshot dates · git SHA</li>
-            </ul>
-            <p class="meta">~100 ms</p>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head">
-              <h3>Stage 7 — Render</h3>
-              <span class="chip chip-active">Claude reasoning</span>
-            </div>
-            <p>Claude renders one reply in the requested tone. The renderer sees ONLY <code class="inline-code">RendererView</code> (presentation_payload + tone_neutral_justification + state) — reasoning fields are unreachable by contract.</p>
-            <ul class="task-list">
-              <li><span class="chip">tones</span> agreeable · neutral · agonistic — three independent prompts, no cross-references</li>
-              <li><span class="chip">invariance</span> verbatim proper nouns · ≥1 cited URL (in verified state) · ≤256 X-weighted chars</li>
-              <li><span class="chip">timeout</span> 30 s per call</li>
-              <li><span class="chip chip-warning">refusal</span> retry once with harm-reduction nudge; else raise → <code class="inline-code">pipeline_error</code></li>
-            </ul>
-            <p class="meta">~5–10 s · 1–2 retries on overflow</p>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head">
-              <h3>Stage 8 — X poster</h3>
-              <span class="chip chip-info">data plumbing</span>
-            </div>
-            <p>Posts the rendered reply as a reply-to the original mention. The bot's <code class="inline-code">/info</code> URL is appended after the rendered text.</p>
-            <ul class="task-list">
-              <li><span class="chip">service</span> X API v2 posts.create · OAuth 1.0a</li>
-              <li><span class="chip chip-warning">cap</span> 100 tweets / day (X Basic) · 500 soft per-tone (<code class="inline-code">DERAD_MAX_MENTIONS_PER_DAY</code>)</li>
-              <li><span class="chip chip-info">dry run</span> <code class="inline-code">DERAD_DRY_RUN=true</code> logs but doesn't post</li>
-            </ul>
-            <p class="meta">~1–2 s</p>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head">
-              <h3>Stage 9 — Outcome</h3>
-              <span class="chip chip-info">data plumbing</span>
-            </div>
-            <p>Each accepted mention writes one event row. Engagement on each bot reply is polled hourly by a Container Apps cron job.</p>
-            <ul class="task-list">
-              <li><span class="chip">outcomes</span> replied · empty_reply · pipeline_error · parent_fetch_failed · dry_run · pipeline_queue_timeout</li>
-              <li><span class="chip">variables</span> likes · RTs · replies · QTs · target-user downstream sharing-quality (Mosleh)</li>
-              <li><span class="chip">tables</span> MentionEvents · MentionDrops · EngagementSnapshots · BotReplyReplies</li>
-            </ul>
-          </div>
-
-        </div>
-      </section>
-
-      <!-- ───────────────────────── SERVICE INVENTORY ───────────────────────── -->
+      <!-- ───── SERVICES ───── -->
       <section id="services">
         <div class="section-head">
-          <p class="eyebrow">06 · services</p>
-          <h2>Service inventory</h2>
-          <p>Everything we actually call at runtime. All Azure-native except the X API.</p>
+          <p class="eyebrow">services</p>
+          <h2>Everything we call at runtime</h2>
         </div>
 
         <div class="table-wrap">
           <table class="data-table">
             <thead>
-              <tr>
-                <th>Service / Model</th>
-                <th>Used for</th>
-                <th>SKU / Tier</th>
-                <th>Rate limit</th>
-                <th>Resource</th>
-              </tr>
+              <tr><th>Model / service</th><th>Used for</th><th>Resource · capacity</th></tr>
             </thead>
             <tbody>
               <tr>
                 <td><strong>Claude Sonnet 4.6</strong> on Azure AI Services</td>
-                <td>Stage 1.5 VLM, Stage 4 controller, Stage 4.5 reconcile, Stage 7 renderer, source-quality model-prior</td>
-                <td>GlobalStandard, capacity 1500</td>
-                <td>1 500 RPM · 1.5M TPM</td>
-                <td><code class="inline-code">derad-2-resource</code> (swedencentral)</td>
+                <td>Stage 1.5 VLM · Stage 2+3 extract · Stage 4 controller · Stage 4.5 reconcile · Stage 4.5.2 model-prior fallback · Stage 7 renderer</td>
+                <td><code>derad-2-resource</code> · 1500 RPM · 1.5M TPM</td>
               </tr>
               <tr>
-                <td><strong>gpt-5.4-mini + web_search</strong> (Azure OpenAI Responses API)</td>
-                <td>Stage 4 search (seed + controller questions) + Stage 1.5 Tier-3 provenance search</td>
-                <td>GlobalStandard, capacity 250</td>
-                <td>250 RPM · 250K TPM</td>
-                <td><code class="inline-code">azfdyspzdzrbtv3v4o</code> · deployment <code class="inline-code">gpt-54-mini-search</code></td>
+                <td><strong>gpt-5.4-mini + web_search</strong> via Azure OpenAI Responses API</td>
+                <td>Stage 4 seed + controller-driven searches · Stage 1.5 Tier-3 provenance search</td>
+                <td><code>azfdyspzdzrbtv3v4o · gpt-54-mini-search</code> · 250 RPM · 250K TPM</td>
               </tr>
               <tr>
-                <td><strong>X API v2</strong> (Basic plan)</td>
-                <td>Filtered stream (mentions), posts.get_by_id (parent + author), posts.create (reply)</td>
-                <td>$200 / month</td>
-                <td>100 posts / day · 15 reads / 15 min</td>
-                <td>OAuth 1.0a single bot identity</td>
+                <td><strong>X API v2</strong> (Basic)</td>
+                <td>Filtered stream · <code>posts.get_by_id</code> · <code>posts.create</code></td>
+                <td>$200/mo · 100 posts/day · 15 reads/15 min</td>
               </tr>
               <tr>
-                <td><strong>Azure Tables</strong> (Storage account)</td>
-                <td>Dedup, rate-limit, mention events, drop events, engagement snapshots, participants</td>
-                <td>Standard_LRS</td>
-                <td>Effectively unlimited at this volume</td>
-                <td><code class="inline-code">azsaspzdzrbtv3v4o</code></td>
+                <td><strong>Azure Tables</strong></td>
+                <td>MentionEvents · MentionDrops · EngagementSnapshots · Participants · InfoTokens · SourceTierCache</td>
+                <td><code>azsaspzdzrbtv3v4o</code> · Standard_LRS</td>
               </tr>
               <tr>
-                <td><strong>Azure App Service</strong> (Linux, Docker)</td>
-                <td>Gunicorn + Flask app, streamer thread, pipeline workers</td>
-                <td>B2 — 2 vCPU / 3.5 GB</td>
-                <td>1 worker × 8 threads + N pipeline threads (semaphore-capped)</td>
-                <td><code class="inline-code">azappspzdzrbtv3v4o</code></td>
-              </tr>
-              <tr>
-                <td><strong>Azure Key Vault</strong></td>
-                <td>X API keys, Claude endpoint/key, Foundry endpoint refs</td>
-                <td>Standard</td>
-                <td>n/a</td>
-                <td><code class="inline-code">azkvspzdzrbtv3v4o</code> · UAMI access</td>
-              </tr>
-              <tr>
-                <td><strong>Container Registry</strong></td>
-                <td>Built derad-agent images pulled by App Service</td>
-                <td>Basic</td>
-                <td>n/a</td>
-                <td><code class="inline-code">azacrspzdzrbtv3v4o</code></td>
-              </tr>
-              <tr>
-                <td><strong>Container Apps job</strong></td>
-                <td>Cron-scheduled <code class="inline-code">poll_engagement</code> for outcome tracking</td>
-                <td>Consumption</td>
-                <td>n/a</td>
-                <td><code class="inline-code">azcjob-engspzdzrbtv3v4o</code></td>
-              </tr>
-              <tr>
-                <td><strong>App Insights + Log Analytics</strong></td>
-                <td>Telemetry, logs, alerting</td>
-                <td>PerGB2018</td>
-                <td>n/a</td>
-                <td><code class="inline-code">azaispzdzrbtv3v4o</code> / <code class="inline-code">azlogspzdzrbtv3v4o</code></td>
+                <td><strong>Azure App Service</strong> (Docker)</td>
+                <td>Gunicorn + Flask · stream worker · pipeline workers</td>
+                <td><code>azappspzdzrbtv3v4o</code> · B2 · 2 vCPU / 3.5 GB</td>
               </tr>
             </tbody>
           </table>
         </div>
       </section>
 
-      <!-- ───────────────────────── CAPACITY ───────────────────────── -->
-      <section id="capacity">
-        <div class="section-head">
-          <p class="eyebrow">07 · capacity</p>
-          <h2>Headroom &amp; bottlenecks</h2>
-          <p>At 25 concurrent pipelines per minute (peak), each constraint as a fraction of its ceiling.</p>
-        </div>
-
-        <div class="table-wrap mt-12">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Resource</th>
-                <th>At 25 concurrent (per min)</th>
-                <th>Ceiling</th>
-                <th>Used</th>
-                <th>Margin</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>gpt-5.4-mini RPM</td>
-                <td>~60 req</td>
-                <td>250 req</td>
-                <td>24 %</td>
-                <td><span class="chip chip-done">healthy</span></td>
-              </tr>
-              <tr>
-                <td>gpt-5.4-mini TPM</td>
-                <td>~180 K tok</td>
-                <td>250 K tok</td>
-                <td>72 %</td>
-                <td><span class="chip chip-done">healthy</span></td>
-              </tr>
-              <tr>
-                <td>Claude RPM</td>
-                <td>~188 req</td>
-                <td>1 500 req</td>
-                <td>13 %</td>
-                <td><span class="chip chip-done">healthy</span></td>
-              </tr>
-              <tr>
-                <td>Claude TPM</td>
-                <td>~1.9 M tok</td>
-                <td>1.5 M tok</td>
-                <td>127 %</td>
-                <td><span class="chip chip-critical">over (rare burst)</span></td>
-              </tr>
-              <tr>
-                <td>X posting</td>
-                <td>~3 / min</td>
-                <td>100 / day</td>
-                <td>tiny burst-wise</td>
-                <td><span class="chip chip-warning">hard daily cap</span></td>
-              </tr>
-              <tr>
-                <td>App Service RAM</td>
-                <td>~2.5 GB peak</td>
-                <td>3.5 GB</td>
-                <td>71 %</td>
-                <td><span class="chip chip-done">healthy</span></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="grid-2 mt-24">
-          <div class="panel">
-            <div class="panel-head"><h3>Per-mention cost (est.)</h3></div>
-            <ul class="task-list">
-              <li><span class="chip chip-info">web_search</span> ~2–4 searches × ~$0.030 = ~$0.07–0.12</li>
-              <li><span class="chip chip-info">Claude</span> 4–7 calls (one fewer than before — seed-search skip), ~40K tokens ≈ ~$0.03</li>
-              <li><span class="chip chip-info">X API</span> ~$0.013 per posted tweet at $200/100 daily cap</li>
-              <li><span class="chip chip-done">≈ $0.12 / mention</span></li>
-            </ul>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head"><h3>Burst limits</h3></div>
-            <ul class="task-list">
-              <li><span class="chip chip-active">25</span> concurrent fact-check pipelines (semaphore cap)</li>
-              <li><span class="chip chip-active">10 min</span> queue timeout before drop (<code class="inline-code">pipeline_queue_timeout</code>)</li>
-              <li><span class="chip chip-active">100/day</span> X post cap (hard)</li>
-              <li><span class="chip chip-active">500/day</span> internal soft cap per tone</li>
-            </ul>
-          </div>
-        </div>
-      </section>
-
-      <!-- ───────────────────────── OPTIMIZATIONS ───────────────────────── -->
-      <section id="optimizations">
-        <div class="section-head">
-          <p class="eyebrow">08 · optimizations</p>
-          <h2>What's been tuned recently</h2>
-          <p>Where the wall-clock and quota wins came from in the last build-week. Tail-latency mitigations &amp; cost trims.</p>
-        </div>
-
-        <div class="grid-3 grid-loose">
-
-          <div class="panel">
-            <div class="panel-head"><h3>Concurrency wins</h3></div>
-            <ul class="task-list">
-              <li><span class="chip chip-active">parallel</span> Multi-image extraction fans out across 4 worker threads (was serial; ~30 s saved on 4-image tweets)</li>
-              <li><span class="chip chip-active">parallel</span> HEAD-validation of search hits via 8-thread pool (was serial 6 s × top_k)</li>
-              <li><span class="chip chip-info">cap</span> 25 concurrent pipelines · 10-min queue timeout</li>
-            </ul>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head"><h3>Skip the work that wouldn't matter</h3></div>
-            <ul class="task-list">
-              <li><span class="chip chip-active">skip</span> Annotation-stamped URLs short-circuit HEAD validation (server-vouched by tool runtime)</li>
-              <li><span class="chip chip-active">skip</span> Step 0 seed search replaces the first Claude controller call (~3–5 s + tokens)</li>
-              <li><span class="chip chip-active">skip</span> Reconcile bypassed when text empty AND no credible-tier image provenance (~5–10 s)</li>
-              <li><span class="chip chip-active">skip</span> <code class="inline-code">_short_circuit_no_checkable</code> path skips Stage 4 + 4.5 entirely</li>
-            </ul>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head"><h3>Tail-latency caps</h3></div>
-            <ul class="task-list">
-              <li><span class="chip chip-warning">timeout</span> Per-stage Claude budgets — 45 s extract · 30 s verify-controller · 90 s reconcile · 30 s render · 60 s VLM</li>
-              <li><span class="chip chip-warning">timeout</span> 15 s daemon-thread join on finalize-persist (Tables can't hold a semaphore slot)</li>
-              <li><span class="chip chip-warning">timeout</span> 60 s wall-clock budget per Stage 4 claim</li>
-            </ul>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head"><h3>Cache layers</h3></div>
-            <ul class="task-list">
-              <li><span class="chip chip-info">L1</span> In-memory model-prior cache (per worker)</li>
-              <li><span class="chip chip-info">L2</span> Azure Tables <code class="inline-code">SourceTierCache</code> — one classification ever per domain fleet-wide</li>
-              <li><span class="chip chip-info">L3</span> Batched Claude classifier (only on cache miss)</li>
-              <li><span class="chip">lru_cache</span> <code class="inline-code">_git_sha</code> · <code class="inline-code">get_llm</code> per (effort, tokens, timeout)</li>
-            </ul>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head"><h3>Cold-start trims</h3></div>
-            <ul class="task-list">
-              <li><span class="chip chip-active">warmup</span> Daemon thread builds the search-backend client at app startup so mention #1 doesn't pay credential-chain resolution + AIProjectClient init</li>
-              <li><span class="chip chip-active">lazy</span> Participants store lazy-loads via write-through cache; no eager Tables scan per gunicorn worker</li>
-            </ul>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head"><h3>Prompt diet</h3></div>
-            <ul class="task-list">
-              <li><span class="chip chip-info">trim</span> Reconcile snippets capped at 240 chars; rationales at 120 chars (~20-30 % input token reduction)</li>
-              <li><span class="chip chip-info">trim</span> <code class="inline-code">tweet_context</code> stripped of None/empty values before serialization</li>
-            </ul>
-          </div>
-
-        </div>
-
-        <div class="callout info mt-24">
-          <strong>Net effect.</strong> Typical mention p50 dropped from <strong>80–120 s → 50–90 s</strong>; tail p99 is bounded by the new per-stage timeouts instead of the single 120 s SDK default. Per-mention cost dropped from <strong>~$0.15 → ~$0.12</strong> (one fewer Claude call + tighter prompts).
-        </div>
-      </section>
-
-      <!-- ───────────────────────── FAILURE MODES ───────────────────────── -->
+      <!-- ───── FAILURE MODES ───── -->
       <section id="failure">
         <div class="section-head">
-          <p class="eyebrow">09 · failure modes</p>
-          <h2>How each stage degrades</h2>
-          <p>Every stage is designed to fail toward NEI rather than toward a confident wrong reply.</p>
+          <p class="eyebrow">degradation</p>
+          <h2>How each stage fails toward NEI</h2>
+          <p class="meta">Every stage is designed to fail toward NotEnoughEvidence rather than toward a confident wrong reply.</p>
         </div>
 
         <div class="table-wrap">
           <table class="data-table">
-            <thead>
-              <tr>
-                <th>Failure</th>
-                <th>Detected by</th>
-                <th>Behavior</th>
-              </tr>
-            </thead>
+            <thead><tr><th>Failure</th><th>Where</th><th>Behavior</th></tr></thead>
             <tbody>
-              <tr>
-                <td>Parent fetch returns nothing (deleted / private)</td>
-                <td>Stage 1</td>
-                <td>Outcome <code class="inline-code">parent_fetch_failed</code>; bot drops the mention silently</td>
-              </tr>
-              <tr>
-                <td>Image too large or unreadable</td>
-                <td>Stage 1.5</td>
-                <td>Image skipped, pipeline continues text-only</td>
-              </tr>
-              <tr>
-                <td>VLM extraction error</td>
-                <td>Stage 1.5</td>
-                <td>This image's record marked unreadable, others continue</td>
-              </tr>
-              <tr>
-                <td>web_search 429 / tool error</td>
-                <td>Stage 4 / 1.5</td>
-                <td>That question returns <code class="inline-code">[]</code>; iterative controller decides whether to retry or stop</td>
-              </tr>
-              <tr>
-                <td>Claude 429 / per-stage timeout (30–90 s)</td>
-                <td>Any LLM stage</td>
-                <td>Narrow handlers in extract / verify / reconcile / multimodal catch <code class="inline-code">(ValueError, TimeoutError)</code> → stage-specific degradation. Unexpected exceptions propagate to <code class="inline-code">pipeline_error</code>.</td>
-              </tr>
-              <tr>
-                <td>Reconcile stance-count drift</td>
-                <td>Stage 4.5</td>
-                <td>Pad/truncate to align with text-evidence count; emit <code class="inline-code">reconcile_stance_drift</code> metric tagged with delta size for observability</td>
-              </tr>
-              <tr>
-                <td>Tables write stalls (degraded backend)</td>
-                <td>finalize</td>
-                <td><code class="inline-code">log_mention_event</code> runs on a daemon thread with 15 s join; semaphore slot releases even if persist never completes</td>
-              </tr>
-              <tr>
-                <td>Verdict label disagrees with structural rule</td>
-                <td>Stage 5 audit</td>
-                <td>Verdict forced to <code class="inline-code">NotEnoughEvidence</code>; NEI payload swapped in</td>
-              </tr>
-              <tr>
-                <td>Renderer cites a URL not in source-quality table</td>
-                <td>Stage 7 runtime check</td>
-                <td>One retry with the error as feedback; on second failure, <code class="inline-code">empty_reply</code> outcome</td>
-              </tr>
-              <tr>
-                <td>Renderer exceeds 280 X-weighted chars</td>
-                <td>Stage 7 runtime check</td>
-                <td>Same as above</td>
-              </tr>
-              <tr>
-                <td>Pipeline semaphore queue full for 10 minutes</td>
-                <td>App-level throttle</td>
-                <td>Outcome <code class="inline-code">pipeline_queue_timeout</code>; visibility in events table</td>
-              </tr>
-              <tr>
-                <td>X stream disconnect / 429 on reconnect</td>
-                <td>Streamer thread</td>
-                <td>Exponential backoff (capped at 30 min) until reconnect; mentions during disconnect are lost</td>
-              </tr>
-              <tr>
-                <td>Worker restart (deploy, scale, crash)</td>
-                <td>App Service</td>
-                <td>In-flight pipelines killed; <code class="inline-code">atexit</code> hook closes X stream so the next worker reconnects fast</td>
-              </tr>
+              <tr><td>Parent unreachable (deleted / private)</td><td>Stage 1</td><td><code>parent_fetch_failed</code> outcome; mention dropped silently</td></tr>
+              <tr><td>Image too large / unreadable / VLM error</td><td>Stage 1.5</td><td>Skip that image; others continue; text path unaffected</td></tr>
+              <tr><td>Extract parse / timeout</td><td>Stage 2+3</td><td>Fallback: treat whole tweet as one verifiable central claim</td></tr>
+              <tr><td>web_search 429 / tool error</td><td>Stage 4 / 1.5</td><td>That question returns <code>[]</code>; controller decides retry or stop</td></tr>
+              <tr><td>Claude per-stage timeout (30–90 s)</td><td>Any LLM stage</td><td>Narrow <code>(ValueError, TimeoutError)</code> handlers degrade per-stage. Unexpected exceptions → <code>pipeline_error</code>.</td></tr>
+              <tr><td>Reconcile stance-count drift</td><td>Stage 4.5</td><td>Pad/truncate; emit <code>reconcile_stance_drift</code> metric with delta size</td></tr>
+              <tr><td>Verdict / URL containment mismatch</td><td>Stage 5</td><td>Force NEI; swap in NEI-shaped payload</td></tr>
+              <tr><td>Render refusal or invariance breach</td><td>Stage 7</td><td>Retry with feedback → harm-reduction nudge → <code>pipeline_error</code></td></tr>
+              <tr><td>Tables write stalls</td><td>Stage 9</td><td>15 s daemon-thread join; semaphore slot releases regardless</td></tr>
+              <tr><td>Pipeline semaphore queue full 10 min</td><td>app-level</td><td><code>pipeline_queue_timeout</code> drop event</td></tr>
             </tbody>
           </table>
         </div>
@@ -749,140 +659,6 @@
   </div>
 
   <script src="assets/html-design-system.js"></script>
-  <script>
-    // ─── Hero diagram: the full pipeline ─────────────────────────────────
-    const nodes = [
-      // Image branch (top row)
-      {
-        id: 'mm', label: 'Stage 1.5 · Multimodal',
-        sub: 'Claude VLM + web_search',
-        x: 220, y: 40, w: 200, h: 76, c: 'var(--clay)',
-        ann: 'When the parent has photos: Claude VLM produces OCR (Tier 1) + identifying description (Tier 2). Description fed through the configured SearchBackend for provenance approximation (Tier 3). Manipulation/AI-gen detection (Tier 4) is forced NEI. Multi-image tweets fan out across 4 worker threads.'
-      },
-
-      // Main horizontal flow (middle row, y = 220)
-      {
-        id: 'm1', label: 'Mention received',
-        sub: 'X filtered stream',
-        x: 20, y: 220, w: 170, h: 76, c: 'var(--sky)',
-        ann: 'One persistent connection to api.twitter.com/2/tweets/search/stream with rule @eddiexbot. Each match is a fresh worker thread on the App Service.'
-      },
-      {
-        id: 'm2', label: 'Fetch parent + context',
-        sub: 'X API v2 posts.get_by_id',
-        x: 220, y: 220, w: 200, h: 76, c: 'var(--sky)',
-        ann: 'Pulls parent tweet text, author handle/bio/verified/created_at/followers, posted_at, lang, expanded t.co URLs, referenced_tweets relations, and any attached photo URLs.'
-      },
-      {
-        id: 'm4', label: 'Stage 4 · Iterative verify',
-        sub: 'Claude controller + web_search',
-        x: 450, y: 220, w: 200, h: 76, c: 'var(--clay)',
-        ann: 'Papelo-style loop. Step 0 is a canned seed search on the claim text directly (no controller call). Steps 1..N: Claude controller decides continue/stop and issues the next question; gpt-5.4-mini + web_search answers. Caps: 5 questions, 3 hits/question, 60s wall-clock.'
-      },
-      {
-        id: 'm45', label: 'Stage 4.5 · Reconcile',
-        sub: 'Claude Sonnet (thinking)',
-        x: 680, y: 220, w: 180, h: 76, c: 'var(--olive)',
-        ann: 'Three lenses folded into one Claude call with extended thinking. Lens 1 text–text, Lens 2 image–text, Lens 3 cross-modal. Emits consolidated_findings, presentation_payload, source citations, per-evidence stances.'
-      },
-      {
-        id: 'm5', label: 'Stage 5 · Audit',
-        sub: 'mechanical structural rule',
-        x: 890, y: 220, w: 150, h: 76, c: 'var(--sky)',
-        ann: 'Re-derives verdict from consolidated_findings + source_quality_table. Checks URL containment in the justification. On any failure forces NotEnoughEvidence.'
-      },
-      {
-        id: 'm6', label: 'Stage 6 · Freeze',
-        sub: 'Pydantic JSON + Tables',
-        x: 1070, y: 220, w: 150, h: 76, c: 'var(--sky)',
-        ann: 'FrozenVerdict serialized to data/freezes/<invocation_id>.json. Deep-immutable: every nested model frozen, every collection a tuple. Pins all model/service version strings.'
-      },
-
-      // Render + post + outcome (bottom row, y = 380)
-      {
-        id: 'm7', label: 'Stage 7 · Render',
-        sub: 'Claude · agreeable / neutral / agonistic',
-        x: 680, y: 380, w: 220, h: 76, c: 'var(--clay)',
-        ann: 'Single Claude call per tone. Reads ONLY presentation_payload + tone_neutral_justification (invariance contract). Runtime check rejects renders that introduce URLs outside primary_sources_to_cite or exceed 280 chars.'
-      },
-      {
-        id: 'm8', label: 'Stage 8 · Post on X',
-        sub: 'X API v2 posts.create',
-        x: 930, y: 380, w: 160, h: 76, c: 'var(--sky)',
-        ann: 'OAuth 1.0a post as a reply to the original mention from @eddiexbot. Gated by DERAD_DRY_RUN. Returns posted_tweet_id for outcome tracking.'
-      },
-      {
-        id: 'm9', label: 'Stage 9 · Outcome',
-        sub: 'Tables + engagement cron',
-        x: 1120, y: 380, w: 100, h: 76, c: 'var(--sky)',
-        ann: 'One event row per accepted mention (outcome = replied / empty_reply / pipeline_error / dry_run / pipeline_queue_timeout / parent_fetch_failed). Engagement polled hourly by a Container Apps cron job.'
-      },
-    ];
-
-    const edges = [
-      // Main flow
-      { from: 'm1',  to: 'm2',  c: 'var(--sky)' },
-      { from: 'm2',  to: 'm4',  c: 'var(--sky)' },
-      { from: 'm4',  to: 'm45', c: 'var(--clay)' },
-      { from: 'm45', to: 'm5',  c: 'var(--olive)' },
-      { from: 'm5',  to: 'm6',  c: 'var(--sky)' },
-      { from: 'm6',  to: 'm7',  c: 'var(--sky)' },
-      { from: 'm7',  to: 'm8',  c: 'var(--clay)' },
-      { from: 'm8',  to: 'm9',  c: 'var(--sky)' },
-      // Conditional image branch (Stage 2 → Stage 1.5 → Stage 4.5)
-      { from: 'm2',  to: 'mm',  c: 'var(--clay)', dash: true },
-      { from: 'mm',  to: 'm45', c: 'var(--clay)', dash: true },
-    ];
-
-    renderFlowchart('flow', 'flow-ann', nodes, edges);
-
-    // ─── Stage 4 zoom: the iterative loop ───────────────────────────────
-    const loopNodes = [
-      { id: 'L0', label: 'Claim + tweet_context',
-        sub: 'from Stage 1 / 1.5',
-        x: 20, y: 130, w: 170, h: 76, c: 'var(--sky)',
-        ann: 'Inputs to the loop: claim text, the full tweet_context dict, and (when present) per-image summaries from Stage 1.5.'
-      },
-      { id: 'LSEED', label: 'Step 0 · seed search',
-        sub: 'claim text → web_search',
-        x: 210, y: 130, w: 180, h: 76, c: 'var(--clay)',
-        ann: 'No Claude call. The claim text is issued directly as the first search query. On a cold history the controller would have produced the same question — skipping it saves one Claude reasoning round-trip per mention.'
-      },
-      { id: 'L1', label: 'Controller',
-        sub: 'Claude · low reasoning',
-        x: 410, y: 130, w: 160, h: 76, c: 'var(--olive)',
-        ann: 'Steps 1..4 only. Single Claude call (timeout 30 s). Sees claim + history (prior questions + their hits) + tweet_context + image_summaries. Emits a Decision: action ∈ {continue, stop}, optional next_question, reason.'
-      },
-      { id: 'L2', label: 'web_search',
-        sub: 'gpt-5.4-mini · Responses API',
-        x: 590, y: 130, w: 200, h: 76, c: 'var(--clay)',
-        ann: 'openai_client.responses.create with tools=[{type: web_search}]. URLs come from url_citation annotations (preferred, server-stamped) or markdown-fallback parsing. Returns up to 3 SearchHits. HEAD validation runs in parallel for markdown-fallback URLs; annotation URLs short-circuit.'
-      },
-      { id: 'L3', label: 'Append to history',
-        sub: 'evidence accumulates',
-        x: 810, y: 130, w: 160, h: 76, c: 'var(--sky)',
-        ann: 'Each hit becomes one Evidence record (question, source_url, snippet, stance=neutral — to be re-stamped by reconcile). Question + hits added to the loop history so the next controller call can condition on what was learned.'
-      },
-      { id: 'L4', label: 'Stop → bundle',
-        sub: 'to Stage 4.5',
-        x: 990, y: 130, w: 110, h: 76, c: 'var(--sky)',
-        ann: 'Loop exits when controller says stop OR caps hit (5 questions, 60s). Bundle of Evidence records flows into Stage 4.5 reconcile.'
-      },
-    ];
-
-    const loopEdges = [
-      { from: 'L0',    to: 'LSEED', c: 'var(--sky)' },
-      { from: 'LSEED', to: 'L2',    c: 'var(--clay)' },
-      { from: 'L2',    to: 'L3',    c: 'var(--clay)' },
-      { from: 'L3',    to: 'L1',    c: 'var(--sky)' },
-      { from: 'L1',    to: 'L2',    c: 'var(--clay)' },
-      { from: 'L2',    to: 'L3',    c: 'var(--olive)', dash: true }, // loop-back
-      { from: 'L1',    to: 'L4',    c: 'var(--sky)' },
-    ];
-
-    renderFlowchart('loop', 'loop-ann', loopNodes, loopEdges);
-
-    initScrollSpy();
-  </script>
+  <script>initScrollSpy();</script>
 </body>
 </html>
