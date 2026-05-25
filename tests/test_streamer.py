@@ -17,9 +17,6 @@ import pytest
 os.environ.setdefault("X_API_KEY", "test_consumer_key")
 os.environ.setdefault("X_API_SECRET", "test_consumer_secret_abc")
 os.environ.setdefault("SERVER_NAME", "test.local")
-os.environ.setdefault("AZURE_OPENAI_API_KEY", "test_key")
-os.environ.setdefault("AZURE_OPENAI_ENDPOINT", "https://test.example/")
-os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_EMBED", "test-embed")
 
 from agent.app import streamer as streamer_module  # noqa: E402
 

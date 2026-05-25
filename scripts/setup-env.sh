@@ -18,11 +18,6 @@ pull() {
   az keyvault secret show --vault-name "$KV" --name "$1" --query value -o tsv 2>/dev/null
 }
 
-OPENAI_KEY=$(pull azure-openai-api-key)
-OPENAI_ENDPOINT=$(pull azure-openai-endpoint)
-OPENAI_EMBED=$(pull azure-openai-deployment-embed)
-OPENAI_CHAT=$(pull azure-openai-deployment-chat)
-
 BEARER=$(pull x-bearer-token)
 API_KEY=$(pull x-api-key)
 API_SECRET=$(pull x-api-secret)
@@ -32,16 +27,16 @@ ACCESS_TOKEN_SECRET=$(pull x-access-token-secret)
 BOT_ID=$(pull bot-user-id)
 
 cat > "$ENV_FILE" <<EOF
-# Azure OpenAI Credentials (used for embeddings + fallback chat)
-AZURE_OPENAI_API_KEY=$OPENAI_KEY
-AZURE_OPENAI_ENDPOINT=$OPENAI_ENDPOINT
-AZURE_OPENAI_DEPLOYMENT_EMBED=$OPENAI_EMBED
-AZURE_OPENAI_DEPLOYMENT_CHAT=$OPENAI_CHAT
-AZURE_OPENAI_API_VERSION=2025-03-01-preview
+# Claude on Azure AI Services (every LLM call in the factcheck pipeline).
+# Fill the endpoint + key after creating the deployment; Key Vault doesn't
+# currently store them.
+AZURE_CLAUDE_ENDPOINT=
+AZURE_CLAUDE_API_KEY=
+AZURE_CLAUDE_DEPLOYMENT_CHAT=claude-sonnet-4-6
 
-# Azure AI Services — Grok
-AZURE_AI_ENDPOINT=https://derad-agent-project-resource.services.ai.azure.com
-AZURE_AI_DEPLOYMENT_CHAT=grok-4.3
+# Search backend — gpt-5.4-mini + native web_search tool via Responses API.
+FOUNDRY_PROJECT_ENDPOINT=
+FOUNDRY_SEARCH_MODEL=gpt-54-mini-search
 
 # X / Twitter credentials (single bot identity — Eddie)
 X_BEARER_TOKEN=$BEARER
@@ -58,7 +53,6 @@ BOT_HANDLE=eddiexbot
 DERAD_TABLES_ENDPOINT=https://azsalikxqqfjcgk72.table.core.windows.net
 DERAD_EVENTS_BACKEND=tables
 DERAD_PARTICIPANTS_BACKEND=tables
-DERAD_AGENT_INDEX_ROOT=/projects/bdata/advaitmb/derad-agent/indexes
 
 # Local dev settings — keep ingest off so prod stream isn't disrupted
 DERAD_INGEST_MODE=off
