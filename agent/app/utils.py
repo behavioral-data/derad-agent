@@ -186,30 +186,17 @@ def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5,
 
     target_tweet_id = str(exclude_tweet_id) if exclude_tweet_id is not None else ""
 
-    try:
-        frozen = run_pipeline(
-            statement,
-            target_tweet_id=target_tweet_id,
-            image_urls=list(image_urls) if image_urls else None,
-            tweet_context=tweet_context or None,
-        )
-    except Exception:
-        logger.exception("Fact-check pipeline failed for statement head=%r", statement[:80])
-        return {
-            "text": "", "sources": None, "tweets": None, "notes": None,
-            "queries": [], "all_cited_tweet_ids": [], "all_cited_note_ids": [],
-            "reasons_detail": [],
-        }
-
-    try:
-        text = render(view_for_renderer(frozen), factcheck_tone)
-    except Exception:
-        logger.exception("Render failed for invocation=%s", frozen.invocation_id)
-        return {
-            "text": "", "sources": None, "tweets": None, "notes": None,
-            "queries": [], "all_cited_tweet_ids": [], "all_cited_note_ids": [],
-            "reasons_detail": [],
-        }
+    # Let pipeline + render exceptions propagate. The streamer's
+    # process_mention wraps the whole flow in try/except and emits
+    # `pipeline_error` — that's the outcome we want for telemetry, NOT a
+    # silent `empty_reply` (which previously hid render refusals).
+    frozen = run_pipeline(
+        statement,
+        target_tweet_id=target_tweet_id,
+        image_urls=list(image_urls) if image_urls else None,
+        tweet_context=tweet_context or None,
+    )
+    text = render(view_for_renderer(frozen), factcheck_tone)
 
     sources = [
         s.url for s in frozen.presentation_payload.primary_sources_to_cite

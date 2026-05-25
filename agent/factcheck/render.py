@@ -33,7 +33,12 @@ logger = logging.getLogger(__name__)
 
 
 _X_TCO_LEN = 23
-_X_TWEET_LIMIT = 280
+# The poster appends a t.co-shortened /info link after the rendered reply:
+# "<reply>\n<info_url>". The /info URL counts as 23 chars + 1 for the
+# newline. Renderer ceiling must leave room for that or the poster's
+# truncation eats the last words of the reply.
+_X_INFO_APPEND_LEN = _X_TCO_LEN + 1  # 23 + newline
+_X_TWEET_LIMIT = 280 - _X_INFO_APPEND_LEN  # = 256
 _URL_RE = re.compile(r"https?://[^\s<>\"')]+")
 
 _REFUSAL_MARKERS = (
@@ -71,7 +76,7 @@ _HARD_CONSTRAINTS = """HARD CONSTRAINTS (renders that violate these are rejected
 - Never introduce a URL outside primary_sources_to_cite.
 - Never introduce facts outside presentation_payload + tone_neutral_justification.
 - No emojis, no hashtags, no @-mentions.
-- ≤270 X-weighted chars (X counts every URL as 23 chars; aim for ≤250 to leave retry headroom).
+- ≤250 X-weighted chars (X counts every URL as 23 chars; the bot appends a 24-char /info link after this reply, so the renderer's hard ceiling is 256; aim for ≤250 for retry headroom).
 - Output a JSON object with a single "text" field. No preamble, no prose around the JSON."""
 
 
@@ -168,8 +173,11 @@ def _state_for(view: RendererView) -> str:
 
 
 def _looks_like_refusal(text: str) -> bool:
-    lower = text.lower()
-    return any(marker in lower for marker in _REFUSAL_MARKERS)
+    """Refusal almost always leads — anchor markers to start-of-text so
+    legitimate replies that quote refusal phrases ("X did not say 'I cannot
+    believe Y'") don't false-trigger."""
+    lower = text.lstrip().lower()
+    return any(lower.startswith(marker) for marker in _REFUSAL_MARKERS)
 
 
 def _build_prompt(view: RendererView, state: str) -> str:
