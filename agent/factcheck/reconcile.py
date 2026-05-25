@@ -191,10 +191,16 @@ def reconcile(
     # Don't crash the pipeline; truncate or pad to match the text-evidence
     # count so the caller's zip(evidence, stances) is well-defined.
     if len(output.evidence_stances) != len(evidence):
+        delta = abs(len(output.evidence_stances) - len(evidence))
         logger.warning(
-            "reconcile: returned %d stances for %d evidence entries — repairing.",
-            len(output.evidence_stances), len(evidence),
+            "reconcile: returned %d stances for %d evidence entries — repairing (delta=%d).",
+            len(output.evidence_stances), len(evidence), delta,
         )
+        try:
+            from agent.app import metrics as _metrics
+            _metrics.reconcile_stance_drift.add(1, {"delta": str(delta)})
+        except ImportError:
+            pass  # tests / isolated runs without the metrics module
         stances = list(output.evidence_stances)[: len(evidence)]
         while len(stances) < len(evidence):
             stances.append("neutral")
