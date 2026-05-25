@@ -134,9 +134,18 @@ def reconcile(
         reasoning_effort="medium",
         max_tokens=4096,
     )
+    # Stance count drift can happen when image-only or evidence list is
+    # empty — Claude sometimes stamps stances for image-provenance hits.
+    # Don't crash the pipeline; truncate or pad to match the text-evidence
+    # count so the caller's zip(evidence, stances) is well-defined.
     if len(output.evidence_stances) != len(evidence):
-        raise ValueError(
-            f"Reconciliation returned {len(output.evidence_stances)} stances for "
-            f"{len(evidence)} evidence entries."
+        import logging
+        logging.getLogger(__name__).warning(
+            "reconcile: returned %d stances for %d evidence entries — repairing.",
+            len(output.evidence_stances), len(evidence),
         )
+        stances = list(output.evidence_stances)[: len(evidence)]
+        while len(stances) < len(evidence):
+            stances.append("neutral")
+        output.evidence_stances = stances
     return output

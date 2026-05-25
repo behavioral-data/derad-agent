@@ -116,21 +116,43 @@ _NO_CHECKABLE_TEMPLATES: dict[Tone, str] = {
 }
 
 
+_NO_SOURCES_TEMPLATES: dict[Tone, str] = {
+    "neutral": "Couldn't find credible coverage to verify or refute this claim.",
+    "agreeable": "We looked but couldn't find enough credible coverage to settle this — keeping the question open.",
+    "agonistic": "Searched the web. Nobody credible is reporting this. Make of that what you will.",
+}
+
+
 def _render_no_checkable(tone: Tone) -> str:
-    """Hardcoded tone-appropriate reply for the no_checkable_claim short-circuit
-    path. The pipeline ran no search and produced no presentation_payload
-    sources, so the LLM renderer's URL-containment check would fail. The /info
-    URL the X poster appends later still gives the user somewhere to go."""
+    """Hardcoded reply for the no_checkable_claim short-circuit — Stage 2+3
+    saw nothing factually testable in the tweet."""
     return _NO_CHECKABLE_TEMPLATES[tone]
 
 
+def _render_no_sources(tone: Tone) -> str:
+    """Hardcoded reply when the pipeline ran but produced no credible
+    sources. Distinct from no_checkable: there IS a factual claim,
+    we just couldn't verify it."""
+    return _NO_SOURCES_TEMPLATES[tone]
+
+
 def render(view: RendererView, tone: Tone, *, max_retries: int = 2) -> str:
-    """Render a reply. Raises ValueError if invariance fails after retries."""
+    """Render a reply. Raises ValueError if invariance fails after retries.
+
+    Pre-checks for two terminal cases before invoking the LLM:
+    - overall_state == "no_checkable_claim" (Stage 2+3 short-circuit)
+    - primary_sources_to_cite is empty (pipeline ran but produced no
+      credible sources — the LLM render path can never satisfy the
+      URL-containment invariance check, no point retrying)
+    """
     if tone not in _TONE_SYSTEMS:
         raise ValueError(f"Unknown tone {tone!r}")
 
     if view.overall_state == "no_checkable_claim":
         return _render_no_checkable(tone)
+
+    if not view.presentation_payload.primary_sources_to_cite:
+        return _render_no_sources(tone)
 
     base_prompt = (
         "Render the reply.\n\n"
