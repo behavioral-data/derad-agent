@@ -82,18 +82,19 @@ class TestStreamLoopDispatchShape:
 
         monkeypatch.setattr(streamer_module.requests, "get", lambda *a, **kw: _FakeResp())
 
-        # _stream_loop catches Exception broadly, so we use KeyboardInterrupt
-        # (not an Exception subclass) to break out after the first reconnect-sleep.
-        def _sleep_then_stop(_seconds):
-            raise KeyboardInterrupt("stop test loop")
-        monkeypatch.setattr(streamer_module.time, "sleep", _sleep_then_stop)
-
         captured: list[tuple] = []
+
+        # The loop runs until _shutting_down is set; signal shutdown from
+        # inside the dispatch handler so the loop exits cleanly after the
+        # first event.
         def dispatch(tweet, ts):
             captured.append((tweet, ts))
+            streamer_module._shutting_down.set()
 
-        with pytest.raises(KeyboardInterrupt):
+        try:
             streamer_module._stream_loop(dispatch, token="dummy")
+        finally:
+            streamer_module._shutting_down.clear()
 
         assert len(captured) == 1
         tweet, ts = captured[0]
