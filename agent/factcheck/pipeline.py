@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 from .audit import audit
+from .extract import ExtractionOutput, central_claim, extract_claims
 from .freeze import freeze_to_disk
 from .multimodal import ImageEvidence, extract_image
 from .reconcile import reconcile
@@ -24,6 +25,7 @@ from .schema import (
     AttachedImage,
     BackendVersion,
     Claim,
+    ClaimType,
     ConsolidatedFindings,
     CrossModalReport,
     Evidence,
@@ -109,6 +111,76 @@ def _attached_image_records(images: list[ImageEvidence]) -> list[AttachedImage]:
 _log = __import__("logging").getLogger("agent.factcheck.pipeline")
 
 
+def _short_circuit_no_checkable(
+    *,
+    invocation_id: str,
+    invocation_time,
+    target_tweet_id: str,
+    modality: Modality,
+    backend_name: str,
+    image_evidence: list[ImageEvidence],
+    extraction: ExtractionOutput,
+    freeze_root: Optional[Path],
+) -> FrozenVerdict:
+    """Stage 2+3 short-circuit. No search, no reconcile — bot replies with
+    a hardcoded tone-appropriate 'nothing to fact-check' template at Stage 7."""
+    _log.info("run_pipeline[%s]: short-circuit — no_checkable_claim (%s)", invocation_id, extraction.reason)
+
+    reason = extraction.reason or "Personal opinion or aesthetic reaction; no factually verifiable claim identified."
+    findings = ConsolidatedFindings(
+        unaddressed_propositions=tuple(
+            UnaddressedProposition(
+                proposition=c.text,
+                reason="no evidence retrieved",
+                is_central=c.is_central,
+            )
+            for c in extraction.claims
+        )
+    )
+    payload = PresentationPayload(
+        headline_finding=reason,
+        counter_fact=None,
+        primary_sources_to_cite=(),
+        load_bearing_evidence_snippet="",
+    )
+    claim_objs = tuple(
+        Claim(
+            claim_id=f"c{i + 1}",
+            text=ec.text,
+            type=ec.type,
+            check_worthy=ec.check_worthy,
+            is_central=ec.is_central,
+            evidence=(),
+        )
+        for i, ec in enumerate(extraction.claims)
+    )
+
+    frozen = FrozenVerdict(
+        invocation_id=invocation_id,
+        target_tweet_id=target_tweet_id,
+        invocation_time=invocation_time,
+        modality=modality,
+        backend_version=BackendVersion(
+            model="claude-via-azure-ai-services",
+            vlm_model="claude-via-azure-ai-services" if image_evidence else "",
+            search_provider=backend_name,
+            pipeline_commit=_git_sha(),
+            source_reliability_lists_version={"thin_slice_canned_table": _PIPELINE_VERSION},
+        ),
+        attached_images=tuple(_attached_image_records(image_evidence)),
+        claims=claim_objs,
+        cross_modal_report=CrossModalReport(lens_1_text_text=Lens1(narrative="Skipped: no checkable claim.")),
+        consolidated_findings=findings,
+        source_quality_table=(),
+        verdict_label="NotEnoughEvidence",
+        tone_neutral_justification=reason,
+        presentation_payload=payload,
+        overall_state="no_checkable_claim",
+    )
+    freeze_to_disk(frozen, root=freeze_root)
+    return frozen
+
+
 def run_pipeline(
     claim_text: str,
     *,
@@ -148,6 +220,34 @@ def run_pipeline(
         image_evidence = _run_multimodal(image_urls, backend)
         _log.info("run_pipeline[%s]: Stage 1.5 complete (%d evidence)", invocation_id, len(image_evidence))
 
+    # ── Stage 2 + 3 — claim extraction & check-worthiness gate ──
+    _log.info("run_pipeline[%s]: Stage 2+3 — claim extraction", invocation_id)
+    extraction = extract_claims(
+        claim_text,
+        tweet_context=tweet_context,
+        image_evidence=image_evidence or None,
+    )
+    central = central_claim(extraction)
+    _log.info(
+        "run_pipeline[%s]: Stage 2+3 → %d propositions, central type=%s check_worthy=%s, overall=%s",
+        invocation_id, len(extraction.claims), central.type, central.check_worthy, extraction.overall_state,
+    )
+
+    if extraction.overall_state == "no_checkable_claim":
+        return _short_circuit_no_checkable(
+            invocation_id=invocation_id,
+            invocation_time=invocation_time,
+            target_tweet_id=target_tweet_id,
+            modality=modality,
+            backend_name=backend.name,
+            image_evidence=image_evidence,
+            extraction=extraction,
+            freeze_root=freeze_root,
+        )
+
+    # Stage 4+ uses the central proposition's text — typically more focused
+    # than the raw tweet (hedges stripped, framing normalized).
+    central_text = central.text
     _log.info("run_pipeline[%s]: Stage 4 — iterative verification (Papelo-style)", invocation_id)
     image_summaries = (
         [
@@ -162,7 +262,7 @@ def run_pipeline(
         else None
     )
     text_evidence = iterative_verify(
-        claim_text=claim_text,
+        claim_text=central_text,
         backend=backend,
         tweet_context=tweet_context,
         image_summaries=image_summaries,
@@ -178,13 +278,13 @@ def run_pipeline(
     quality_table = build_quality_table(all_urls)
 
     if not text_evidence and not image_evidence:
-        findings, payload, justification = _nei_verdict(claim_text)
+        findings, payload, justification = _nei_verdict(central_text)
         lens_1 = Lens1(narrative="No evidence retrieved.")
         verdict_label = "NotEnoughEvidence"
     else:
         _log.info("run_pipeline[%s]: Stage 4.5 — reconcile", invocation_id)
         recon = reconcile(
-            central_claim_text=claim_text,
+            central_claim_text=central_text,
             evidence=text_evidence,
             source_quality_table=quality_table,
             image_evidence=image_evidence or None,
@@ -226,13 +326,19 @@ def run_pipeline(
             "Audit failed: " + "; ".join(audit_result.failures)
         )
 
-    claim_obj = Claim(
-        claim_id="c1",
-        text=claim_text,
-        type="verifiable",
-        is_central=True,
-        evidence=evidence,
-    )
+    claim_objs: list[Claim] = []
+    for i, ec in enumerate(extraction.claims):
+        evidence_for_this = evidence if ec.is_central else ()
+        claim_objs.append(
+            Claim(
+                claim_id=f"c{i + 1}",
+                text=ec.text,
+                type=ec.type,
+                check_worthy=ec.check_worthy,
+                is_central=ec.is_central,
+                evidence=evidence_for_this,
+            )
+        )
 
     cross_modal = CrossModalReport(lens_1_text_text=lens_1)
     if image_evidence:
@@ -272,7 +378,7 @@ def run_pipeline(
             source_reliability_lists_version={"thin_slice_canned_table": _PIPELINE_VERSION},
         ),
         attached_images=tuple(_attached_image_records(image_evidence)),
-        claims=[claim_obj],
+        claims=tuple(claim_objs),
         cross_modal_report=cross_modal,
         consolidated_findings=findings,
         source_quality_table=quality_table,

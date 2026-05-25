@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from .schema import FrozenVerdict, PresentationPayload
+from .schema import FrozenVerdict, OverallState, PresentationPayload
 
 
 _DEFAULT_FREEZE_ROOT = Path(__file__).resolve().parents[2] / "data" / "freezes"
@@ -20,10 +20,16 @@ _DEFAULT_FREEZE_ROOT = Path(__file__).resolve().parents[2] / "data" / "freezes"
 
 @dataclass(frozen=True)
 class RendererView:
-    """The only fields a tone renderer is allowed to see (design §3.2)."""
+    """The only fields a tone renderer is allowed to see (design §3.2).
+
+    `overall_state` is exposed as pipeline metadata (not as evidence content)
+    so the renderer can take the short-circuit "no checkable claim" path
+    without ever seeing reasoning fields.
+    """
 
     presentation_payload: PresentationPayload
     tone_neutral_justification: str
+    overall_state: OverallState = "checked"
 
 
 def view_for_renderer(frozen: FrozenVerdict) -> RendererView:
@@ -31,6 +37,7 @@ def view_for_renderer(frozen: FrozenVerdict) -> RendererView:
     return RendererView(
         presentation_payload=frozen.presentation_payload,
         tone_neutral_justification=frozen.tone_neutral_justification,
+        overall_state=frozen.overall_state,
     )
 
 
