@@ -137,94 +137,113 @@
       <section id="urls">
         <div class="section-head">
           <p class="eyebrow">04 · URLs — trust &amp; persistence</p>
-          <h2>How URLs flow through the pipeline (and what we save)</h2>
-          <p>Honest accounting of where URLs come from, where they can be hallucinated, what we persist, and what we never read.</p>
+          <h2>Where URLs come from and how we keep them honest</h2>
+          <p>Where Bing's URLs become evidence, where the small model can fabricate, and what's read vs. saved at every step.</p>
         </div>
 
         <div class="callout info">
-          <strong>Content-based URL validation is now mandatory.</strong> Every URL the Foundry+Bing agent claims is fetched (first 32KB, redirects followed); the page's actual <code class="inline-code">&lt;title&gt;</code> is tokenized and Jaccard-overlapped against the agent's claimed title. Match score ≥ 0.20 → accepted; below → rejected as <code class="inline-code">title_mismatch</code> with the score logged. 4xx/5xx → rejected by status. This catches the India Today miscite class: gpt-4.1-mini fabricated a Neuralink-themed slug attached to a real numeric ID that India Today's router resolved to an unrelated 2023 Samantha/Vijay Deverakonda movie article (HTTP 301). The title-match validator dropped it with score=0.00 in offline reproduction.
-        </div>
-        <div class="callout warning mt-12">
-          <strong>What we still don't do.</strong> We don't extract or reason about the article body — only the page title is used for validation. Design §4.4's full HTTP + Playwright + snippet-extraction pipeline (where Claude reads the document text and pulls supporting/refuting passages) is still deferred. We trust the agent's claimed snippet; if the agent paraphrased incorrectly, downstream stages can't catch it. Playwright-rendered pages (X, Facebook, Instagram, archive sites) are out of scope.
+          <strong>Every cited URL is now fetched and title-matched before it enters evidence.</strong> The validator dropped the recent India Today miscite (a fabricated Neuralink slug whose ID actually routed to a 2023 movie article) with a Jaccard score of <code class="inline-code">0.00</code> in offline reproduction.
         </div>
 
         <h3 class="mt-24">URL lifecycle per Foundry search call</h3>
-        <ol class="task-list">
-          <li><span class="chip chip-info">1</span> We send a query to a single-purpose Foundry agent (model gpt-4.1-mini wrapped with only the <code class="inline-code">bing_grounding</code> tool).</li>
-          <li><span class="chip chip-info">2</span> The agent invokes the bing_grounding tool. Bing runs a real web search. Tool output is returned to the model internally; raw results are not exposed to the API caller.</li>
-          <li><span class="chip chip-warning">3 ⚠</span> The agent writes a JSON object summarizing the hits. <strong>This is where URL hallucination happens.</strong> gpt-4.1-mini pattern-matches URL shapes (slugs, IDs, dates) and can fabricate plausible-looking links. Empirical: the bot's India Today miscite was a 2025-dated Neuralink slug attached to a real ID that India Today's router resolved to a 2023 movie article.</li>
-          <li><span class="chip chip-info">4</span> Empirical: Foundry's <code class="inline-code">url_citation</code> annotations are reliably empty for the structured-JSON output mode. Annotation-only filtering would zero out every search, so we don't depend on them.</li>
-          <li><span class="chip chip-done">5</span> For every URL in the agent's JSON: HTTP GET with redirect-following (≤ 32 KB body, 6 s timeout, browser User-Agent). Extract the page's <code class="inline-code">&lt;title&gt;</code> tag.</li>
-          <li><span class="chip chip-done">6</span> Tokenize both the agent's claimed title and the actual page title (lowercase alphanumeric, ≥3 chars, stopwords + framing words filtered). Jaccard overlap ≥ 0.20 → accepted. Below → rejected as <code class="inline-code">title_mismatch</code> with the score logged.</li>
-          <li><span class="chip chip-done">7</span> 4xx/5xx → rejected by status. No <code class="inline-code">&lt;title&gt;</code> tag found → passed through unverified (common for JS-rendered pages) and logged.</li>
-        </ol>
+        <div class="timeline mt-12">
+          <div class="tl-row">
+            <div class="tl-dot tl-dot-gray"></div>
+            <div class="tl-time">step 1</div>
+            <div class="tl-text"><strong>Query out.</strong> Sent to the single-purpose Foundry agent (model gpt-4.1-mini, only the <code class="inline-code">bing_grounding</code> tool attached).</div>
+          </div>
+          <div class="tl-row">
+            <div class="tl-dot tl-dot-gray"></div>
+            <div class="tl-time">step 2</div>
+            <div class="tl-text"><strong>Bing search.</strong> Tool fires; results return to the model internally. Foundry never exposes the raw Bing output to API callers.</div>
+          </div>
+          <div class="tl-row">
+            <div class="tl-dot tl-dot-warn"></div>
+            <div class="tl-time">step 3</div>
+            <div class="tl-text"><strong>Agent re-emits as JSON.</strong> gpt-4.1-mini transcribes URLs into a structured response. <strong>Hallucination point.</strong> The small model pattern-matches URL shapes and can fabricate plausible slugs / IDs / dates that don't map to real articles.</div>
+          </div>
+          <div class="tl-row">
+            <div class="tl-dot tl-dot-gray"></div>
+            <div class="tl-time">step 4</div>
+            <div class="tl-text"><strong>Annotations check (empirically empty).</strong> Foundry's <code class="inline-code">url_citation</code> annotations would normally be authoritative, but they don't populate for structured-JSON output. So we can't filter on them.</div>
+          </div>
+          <div class="tl-row">
+            <div class="tl-dot tl-dot-ok"></div>
+            <div class="tl-time">step 5</div>
+            <div class="tl-text"><strong>GET + title extract.</strong> Each agent-claimed URL is fetched (≤32&nbsp;KB body, 6&nbsp;s timeout, redirects followed, browser User-Agent). The page's <code class="inline-code">&lt;title&gt;</code> is parsed out.</div>
+          </div>
+          <div class="tl-row">
+            <div class="tl-dot tl-dot-ok"></div>
+            <div class="tl-time">step 6</div>
+            <div class="tl-text"><strong>Title Jaccard match.</strong> Tokenize claimed and actual titles (lowercase alphanumeric, ≥3 chars, stopwords + framing words filtered). Overlap ≥ 0.20 → accepted. Below → rejected as <code class="inline-code">title_mismatch</code> with score logged.</div>
+          </div>
+          <div class="tl-row">
+            <div class="tl-dot tl-dot-ok"></div>
+            <div class="tl-time">step 7</div>
+            <div class="tl-text"><strong>Status check.</strong> HTTP 4xx/5xx → rejected. No <code class="inline-code">&lt;title&gt;</code> at all (typical for JS-rendered pages) → passed through unverified and logged.</div>
+          </div>
+        </div>
 
-        <h3 class="mt-24">What gets persisted per mention</h3>
-        <div class="table-wrap">
+        <h3 class="mt-24">Persisted per mention</h3>
+        <div class="table-wrap mt-12">
           <table class="data-table">
             <thead>
               <tr>
                 <th>Artifact</th>
                 <th>Where</th>
-                <th>What's in it</th>
+                <th>What it carries</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td>Frozen verdict (full audit trail)</td>
-                <td><code class="inline-code">data/freezes/&lt;invocation_id&gt;.json</code> on App Service disk</td>
-                <td>Every extracted claim, every Evidence record (URL + snippet + question + stance), the source-quality table with tier classifications, the reconcile findings, the rendered presentation_payload, the cited URLs, the pipeline git SHA and model version strings.</td>
+                <td><strong>Frozen verdict</strong></td>
+                <td><code class="inline-code">data/freezes/&lt;invocation_id&gt;.json</code></td>
+                <td>Every extracted claim, every <code class="inline-code">Evidence</code> record, source-quality table, reconcile findings, presentation payload, cited URLs, pipeline git SHA, model versions.</td>
               </tr>
               <tr>
-                <td>Mention event row</td>
-                <td>Azure Tables <code class="inline-code">MentionEvents</code></td>
-                <td>Outcome (replied / dry_run / empty_reply / pipeline_error / pipeline_queue_timeout / parent_fetch_failed), tone, participant ID, study day, reply tweet ID, pipeline latency, queries issued, cited URLs.</td>
+                <td><strong>Mention event</strong></td>
+                <td>Tables <code class="inline-code">MentionEvents</code></td>
+                <td>Outcome + tone + participant ID + study day + reply tweet ID + pipeline latency + queries + cited URLs.</td>
               </tr>
               <tr>
-                <td>Mention drop row</td>
-                <td>Azure Tables <code class="inline-code">MentionDrops</code></td>
-                <td>Mentions rejected at the guard chain (self-reply / opt-out / rate-limit) — separate from accepted-but-failed mentions.</td>
+                <td><strong>Mention drop</strong></td>
+                <td>Tables <code class="inline-code">MentionDrops</code></td>
+                <td>Mentions rejected before pipeline (self-reply, opt-out, rate-limit).</td>
               </tr>
               <tr>
-                <td>Engagement snapshot</td>
-                <td>Azure Tables <code class="inline-code">EngagementSnapshots</code></td>
-                <td>Hourly poll of likes/reposts/replies on each bot-posted reply, plus downstream sharing-quality on the target user's subsequent posts (Mosleh outcome).</td>
+                <td><strong>Engagement snapshot</strong></td>
+                <td>Tables <code class="inline-code">EngagementSnapshots</code></td>
+                <td>Hourly likes / RT / reply counts on the bot's reply + downstream sharing-quality on the target user (Mosleh outcome).</td>
               </tr>
             </tbody>
           </table>
         </div>
 
-        <h3 class="mt-24">What we do <em>not</em> persist or read</h3>
-        <div class="grid-2 mt-12">
+        <div class="grid-2 grid-loose mt-24">
           <div class="panel">
             <div class="panel-head"><h3>What we read</h3></div>
             <ul class="task-list">
-              <li><span class="chip chip-done">yes</span> HTTP GET of each cited URL — first 32 KB only, for title extraction.</li>
-              <li><span class="chip chip-done">yes</span> Page <code class="inline-code">&lt;title&gt;</code> compared against the agent's claimed title for validation.</li>
-              <li><span class="chip chip-blocked">no</span> Article body / paragraphs are not parsed; no snippet extraction from real page content (yet).</li>
-              <li><span class="chip chip-blocked">no</span> Playwright-headless rendering of JS-heavy pages (X, Facebook, Instagram, archive sites). These either fail validation (no title) or pass through unverified.</li>
+              <li><span class="chip chip-done">yes</span> HTTP GET of each cited URL, first 32&nbsp;KB only — for title extraction.</li>
+              <li><span class="chip chip-done">yes</span> Page <code class="inline-code">&lt;title&gt;</code> compared against the agent's claimed title.</li>
+              <li><span class="chip chip-blocked">no</span> Article body / paragraphs (no snippet extraction from real content yet).</li>
+              <li><span class="chip chip-blocked">no</span> Playwright rendering for JS-heavy sites — they fail validation or pass through unverified.</li>
               <li><span class="chip chip-blocked">no</span> Archive-Today / Wayback cross-checks.</li>
             </ul>
           </div>
           <div class="panel">
-            <div class="panel-head"><h3>Not saved</h3></div>
+            <div class="panel-head"><h3>What we don't save</h3></div>
             <ul class="task-list">
-              <li><span class="chip chip-blocked">no</span> Raw Bing search results (Foundry hides the tool's raw output from API callers).</li>
-              <li><span class="chip chip-blocked">no</span> Foundry response objects (only the parsed + validated hits).</li>
-              <li><span class="chip chip-blocked">no</span> Fetched page HTML / titles used for validation (the rejection reason is logged, not stored).</li>
+              <li><span class="chip chip-blocked">no</span> Raw Bing search results (Foundry hides them).</li>
+              <li><span class="chip chip-blocked">no</span> Foundry response objects (only parsed + validated hits).</li>
+              <li><span class="chip chip-blocked">no</span> Fetched HTML / titles used during validation (rejection reasons are logged, not stored).</li>
               <li><span class="chip chip-blocked">no</span> Per-stage Claude conversation transcripts.</li>
             </ul>
           </div>
         </div>
 
-        <h3 class="mt-24">Why we don't extract page bodies (yet)</h3>
-        <p>Design §4.4 specifies HTTP + Playwright fetching with snippet extraction from the actual document. We do the HTTP-GET half (for title-based URL validation) but not the snippet-extraction half. Three reasons:</p>
-        <ul class="task-list">
-          <li><span class="chip">cost</span> Reading + chunking ~10 KB of HTML per URL through Claude for snippet extraction adds ~3-8 s per cited URL × multiple URLs per pipeline. Latency cost is real.</li>
-          <li><span class="chip">scope</span> Playwright would unlock JS-rendered sites (X, FB, IG, archives) but it's a ~500 MB Docker layer + Container Apps infra slab.</li>
-          <li><span class="chip">redundancy</span> The agent's claimed snippet is usually accurate even when the URL is hallucinated — fixing the URL hallucination at the validation step is most of the value. Real-document snippet extraction is incremental.</li>
-        </ul>
-        <p>Pragmatic next step: when the agent's snippet doesn't appear (case-insensitive substring) in the validated page's first 4 KB of text, drop the citation as snippet-mismatch. ~30 min of code, adds ~100 ms per URL (we already fetched the body for title extraction).</p>
+        <div class="callout mt-24">
+          <strong>Pragmatic next step.</strong> When the agent's claimed snippet doesn't appear (case-insensitive substring) in the validated page's first 4&nbsp;KB of text, drop the citation as <code class="inline-code">snippet_mismatch</code>. ~30 minutes of code, ~100&nbsp;ms per URL (we already fetched the body). Catches the case where the URL is correct but the agent paraphrased what's there inaccurately.
+        </div>
       </section>
 
       <!-- ───────────────────────── PER-STAGE DETAILS ───────────────────────── -->
@@ -235,53 +254,61 @@
           <p>One card per stage. Service/model is the actual deployment we hit at runtime.</p>
         </div>
 
-        <div class="grid-auto grid-loose">
+        <div class="grid-3 grid-loose">
 
           <div class="panel">
             <div class="panel-head">
               <h3>Stage 1 — Ingestion</h3>
               <span class="chip chip-info">data plumbing</span>
             </div>
-            <p><strong>Service.</strong> X API v2 — filtered stream + posts.get_by_id.</p>
-            <p><strong>What.</strong> The streamer (one persistent connection) matches <code class="inline-code">@eddiexbot</code> mentions. For each accepted mention the bot fetches the <em>parent</em> tweet (the tweet the mention replied to) along with author handle/bio/verified/created_at/followers, posted-at, expanded <code class="inline-code">t.co</code> URLs, referenced-tweet relations, and any attached photo URLs.</p>
-            <p><strong>Out.</strong> <code class="inline-code">TweetSnapshot</code> + <code class="inline-code">tweet_context</code> dict.</p>
-            <p class="meta">~2 s · gated by X read-rate-limit (15 reads / 15 min)</p>
+            <p>The streamer matches <code class="inline-code">@eddiexbot</code> mentions on the X filtered stream; the bot fetches the parent tweet with full author + media + URL context.</p>
+            <ul class="task-list">
+              <li><span class="chip">service</span> X API v2 — filtered stream + posts.get_by_id</li>
+              <li><span class="chip">out</span> <code class="inline-code">TweetSnapshot</code> + <code class="inline-code">tweet_context</code> (handle, bio, verified, created_at, followers, posted_at, expanded URLs, referenced tweets, photos)</li>
+            </ul>
+            <p class="meta">~2 s · capped by X read-rate-limit</p>
           </div>
 
           <div class="panel">
             <div class="panel-head">
-              <h3>Stage 1.5 — Multimodal extraction</h3>
+              <h3>Stage 1.5 — Multimodal</h3>
               <span class="chip chip-suggest">Claude + Foundry+Bing</span>
             </div>
-            <p><strong>Conditional.</strong> Only fires when the parent has ≥1 photo.</p>
-            <p><strong>Tier 1 (OCR).</strong> Claude VLM transcribes every readable string in the image.</p>
-            <p><strong>Tier 2 (description).</strong> Same VLM call writes a literal, identifying description — instructed to name public figures (incl. musicians, actresses), landmarks, events, brands, canonical images with reasonable confidence.</p>
-            <p><strong>Tier 3 (provenance approximation).</strong> Description fed back through Foundry+Bing to surface articles about the image's subject. True reverse-image-search has no Azure-native path post-Bing-API retirement.</p>
-            <p><strong>Tier 4 (manipulation/AI-gen).</strong> Forced NEI per spec.</p>
-            <p class="meta">~7–13 s/image · cap 5 MB base64 (auto-resized via Pillow)</p>
+            <p>Per-image extraction; only fires when the parent carries ≥1 photo.</p>
+            <ul class="task-list">
+              <li><span class="chip chip-info">tier 1</span> OCR — Claude VLM transcribes every visible string</li>
+              <li><span class="chip chip-info">tier 2</span> Description — names public figures, landmarks, events, brands with reasonable confidence</li>
+              <li><span class="chip chip-info">tier 3</span> Provenance approx — description fed back through Foundry+Bing</li>
+              <li><span class="chip chip-warning">tier 4</span> Manipulation / AI-gen detection — forced NEI per spec</li>
+            </ul>
+            <p class="meta">~7–13 s per image · 5 MB base64 cap (Pillow-resized)</p>
           </div>
 
           <div class="panel">
             <div class="panel-head">
-              <h3>Stage 4 — Iterative verification</h3>
+              <h3>Stage 4 — Iterative verify</h3>
               <span class="chip chip-suggest">Claude + Foundry+Bing</span>
             </div>
-            <p><strong>Service.</strong> Claude Sonnet 4.6 (controller, low reasoning) + Azure AI Foundry agent (gpt-4.1-mini wrapping the bing_grounding tool).</p>
-            <p><strong>What.</strong> Papelo-style loop. Each iteration: controller sees claim + history → decides <em>continue</em> (issues next question) or <em>stop</em>. The next question runs through Foundry+Bing.</p>
-            <p><strong>URL validation.</strong> Every hit URL is fetched (≤32&nbsp;KB, 6&nbsp;s timeout, follow redirects); page <code class="inline-code">&lt;title&gt;</code> is Jaccard-matched against the agent's claimed title (threshold 0.20). Hallucinated URLs are dropped before they enter the evidence bundle. See <a href="#urls">URLs: trust &amp; persistence</a> for the full lifecycle.</p>
-            <p><strong>Caps.</strong> ≤5 questions · ≤3 hits/question · 60 s wall-clock · 120 s per LLM call.</p>
-            <p class="meta">~20–50 s with validation · 1–3 questions typical · early-stops when ≥2 reliable-tier hits agree</p>
+            <p>Papelo-style loop: a Claude controller decides continue/stop, issues the next question, Foundry+Bing answers. Hallucinated URLs are filtered by content-based validation (see <a href="#urls">URLs: trust &amp; persistence</a>).</p>
+            <ul class="task-list">
+              <li><span class="chip">controller</span> Claude Sonnet 4.6, low reasoning</li>
+              <li><span class="chip">search</span> Foundry agent + bing_grounding (gpt-4.1-mini)</li>
+              <li><span class="chip">caps</span> ≤5 questions · ≤3 hits/q · 60 s · 120 s/LLM call</li>
+            </ul>
+            <p class="meta">~20–50 s · 1–3 questions typical · early-stops when ≥2 reliable hits agree</p>
           </div>
 
           <div class="panel">
             <div class="panel-head">
-              <h3>Stage 4.5 — Reconciliation</h3>
+              <h3>Stage 4.5 — Reconcile</h3>
               <span class="chip chip-active">Claude reasoning</span>
             </div>
-            <p><strong>Service.</strong> Claude Sonnet 4.6 with extended thinking (<code class="inline-code">budget=4096</code>).</p>
-            <p><strong>What.</strong> One call folds together: Lens 1 (text-text), Lens 2 (image-text), Lens 3 (cross-modal). Sees claim, evidence, source-quality table, image evidence, and tweet_context. Emits atomic propositions (verified / refuted / disputed / unaddressed) with citations, a presentation_payload, a tone-neutral justification, and per-evidence stance labels.</p>
-            <p><strong>Author signal.</strong> The model uses author handle + bio + verified + account-age to detect parody / fan / aggregator accounts and to date-stamp recency claims.</p>
-            <p class="meta">~30–50 s · the heaviest single LLM call in the pipeline</p>
+            <p>One Claude call folds Lens 1 (text-text), Lens 2 (image-text), and Lens 3 (cross-modal) over the full evidence + tweet_context bundle. Emits atomic propositions, presentation payload, and per-evidence stances.</p>
+            <ul class="task-list">
+              <li><span class="chip">model</span> Claude Sonnet 4.6, extended thinking (<code class="inline-code">budget=4096</code>)</li>
+              <li><span class="chip">author signal</span> handle + bio + verified + account-age → parody / fan / aggregator detection</li>
+            </ul>
+            <p class="meta">~30–50 s · heaviest single LLM call in the pipeline</p>
           </div>
 
           <div class="panel">
@@ -289,19 +316,27 @@
               <h3>Stage 4.5.2 — Source reliability</h3>
               <span class="chip chip-warning">structural rule</span>
             </div>
-            <p><strong>Four-step lookup.</strong> (1) curated IFCN signatory set; (2) Wikipedia perennial-sources style table (reputable-news / primary-source / satirical / low-quality); (3) subdomain → parent fallback (<code class="inline-code">fact-check.usatoday.com</code> → <code class="inline-code">usatoday.com</code>); (4) batched Claude model-prior classifier for the long tail, cached for the worker's lifetime.</p>
-            <p><strong>Counts.</strong> 243 curated domains across five tiers. Anything else hits one Claude call per pipeline (batched).</p>
-            <p><strong>Verdict rule.</strong> Refuted / Supported requires ≥2 sources at fact-checker or reputable-news tier on the central proposition. Conflicting / NEI otherwise.</p>
+            <p>Four-step lookup classifies every URL into a tier; structural verdict rule reads from those tiers.</p>
+            <ul class="task-list">
+              <li><span class="chip chip-info">1</span> Curated IFCN signatory set</li>
+              <li><span class="chip chip-info">2</span> Wikipedia perennial-sources table</li>
+              <li><span class="chip chip-info">3</span> Subdomain → parent fallback</li>
+              <li><span class="chip chip-info">4</span> Batched Claude model-prior, cached per worker</li>
+              <li><span class="chip">verdict</span> Refuted / Supported needs ≥2 fact-checker / reputable-news on the central claim</li>
+            </ul>
+            <p class="meta">243 curated domains across five tiers</p>
           </div>
 
           <div class="panel">
             <div class="panel-head">
-              <h3>Stage 5 — Verdict audit</h3>
+              <h3>Stage 5 — Audit</h3>
               <span class="chip chip-info">mechanical</span>
             </div>
-            <p><strong>Service.</strong> Pure-Python checks (no LLM in current build; CoVe-style audit is a planned follow-up).</p>
-            <p><strong>What.</strong> Re-derives the verdict label from <code class="inline-code">consolidated_findings</code> + <code class="inline-code">source_quality_table</code> via the structural rule and confirms it matches the declared label. Confirms every URL in the rendered justification is in the source-quality table. Forbids the central proposition appearing in more than one bucket.</p>
-            <p><strong>On failure.</strong> Verdict forced to <code class="inline-code">NotEnoughEvidence</code>; NEI-shaped payload swaps in.</p>
+            <p>Pure-Python audit re-derives the verdict and validates every cited URL is in the source-quality table. CoVe-style Claude audit is a planned follow-up.</p>
+            <ul class="task-list">
+              <li><span class="chip">checks</span> verdict consistency · URL containment · one-bucket rule</li>
+              <li><span class="chip chip-blocked">on fail</span> forces <code class="inline-code">NotEnoughEvidence</code>; NEI-shaped payload swapped in</li>
+            </ul>
             <p class="meta">&lt; 50 ms</p>
           </div>
 
@@ -310,20 +345,26 @@
               <h3>Stage 6 — Freeze</h3>
               <span class="chip chip-info">data plumbing</span>
             </div>
-            <p><strong>Service.</strong> Local JSON + Azure Tables (events row).</p>
-            <p><strong>What.</strong> Serializes the complete <code class="inline-code">FrozenVerdict</code> Pydantic object to disk under <code class="inline-code">data/freezes/&lt;invocation_id&gt;.json</code>. Deep-immutable: every nested model carries <code class="inline-code">frozen=True</code> and every collection is a tuple — list .append, nested attr writes, and list-item attr writes all raise.</p>
-            <p><strong>Pins.</strong> Claude version, VLM version, search provider, source-reliability snapshot dates, pipeline git SHA.</p>
-            <p class="meta">~ 100 ms</p>
+            <p>Serializes the complete <code class="inline-code">FrozenVerdict</code> Pydantic tree to disk + an event row in Tables. Deep-immutable: nested models are <code class="inline-code">frozen=True</code> and every collection is a tuple.</p>
+            <ul class="task-list">
+              <li><span class="chip">disk</span> <code class="inline-code">data/freezes/&lt;invocation_id&gt;.json</code></li>
+              <li><span class="chip">tables</span> <code class="inline-code">MentionEvents</code> row</li>
+              <li><span class="chip">pins</span> Claude version · VLM version · source-list snapshot dates · git SHA</li>
+            </ul>
+            <p class="meta">~100 ms</p>
           </div>
 
           <div class="panel">
             <div class="panel-head">
-              <h3>Stage 7 — Tone renderer</h3>
+              <h3>Stage 7 — Render</h3>
               <span class="chip chip-active">Claude reasoning</span>
             </div>
-            <p><strong>Service.</strong> Claude Sonnet 4.6 — non-thinking, one of three system prompts per condition (<code class="inline-code">agreeable</code> / <code class="inline-code">neutral</code> / <code class="inline-code">agonistic</code>).</p>
-            <p><strong>Invariance gate.</strong> Renderer receives only <code class="inline-code">RendererView</code> — <code class="inline-code">presentation_payload</code> + <code class="inline-code">tone_neutral_justification</code>. Reasoning fields are unreachable by contract. After rendering, a runtime check rejects any reply that introduces URLs outside <code class="inline-code">primary_sources_to_cite</code> or exceeds the X 280 char limit.</p>
-            <p><strong>Hard constraints.</strong> Verbatim proper nouns (no "a satirical site" when the source said "World News Daily Report"). At least one cited URL. Retry-with-feedback on invariance failure.</p>
+            <p>Claude renders one reply in the requested tone. The renderer sees ONLY <code class="inline-code">RendererView</code> (presentation_payload + tone_neutral_justification + state) — reasoning fields are unreachable by contract.</p>
+            <ul class="task-list">
+              <li><span class="chip">tones</span> agreeable · neutral · agonistic — three independent prompts, no cross-references</li>
+              <li><span class="chip">invariance</span> verbatim proper nouns · ≥1 cited URL (in verified state) · ≤256 X-weighted chars</li>
+              <li><span class="chip chip-warning">refusal</span> retry once with harm-reduction nudge; else raise → <code class="inline-code">pipeline_error</code></li>
+            </ul>
             <p class="meta">~5–10 s · 1–2 retries on overflow</p>
           </div>
 
@@ -332,21 +373,26 @@
               <h3>Stage 8 — X poster</h3>
               <span class="chip chip-info">data plumbing</span>
             </div>
-            <p><strong>Service.</strong> X API v2 — posts.create (OAuth 1.0a, single bot identity).</p>
-            <p><strong>What.</strong> Posts the rendered reply as a reply-to the original mention from <code class="inline-code">@eddiexbot</code>. Refuses if X-weighted length &gt; 280. Returns the new tweet ID for outcome tracking.</p>
-            <p><strong>Daily cap.</strong> X Basic = 100 tweets / day total. Per-tone counter caps with <code class="inline-code">DERAD_MAX_MENTIONS_PER_DAY=500</code> (soft).</p>
-            <p><strong>Dry run.</strong> <code class="inline-code">DERAD_DRY_RUN=true</code> logs the would-be reply without posting.</p>
+            <p>Posts the rendered reply as a reply-to the original mention. The bot's <code class="inline-code">/info</code> URL is appended after the rendered text.</p>
+            <ul class="task-list">
+              <li><span class="chip">service</span> X API v2 posts.create · OAuth 1.0a</li>
+              <li><span class="chip chip-warning">cap</span> 100 tweets / day (X Basic) · 500 soft per-tone (<code class="inline-code">DERAD_MAX_MENTIONS_PER_DAY</code>)</li>
+              <li><span class="chip chip-info">dry run</span> <code class="inline-code">DERAD_DRY_RUN=true</code> logs but doesn't post</li>
+            </ul>
             <p class="meta">~1–2 s</p>
           </div>
 
           <div class="panel">
             <div class="panel-head">
-              <h3>Stage 9 — Outcome tracker</h3>
+              <h3>Stage 9 — Outcome</h3>
               <span class="chip chip-info">data plumbing</span>
             </div>
-            <p><strong>Service.</strong> Azure Tables (MentionEvents, MentionDrops, EngagementSnapshots, BotReplyReplies) + a Container Apps cron job (<code class="inline-code">poll-engagement</code>).</p>
-            <p><strong>What.</strong> Each accepted mention writes one event row with outcome (<code class="inline-code">replied</code> / <code class="inline-code">empty_reply</code> / <code class="inline-code">pipeline_error</code> / <code class="inline-code">parent_fetch_failed</code> / <code class="inline-code">dry_run</code> / <code class="inline-code">pipeline_queue_timeout</code>). Engagement snapshots polled hourly from the cron job.</p>
-            <p><strong>Outcome variables.</strong> likes, retweets, replies, quote tweets, target-user subsequent sharing quality (Mosleh downstream-quality outcome), participant survey rows.</p>
+            <p>Each accepted mention writes one event row. Engagement on each bot reply is polled hourly by a Container Apps cron job.</p>
+            <ul class="task-list">
+              <li><span class="chip">outcomes</span> replied · empty_reply · pipeline_error · parent_fetch_failed · dry_run · pipeline_queue_timeout</li>
+              <li><span class="chip">variables</span> likes · RTs · replies · QTs · target-user downstream sharing-quality (Mosleh)</li>
+              <li><span class="chip">tables</span> MentionEvents · MentionDrops · EngagementSnapshots · BotReplyReplies</li>
+            </ul>
           </div>
 
         </div>
