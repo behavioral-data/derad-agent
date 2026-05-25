@@ -19,6 +19,7 @@ from .audit import audit
 from .freeze import freeze_to_disk
 from .multimodal import ImageEvidence, extract_image
 from .reconcile import reconcile
+from .verify import iterative_verify
 from .schema import (
     AttachedImage,
     BackendVersion,
@@ -56,19 +57,6 @@ def _git_sha() -> str:
         return result.stdout.strip() if result.returncode == 0 else "unknown"
     except OSError:
         return "unknown"
-
-
-def _build_evidence(query: str, hits) -> list[Evidence]:
-    """Stage 4 (thin): one auto-question per claim; each hit becomes one Evidence."""
-    return [
-        Evidence(
-            question=f"Is the claim true? — {query}",
-            source_url=hit.url,
-            snippet=hit.snippet,
-            stance="neutral",
-        )
-        for hit in hits
-    ]
 
 
 def _nei_verdict(reason: str) -> tuple[ConsolidatedFindings, PresentationPayload, str]:
@@ -160,15 +148,31 @@ def run_pipeline(
         image_evidence = _run_multimodal(image_urls, backend)
         _log.info("run_pipeline[%s]: Stage 1.5 complete (%d evidence)", invocation_id, len(image_evidence))
 
-    _log.info("run_pipeline[%s]: Stage 4 — text search", invocation_id)
-    hits = backend.search(claim_text, top_k=5)
-    _log.info("run_pipeline[%s]: Stage 4 done (%d hits)", invocation_id, len(hits))
-    text_evidence = _build_evidence(claim_text, hits)
+    _log.info("run_pipeline[%s]: Stage 4 — iterative verification (Papelo-style)", invocation_id)
+    image_summaries = (
+        [
+            {
+                "image_url": img.image_url,
+                "ocr_text": img.ocr_text,
+                "description": img.description,
+            }
+            for img in image_evidence
+        ]
+        if image_evidence
+        else None
+    )
+    text_evidence = iterative_verify(
+        claim_text=claim_text,
+        backend=backend,
+        tweet_context=tweet_context,
+        image_summaries=image_summaries,
+    )
+    _log.info("run_pipeline[%s]: Stage 4 done (%d evidence records)", invocation_id, len(text_evidence))
 
     # Roll image-provenance hits into the source-quality table too — Claude is
     # told to cite from `source_quality_table` only, and image-derived URLs are
     # legitimate evidence sources.
-    all_urls = [h.url for h in hits]
+    all_urls = [e.source_url for e in text_evidence]
     for img in image_evidence:
         all_urls.extend(h.url for h in img.provenance_hits)
     quality_table = build_quality_table(all_urls)
