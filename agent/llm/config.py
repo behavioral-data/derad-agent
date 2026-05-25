@@ -50,12 +50,13 @@ _CLAUDE_THINKING_BUDGETS: dict[str, int] = {
 }
 
 
-@functools.lru_cache(maxsize=16)
+@functools.lru_cache(maxsize=32)
 def get_llm(
     temperature: float = None,
     max_tokens: int = 2048,
     reasoning_effort: str = None,
     deployment: str = None,
+    timeout: float = 120.0,
 ):
     """Get a Claude chat model via Azure AI Services (cached per arg combo).
 
@@ -65,6 +66,10 @@ def get_llm(
     to ``max_tokens + budget_tokens`` because thinking tokens count against
     the same limit (Anthropic requires ``budget_tokens < max_tokens``).
 
+    ``timeout`` is the per-request HTTP wall-clock cap. Default 120s matches
+    the pre-per-stage-timeout behavior; pipeline stages override to tighter
+    values (e.g. 30s for extract, 90s for reconcile).
+
     Extended thinking is incompatible with ``temperature != 1``; if a caller
     sets one anyway we drop it rather than failing the request.
     """
@@ -72,15 +77,11 @@ def get_llm(
     claude_endpoint = _require_env("AZURE_CLAUDE_ENDPOINT")
     model_name = deployment or os.getenv("AZURE_CLAUDE_DEPLOYMENT_CHAT", "claude-sonnet-4-6")
 
-    # Cap per-request wall time. The Anthropic Python SDK default is 600s,
-    # which is unsuitable for a real-time bot — a single hung call would
-    # stall the pipeline (and the singleton-locked event store) far longer
-    # than the gunicorn graceful-timeout window.
     config: dict = {
         "model_name": model_name,
         "anthropic_api_url": claude_endpoint,
         "api_key": _require_env("AZURE_CLAUDE_API_KEY"),
-        "timeout": 120,
+        "timeout": timeout,
         "max_retries": 1,
     }
 

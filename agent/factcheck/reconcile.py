@@ -154,6 +154,7 @@ def reconcile(
             system=_SYSTEM_PROMPT,
             reasoning_effort="medium",
             max_tokens=4096,
+            timeout=90.0,
         )
     except (ValueError, TimeoutError) as exc:
         # Refusal/parse failure or stage timeout. Degrade to a "could not

@@ -192,7 +192,7 @@ def _vlm_extract(image_bytes: bytes, media_type: str) -> MultimodalExtraction:
         },
     ]
 
-    llm = get_llm(reasoning_effort="low", max_tokens=2048)
+    llm = get_llm(reasoning_effort="low", max_tokens=2048, timeout=60.0)
     response = llm.invoke(
         [
             {"role": "system", "content": system},

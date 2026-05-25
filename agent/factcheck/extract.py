@@ -127,6 +127,7 @@ def extract_claims(
             system=_SYSTEM_PROMPT,
             reasoning_effort="low",
             max_tokens=2048,
+            timeout=45.0,
         )
     except (ValueError, TimeoutError) as exc:
         # Parse/schema failure or wall-clock timeout — degrade to fallback so

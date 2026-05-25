@@ -254,9 +254,10 @@ def _classify_via_model_batch(domains: list[str]) -> dict[str, tuple[SourceTier,
             system=_MODEL_PRIOR_SYSTEM,
             reasoning_effort="low",
             max_tokens=2048,
+            timeout=30.0,
         )
-    except Exception:
-        logger.exception("Model-prior classification call failed; %d domains stay unknown.", len(fresh))
+    except (ValueError, TimeoutError):
+        logger.warning("Model-prior classification failed; %d domains stay unknown.", len(fresh), exc_info=True)
         return {}
 
     result: dict[str, tuple[SourceTier, str]] = {}

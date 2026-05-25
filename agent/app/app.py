@@ -74,6 +74,10 @@ PIPELINE_MAX_CONCURRENT = int(os.getenv("DERAD_PIPELINE_MAX_CONCURRENT", "5"))
 PIPELINE_QUEUE_TIMEOUT_S = float(os.getenv("DERAD_PIPELINE_QUEUE_TIMEOUT_S", "600"))
 _PIPELINE_SEMAPHORE = threading.BoundedSemaphore(PIPELINE_MAX_CONCURRENT)
 
+# Hard cap on the finalize-persist write so a degraded Tables backend can't
+# hold a pipeline-semaphore slot forever.
+_FINALIZE_TIMEOUT_S = float(os.getenv("DERAD_FINALIZE_TIMEOUT_S", "15"))
+
 # Participant metadata loaded lazily via _lookup_participant's write-through
 # cache (lines below). No eager preload — every gunicorn worker would
 # otherwise repeat the same Tables scan at fork.
@@ -477,7 +481,19 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         if exc is not None:
             ev.error_class = type(exc).__name__
             ev.error_detail = str(exc)[:1000]
-        log_mention_event(ev)
+        # If Tables is degraded the write can stall indefinitely and hold the
+        # pipeline-semaphore slot until PIPELINE_QUEUE_TIMEOUT_S (~10 min).
+        # Run the persist on a daemon thread and bail after _FINALIZE_TIMEOUT_S.
+        t = threading.Thread(
+            target=log_mention_event, args=(ev,), daemon=True, name="finalize-persist",
+        )
+        t.start()
+        t.join(timeout=_FINALIZE_TIMEOUT_S)
+        if t.is_alive():
+            logger.warning(
+                "log_mention_event stalled for mention %s; abandoning persist (Tables degraded?)",
+                ev.mention_id,
+            )
         metrics.replies_posted.add(1, {"tone": tone, "outcome": outcome})
         metrics.pipeline_latency_ms.record(ev.pipeline_ms, {"tone": tone, "outcome": outcome})
 

@@ -254,6 +254,7 @@ def render(view: RendererView, tone: Tone, *, max_invariance_retries: int = 2) -
                 system=_TONE_SYSTEMS[tone],
                 reasoning_effort=None,
                 max_tokens=512,
+                timeout=30.0,
             )
         except ValueError as exc:
             # Most likely a refusal that broke JSON parsing — break to pass 2.
@@ -276,6 +277,7 @@ def render(view: RendererView, tone: Tone, *, max_invariance_retries: int = 2) -
             system=_TONE_SYSTEMS[tone],
             reasoning_effort=None,
             max_tokens=512,
+            timeout=30.0,
         )
         text = reply.text.strip()
         _enforce_invariance(text, view, state)

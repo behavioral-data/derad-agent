@@ -49,8 +49,13 @@ def call_claude_json(
     system: str = "",
     reasoning_effort: str | None = "medium",
     max_tokens: int = 4096,
+    timeout: float = 120.0,
 ) -> T:
     """Call Claude expecting a JSON object that parses into `schema`.
+
+    `timeout` is the per-request HTTP wall-clock cap. Stages override to
+    appropriate values (extract ~30s, reconcile ~90s) so one slow call
+    can't burn an entire pipeline-semaphore slot for the full 120s.
 
     Raises ValueError on parse/validation failure — callers should treat that
     as an audit failure (Stage 5 forces NEI on any structural problem).
@@ -63,7 +68,7 @@ def call_claude_json(
         + f"Schema:\n```json\n{schema_json}\n```"
     )
 
-    llm = get_llm(reasoning_effort=reasoning_effort, max_tokens=max_tokens)
+    llm = get_llm(reasoning_effort=reasoning_effort, max_tokens=max_tokens, timeout=timeout)
     response = llm.invoke(
         [
             {"role": "system", "content": full_system},

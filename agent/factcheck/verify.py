@@ -121,6 +121,7 @@ def _decide_next(
             system=_DECISION_SYSTEM,
             reasoning_effort="low",
             max_tokens=1024,
+            timeout=30.0,
         )
     except (ValueError, TimeoutError):
         # Parse/schema failure or wall-clock timeout. Caller distinguishes
