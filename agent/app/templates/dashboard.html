@@ -160,6 +160,23 @@
     .bot-chip.tone-neutral   { color: #4fc1ff; border-color: #4fc1ff; }
     .bot-chip.tone-satirical { color: #e85040; border-color: #e85040; }
     .bot-chip.tone-unknown   { color: var(--gray-500); border-color: var(--gray-500); }
+
+    /* ── Copy button ── */
+    .copy-btn {
+      font-size: 10px; font-family: var(--mono); cursor: pointer;
+      background: transparent; border: 1px solid #333;
+      color: var(--gray-500); padding: 1px 6px; margin-left: 8px;
+      vertical-align: middle;
+    }
+    .copy-btn:hover { border-color: var(--clay); color: var(--clay); }
+    .copy-btn.copied { border-color: #6fe080; color: #6fe080; }
+
+    /* ── Sortable headers ── */
+    th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+    th.sortable:hover { color: var(--clay); }
+    th.sortable .sort-arrow { margin-left: 4px; opacity: 0.35; font-size: 10px; }
+    th.sortable.sort-asc  .sort-arrow,
+    th.sortable.sort-desc .sort-arrow { opacity: 1; color: var(--clay); }
   </style>
 </head>
 <body>
@@ -291,16 +308,22 @@
         <h2>Bot Replies by User · by Day</h2>
         <p>Every successful bot reply, grouped by UTC date, newest first. Each row links to the live tweet on X. Showing up to 200 most recent.</p>
       </div>
+      <div style="margin-bottom:12px;">
+        <input type="text" id="bot-search" placeholder="Search username…"
+          style="background:transparent;border:1px solid #333;color:var(--gray-700);
+                 font-family:var(--mono);font-size:12px;padding:6px 10px;outline:none;width:220px;"
+          oninput="onBotSearch(this.value)">
+      </div>
       <div class="table-wrap">
         <table class="data-table" id="bot-replies-table">
           <thead>
             <tr>
-              <th>Time (UTC)</th>
-              <th>User</th>
-              <th>Bot</th>
-              <th>Study Day</th>
-              <th>Code</th>
-              <th>Reply text</th>
+              <th class="sortable" data-col="time">Time (UTC)<span class="sort-arrow">↕</span></th>
+              <th class="sortable" data-col="user">User<span class="sort-arrow">↕</span></th>
+              <th class="sortable" data-col="bot">Bot<span class="sort-arrow">↕</span></th>
+              <th class="sortable" data-col="day">Study Day<span class="sort-arrow">↕</span></th>
+              <th class="sortable" data-col="code">Code<span class="sort-arrow">↕</span></th>
+              <th class="sortable" data-col="text">Reply text<span class="sort-arrow">↕</span></th>
               <th>Link</th>
             </tr>
           </thead>
@@ -620,6 +643,58 @@
     return (iso || '').slice(11, 19) || '—';
   }
 
+  let botRepliesData = [];
+  let botSort = { col: null, dir: 'asc' };
+  let botSearchQuery = '';
+
+  function onBotSearch(val) {
+    botSearchQuery = val.trim().toLowerCase().replace(/^@/, '');
+    renderBotReplies(botRepliesData);
+  }
+
+  const BOT_SORT_KEY = {
+    time: r => r.received_at_utc || '',
+    user: r => (r.author_username || r.author_id || '').toLowerCase(),
+    bot:  r => (r.bot_handle || r.tone || '').toLowerCase(),
+    day:  r => String(r.study_day ?? ''),
+    code: r => (r.study_code || '').toLowerCase(),
+    text: r => (r.reply_text || '').toLowerCase(),
+  };
+
+  function updateBotSortHeaders() {
+    document.querySelectorAll('#bot-replies-table th.sortable').forEach(th => {
+      th.classList.remove('sort-asc', 'sort-desc');
+      const arrow = th.querySelector('.sort-arrow');
+      if (th.dataset.col === botSort.col) {
+        th.classList.add(botSort.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+        arrow.textContent = botSort.dir === 'asc' ? '↑' : '↓';
+      } else {
+        arrow.textContent = '↕';
+      }
+    });
+  }
+
+  function copyText(text, btn) {
+    const label = btn.dataset.label || 'copy';
+    function onSuccess() {
+      btn.textContent = 'copied!';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = label; btn.classList.remove('copied'); }, 1500);
+    }
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(onSuccess);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      onSuccess();
+    }
+  }
+
   function renderBotReplies(rows) {
     const tbody = document.getElementById('bot-replies-tbody');
     if (!rows.length) {
@@ -627,50 +702,95 @@
       return;
     }
 
-    // Group by date for the day-header rows; keep rows ordered within the day.
-    const byDay = new Map();
-    for (const r of rows) {
-      const d = fmtDay(r.received_at_utc);
-      if (!byDay.has(d)) byDay.set(d, []);
-      byDay.get(d).push(r);
+    const filtered = botSearchQuery
+      ? rows.filter(r => (r.author_username || r.author_id || '').toLowerCase().includes(botSearchQuery))
+      : rows;
+
+    const sorted = botSort.col ? [...filtered].sort((a, b) => {
+      const ka = BOT_SORT_KEY[botSort.col](a);
+      const kb = BOT_SORT_KEY[botSort.col](b);
+      const cmp = ka < kb ? -1 : ka > kb ? 1 : 0;
+      return botSort.dir === 'asc' ? cmp : -cmp;
+    }) : filtered;
+
+    function rowHtml(r) {
+      const user = r.author_username ? `@${esc(r.author_username)}` : esc(r.author_id || '—');
+      const tone = (r.tone || 'unknown').toLowerCase();
+      const knownTone = ['agreeable', 'neutral', 'satirical'].includes(tone) ? tone : 'unknown';
+      const botLabel = r.bot_handle ? `@${esc(r.bot_handle)}` : esc(tone || '?');
+      const code = r.study_code ? `<code class="inline-code">${esc(r.study_code)}</code>` : '—';
+      const singleLine = r.reply_url && r.study_code
+        ? `${r.reply_url} (${r.study_code})` : (r.reply_url || '');
+      const link = r.reply_url
+        ? `<a class="reply-link" href="${esc(r.reply_url)}" target="_blank" rel="noopener noreferrer">→ tweet</a>
+           <button class="copy-btn" data-copy="${esc(singleLine)}">copy</button>`
+        : '<span class="reply-link disabled">—</span>';
+      return `<tr>
+        <td style="white-space:nowrap;">${esc(fmtClock(r.received_at_utc))}</td>
+        <td>${user}</td>
+        <td><span class="bot-chip tone-${knownTone}">${botLabel}</span></td>
+        <td>${esc(r.study_day)}</td>
+        <td>${code}</td>
+        <td class="reply-text-cell" title="${esc(r.reply_text)}">${esc(r.reply_text)}</td>
+        <td style="white-space:nowrap;">${link}</td>
+      </tr>`;
+    }
+
+    function dayListText(items) {
+      return items
+        .filter(r => r.reply_url)
+        .map(r => r.study_code ? `${r.reply_url} (${r.study_code})` : r.reply_url)
+        .join('\n');
     }
 
     let html = '';
-    for (const [day, items] of byDay) {
-      const count = items.length;
-      html += `<tr class="day-header">
-        <td colspan="7">${esc(day)}<span class="day-count">${count} ${count === 1 ? 'reply' : 'replies'}</span></td>
-      </tr>`;
-      for (const r of items) {
-        const user = r.author_username ? `@${esc(r.author_username)}` : esc(r.author_id || '—');
-        const tone = (r.tone || 'unknown').toLowerCase();
-        const knownTone = ['agreeable', 'neutral', 'satirical'].includes(tone) ? tone : 'unknown';
-        const botLabel = r.bot_handle ? `@${esc(r.bot_handle)}` : esc(tone || '?');
-        const code = r.study_code
-          ? `<code class="inline-code">${esc(r.study_code)}</code>` : '—';
-        const link = r.reply_url
-          ? `<a class="reply-link" href="${esc(r.reply_url)}" target="_blank" rel="noopener noreferrer">→ tweet</a>`
-          : '<span class="reply-link disabled">—</span>';
-        html += `<tr>
-          <td style="white-space:nowrap;">${esc(fmtClock(r.received_at_utc))}</td>
-          <td>${user}</td>
-          <td><span class="bot-chip tone-${knownTone}">${botLabel}</span></td>
-          <td>${esc(r.study_day)}</td>
-          <td>${code}</td>
-          <td class="reply-text-cell" title="${esc(r.reply_text)}">${esc(r.reply_text)}</td>
-          <td>${link}</td>
-        </tr>`;
+    if (!botSort.col || botSort.col === 'time') {
+      // Group by date
+      const byDay = new Map();
+      for (const r of sorted) {
+        const d = fmtDay(r.received_at_utc);
+        if (!byDay.has(d)) byDay.set(d, []);
+        byDay.get(d).push(r);
       }
+      for (const [day, items] of byDay) {
+        const count = items.length;
+        html += `<tr class="day-header">
+          <td colspan="7">${esc(day)}<span class="day-count">${count} ${count === 1 ? 'reply' : 'replies'}</span>
+          <button class="copy-btn" data-copy="${esc(dayListText(items))}" data-label="copy list">copy list</button></td>
+        </tr>`;
+        for (const r of items) html += rowHtml(r);
+      }
+    } else {
+      for (const r of sorted) html += rowHtml(r);
     }
+
     tbody.innerHTML = html;
   }
 
   function fetchBotReplies() {
     fetch('/api/replies?limit=200')
       .then(r => r.json())
-      .then(data => renderBotReplies(data.replies || []))
+      .then(data => {
+        botRepliesData = data.replies || [];
+        renderBotReplies(botRepliesData);
+      })
       .catch(e => console.error('bot replies fetch failed', e));
   }
+
+  document.querySelectorAll('#bot-replies-table th.sortable').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.col;
+      botSort.dir = (botSort.col === col && botSort.dir === 'asc') ? 'desc' : 'asc';
+      botSort.col = col;
+      updateBotSortHeaders();
+      renderBotReplies(botRepliesData);
+    });
+  });
+
+  document.getElementById('bot-replies-tbody').addEventListener('click', e => {
+    const btn = e.target.closest('.copy-btn');
+    if (btn && btn.dataset.copy !== undefined) copyText(btn.dataset.copy, btn);
+  });
 
   fetchBotReplies();
   setInterval(fetchBotReplies, 10000);
