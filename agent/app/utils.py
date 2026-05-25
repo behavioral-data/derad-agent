@@ -23,6 +23,18 @@ class TweetSnapshot:
     # Image URLs attached to the tweet (photos only; videos/GIFs skipped).
     # X API populates url for photos and preview_image_url for video/animated_gif.
     image_urls: list = None  # type: ignore[assignment]
+    # Fact-checking context fields (added in v3.x). All optional; missing
+    # fields fall back to None when the X API doesn't return them.
+    created_at: Optional[str] = None
+    lang: Optional[str] = None
+    possibly_sensitive: Optional[bool] = None
+    expanded_urls: list = None  # type: ignore[assignment]  # list[{display_url, expanded_url, title}]
+    referenced_tweets: list = None  # type: ignore[assignment]  # list[{type, id}]
+    author_verified: Optional[bool] = None
+    author_verified_type: Optional[str] = None
+    author_description: Optional[str] = None
+    author_created_at: Optional[str] = None
+    author_followers_count: Optional[int] = None
 
 
 def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
@@ -37,9 +49,16 @@ def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
     try:
         response = get_x_client().posts.get_by_id(
             id=str(tweet_id),
-            tweet_fields=["text", "author_id", "public_metrics", "attachments"],
+            tweet_fields=[
+                "text", "author_id", "public_metrics", "attachments",
+                "created_at", "lang", "possibly_sensitive", "entities",
+                "referenced_tweets",
+            ],
             expansions=["author_id", "attachments.media_keys"],
-            user_fields=["username"],
+            user_fields=[
+                "username", "verified", "verified_type", "description",
+                "created_at", "public_metrics",
+            ],
             media_fields=["url", "preview_image_url", "type"],
         )
     except requests.HTTPError as exc:
@@ -58,12 +77,24 @@ def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
     if not isinstance(public_metrics, dict):
         public_metrics = {}
     author_username: Optional[str] = None
+    author_verified: Optional[bool] = None
+    author_verified_type: Optional[str] = None
+    author_description: Optional[str] = None
+    author_created_at: Optional[str] = None
+    author_followers_count: Optional[int] = None
     includes = getattr(response, "includes", None) or {}
     users = includes.get("users") if isinstance(includes, dict) else None
     if users and author_id:
         for user in users:
             if isinstance(user, dict) and str(user.get("id")) == str(author_id):
                 author_username = user.get("username")
+                author_verified = user.get("verified")
+                author_verified_type = user.get("verified_type")
+                author_description = user.get("description")
+                author_created_at = user.get("created_at")
+                user_metrics = user.get("public_metrics") or {}
+                if isinstance(user_metrics, dict):
+                    author_followers_count = user_metrics.get("followers_count")
                 break
 
     image_urls: list[str] = []
@@ -78,6 +109,27 @@ def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
             if mu:
                 image_urls.append(mu)
 
+    # Expanded URLs from entities.urls — `t.co/xyz` resolves to the real link
+    # plus its page title. Lets the fact-checker see where short links go.
+    expanded_urls: list[dict] = []
+    entities = data.get("entities") if isinstance(data, dict) else None
+    if isinstance(entities, dict):
+        for u in (entities.get("urls") or []):
+            if not isinstance(u, dict):
+                continue
+            entry = {
+                "display_url": u.get("display_url"),
+                "expanded_url": u.get("expanded_url") or u.get("unwound_url"),
+                "title": u.get("title"),
+            }
+            if entry["expanded_url"]:
+                expanded_urls.append(entry)
+
+    referenced_tweets: list[dict] = []
+    for ref in (data.get("referenced_tweets") or []):
+        if isinstance(ref, dict) and ref.get("type") and ref.get("id"):
+            referenced_tweets.append({"type": ref["type"], "id": str(ref["id"])})
+
     return TweetSnapshot(
         text=text,
         author_id=str(author_id) if author_id is not None else None,
@@ -87,6 +139,16 @@ def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
         reply_count=public_metrics.get("reply_count"),
         quote_count=public_metrics.get("quote_count"),
         image_urls=image_urls,
+        created_at=data.get("created_at") if isinstance(data, dict) else None,
+        lang=data.get("lang") if isinstance(data, dict) else None,
+        possibly_sensitive=data.get("possibly_sensitive") if isinstance(data, dict) else None,
+        expanded_urls=expanded_urls,
+        referenced_tweets=referenced_tweets,
+        author_verified=author_verified,
+        author_verified_type=author_verified_type,
+        author_description=author_description,
+        author_created_at=author_created_at,
+        author_followers_count=author_followers_count,
     )
 
 
@@ -97,10 +159,17 @@ _APP_TO_FACTCHECK_TONE = {
 }
 
 
-def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5, image_urls=None):
+def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5,
+                   image_urls=None, tweet_context=None):
     """Run the fact-check pipeline and render a reply in the requested tone.
 
     `image_urls`, when provided, triggers Stage 1.5 multimodal extraction.
+    `tweet_context`, when provided, is a dict of supporting metadata pulled
+    from the parent tweet (posted_at, author handle/bio/verified/age, expanded
+    t.co URLs, referenced-tweet relations, language, sensitive flag, public
+    metrics). The reconcile stage uses it to spot parody/aggregator accounts
+    and to date-stamp the claim.
+
     Returns the dict shape the X app expects. Community-notes-specific fields
     (`tweets`, `notes`, `all_cited_*`, `reasons_detail`) are empty by design —
     they have no analog in the web-evidence pipeline. The /info page falls
@@ -122,6 +191,7 @@ def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5, image_
             statement,
             target_tweet_id=target_tweet_id,
             image_urls=list(image_urls) if image_urls else None,
+            tweet_context=tweet_context or None,
         )
     except Exception:
         logger.exception("Fact-check pipeline failed for statement head=%r", statement[:80])

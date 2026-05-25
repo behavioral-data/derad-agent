@@ -3,6 +3,11 @@
 1. double tweets. 
 2. check for other tones
 
+- Pagination for dashboard tables
+- make tables that aahan and trisha need a bit more user friendly
+- the asnwer should be to the question of 'is this true?' during invocation etc
+- how are we handling videos?
+
 ## Research Question
 
 How does the tone of an AI fact-check affect (1) engagement with the fact-check and (2) affective polarization in those exposed to the fact-check?

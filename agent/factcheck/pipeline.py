@@ -127,6 +127,7 @@ def run_pipeline(
     backend: Optional[SearchBackend] = None,
     target_tweet_id: str = "",
     image_urls: Optional[list[str]] = None,
+    tweet_context: Optional[dict] = None,
     freeze_root: Optional[Path] = None,
 ) -> FrozenVerdict:
     """Run the pipeline end-to-end. Returns the frozen verdict.
@@ -135,15 +136,22 @@ def run_pipeline(
     description (Claude VLM) + a Bing-grounded provenance approximation
     search. The results feed Lens 2 / Lens 3 reasoning inside the
     Stage 4.5 reconciliation call.
+
+    `tweet_context` carries fact-checking-relevant metadata pulled from the
+    parent tweet (author handle/bio/verified/account-age, posted-at, expanded
+    t.co URLs, referenced-tweet relations, language, sensitive flag, public
+    metrics). Reconcile uses it to spot parody/aggregator accounts and to
+    date-stamp the claim.
     """
     backend = backend or build_default_backend()
     invocation_id = str(uuid.uuid4())
     invocation_time = datetime.now(timezone.utc)
     image_urls = image_urls or []
     modality: Modality = "mixed" if image_urls and claim_text.strip() else ("image" if image_urls else "text")
+    author_log = (tweet_context or {}).get("author_username") or "?"
     _log.info(
-        "run_pipeline[%s]: starting (modality=%s, claim_chars=%d, images=%d)",
-        invocation_id, modality, len(claim_text), len(image_urls),
+        "run_pipeline[%s]: starting (modality=%s, claim_chars=%d, images=%d, author=@%s)",
+        invocation_id, modality, len(claim_text), len(image_urls), author_log,
     )
 
     image_evidence: list[ImageEvidence] = []
@@ -176,6 +184,7 @@ def run_pipeline(
             evidence=text_evidence,
             source_quality_table=quality_table,
             image_evidence=image_evidence or None,
+            tweet_context=tweet_context,
         )
         _log.info("run_pipeline[%s]: Stage 4.5 done", invocation_id)
         text_evidence = [

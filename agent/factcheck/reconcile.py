@@ -40,7 +40,18 @@ class ReconciliationOutput(BaseModel):
 
 _SYSTEM_PROMPT = """You are the Evidence Reconciliation stage of a fact-checking pipeline.
 
-You receive (a) the central claim text, (b) an ordered list of text evidence snippets each tagged with a source URL, (c) the source-quality table classifying each URL by tier, and (d) when the claim is image-bearing, per-image evidence (OCR'd text inside the image, a neutral visual description, and Bing-grounded search hits about the image's subject).
+You receive (a) the central claim text, (b) `tweet_context` — metadata about the parent tweet (author handle/bio/verified/account-age, posted-at, expanded t.co URLs, referenced-tweet relations, etc.), (c) an ordered list of text evidence snippets each tagged with a source URL, (d) the source-quality table classifying each URL by tier, and (e) when the claim is image-bearing, per-image evidence (OCR'd text, visual description, and Bing-grounded provenance search hits).
+
+Use `tweet_context` actively. In particular:
+- **`author_username`** and **`author_description`** (bio): is the handle the actual person being quoted (e.g., @ElonMusk for an Elon Musk quote)? Then the claim is a primary statement and the question is whether it's authentic. Is the handle or bio a parody/satire/fan account (contains "parody", "satire", "fake", "fanpage", "joke", "not affiliated", "unofficial", etc.)? Then the content is not a real statement from the named person — surface that. Is the handle a third-party aggregator or news-style influencer? Then this is a RE-report ABOUT a public figure, and the question is whether what's being reported is true.
+- **`author_verified`** / **`author_verified_type`**: blue-check / business / government / none. Useful signal but NOT a guarantee of accuracy — verified accounts can still post false claims.
+- **`author_created_at`** + **`author_followers_count`**: very new account + tiny follower count + extraordinary claim = bot/spam pattern. Surface that if relevant.
+- **`posted_at`**: when the claim was made. For claims about "recent" or "breaking" events, mismatch between the tweet's posted_at and the actual event date is a giveaway that the tweet is recycling old content. If the evidence places the cited event years before the tweet's posted_at, the tweet is misframing the recency.
+- **`expanded_urls`**: any short `t.co` link in the claim resolves to a real URL here, with the page title. If the linked article exists and supports/contradicts the claim, treat the URL like any other evidence URL.
+- **`referenced_tweets`**: if `type=quoted`, the parent is quote-tweeting another tweet (we don't have its content, just the relation). If `type=retweeted` or `type=replied_to`, note the framing.
+- **`public_metrics`**: virality is not truth. Don't treat high engagement as evidence of accuracy.
+
+Use the source_quality_table for evidence-source classification; tweet_context informs how you interpret the CLAIM itself, not the evidence.
 
 Your job is to reconcile all the evidence and emit Lens 1 (text-text) findings. When image evidence is present, also reason about image-text alignment and cross-modal contradictions inline:
 
@@ -75,6 +86,7 @@ def reconcile(
     evidence: list[Evidence],
     source_quality_table: list[SourceQualityEntry],
     image_evidence: Optional[list[ImageEvidence]] = None,
+    tweet_context: Optional[dict] = None,
 ) -> ReconciliationOutput:
     """Run Stage 4.5; returns the structured output.
 
@@ -82,12 +94,23 @@ def reconcile(
     the same Claude call. Per-image OCR text, description, and provenance
     search hits are passed alongside the text evidence; Claude is
     instructed to reason about cross-modal alignment inline.
+
+    `tweet_context` carries the parent tweet's surrounding metadata —
+    author handle/bio/verified/account-age, posted-at, expanded t.co URLs,
+    referenced-tweet relations, language, sensitive flag, public metrics.
+    Reconcile uses it to interpret the claim (parody account, third-party
+    aggregator, primary statement, etc.) and to date-stamp recency claims.
     """
     payload: dict = {
         "central_claim": central_claim_text,
         "evidence": [e.model_dump() for e in evidence],
         "source_quality_table": [s.model_dump() for s in source_quality_table],
     }
+    if tweet_context:
+        # Drop None / empty values so the prompt doesn't get noise.
+        clean = {k: v for k, v in tweet_context.items() if v not in (None, "", [], {})}
+        if clean:
+            payload["tweet_context"] = clean
     if image_evidence:
         payload["image_evidence"] = [
             {
