@@ -4,6 +4,12 @@ Usage:
     python -m agent.factcheck "<claim text>"
     python -m agent.factcheck --tone agonistic "<claim text>"
     python -m agent.factcheck --image <url> "<claim text>"
+    python -m agent.factcheck --invoker "what's the context" "<claim text>"
+
+`--invoker` passes the text the invoker would have written alongside
+the bot handle in their mention tweet. The extractor parses it and
+chooses the action. With no `--invoker`, the action is inferred from
+the claim character.
 
 With no claim, runs the Rosa Camfield worked example from the design doc.
 """
@@ -43,16 +49,29 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         help="URL of an image to include (repeat for multiple). Triggers Stage 1.5.",
     )
+    parser.add_argument(
+        "--invoker",
+        default="",
+        help="Invoker instruction (the text the invoker would have written alongside @eddiexbot in their mention). Drives action selection.",
+    )
     args = parser.parse_args(argv)
 
     print(f"Claim: {args.claim}", file=sys.stderr)
+    if args.invoker:
+        print(f"Invoker: {args.invoker!r}", file=sys.stderr)
     if args.image:
         print(f"Images: {args.image}", file=sys.stderr)
     print("", file=sys.stderr)
 
-    frozen = run_pipeline(args.claim, image_urls=args.image or None)
+    frozen = run_pipeline(
+        args.claim,
+        image_urls=args.image or None,
+        invoker_instruction=args.invoker,
+    )
     print(
-        f"Verdict: {frozen.verdict_label}\n"
+        f"Action: {frozen.action} (source={frozen.action_source}, pivoted_from={frozen.pivoted_from})\n"
+        f"Action outcome: {frozen.action_outcome}\n"
+        f"Verdict (legacy): {frozen.verdict_label}\n"
         f"Frozen: data/freezes/{frozen.invocation_id}.json\n",
         file=sys.stderr,
     )

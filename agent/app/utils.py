@@ -162,16 +162,18 @@ _APP_TO_FACTCHECK_TONE = {
 
 
 def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5,
-                   image_urls=None, tweet_context=None):
+                   image_urls=None, tweet_context=None, invoker_instruction=""):
     """Run the fact-check pipeline and render a reply in the requested tone.
 
     `image_urls` triggers Stage 1.5 multimodal extraction.
     `tweet_context` is metadata from the parent tweet (posted_at, author
     handle/bio/verified/age, expanded t.co URLs, referenced-tweet relations,
-    language, sensitive flag, public metrics). Reconcile uses it to spot
-    parody/aggregator accounts and to date-stamp the claim.
+    language, sensitive flag, public metrics).
+    `invoker_instruction` is what the invoker wrote in the mention itself
+    after the bot handle was stripped. Empty when they only tagged. The
+    extractor uses it to choose the bot's action.
 
-    Returns `{text, sources, verdict_label, queries}`.
+    Returns `{text, sources, verdict_label, action, action_outcome, queries}`.
     """
     from agent.factcheck.freeze import view_for_renderer
     from agent.factcheck.pipeline import run_pipeline
@@ -193,6 +195,7 @@ def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5,
         target_tweet_id=target_tweet_id,
         image_urls=list(image_urls) if image_urls else None,
         tweet_context=tweet_context or None,
+        invoker_instruction=invoker_instruction or "",
     )
     text = render(view_for_renderer(frozen), factcheck_tone)
 
@@ -201,14 +204,17 @@ def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5,
     ][:max_sources] or None
 
     logger.info(
-        "Fact-check produced verdict=%s for invocation=%s tone=%s",
-        frozen.verdict_label, frozen.invocation_id, factcheck_tone,
+        "Fact-check produced action=%s outcome=%s verdict=%s for invocation=%s tone=%s",
+        frozen.action, frozen.action_outcome, frozen.verdict_label,
+        frozen.invocation_id, factcheck_tone,
     )
 
     return {
         "text": text,
         "sources": sources,
         "verdict_label": frozen.verdict_label,
+        "action": frozen.action,
+        "action_outcome": frozen.action_outcome,
         "queries": [statement],
     }
 

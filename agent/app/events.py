@@ -78,8 +78,17 @@ class MentionEvent:
     outcome: str = "replied"  # 'replied' | 'pipeline_error' | 'x_post_error' | 'parent_fetch_failed' | 'empty_reply'
     # 'factcheck' when the pipeline produced a structural verdict
     # (Supported/Refuted/Disputed), 'no_factcheck' when it landed on NEI.
-    # None when no reply was sent.
+    # None when no reply was sent. Legacy field — analytics should prefer
+    # `action` + `action_outcome` below.
     reply_type: Optional[str] = None
+    # New action-typed analytics (introduced with the multi-action pipeline).
+    # action ∈ {verify, provide_context, challenge_opinion, surface_perspectives, decline}
+    # action_outcome is the terminal ActionOutcome label.
+    action: Optional[str] = None
+    action_outcome: Optional[str] = None
+    # Raw text the invoker wrote in the mention (after stripping the bot
+    # handle). Empty string when invoker only tagged.
+    invoker_instruction_text: Optional[str] = None
     error_class: Optional[str] = None
     error_detail: Optional[str] = None
 
@@ -321,6 +330,9 @@ class TablesEventsStore:
             "pipeline_ms": ev.pipeline_ms,
             "outcome": ev.outcome,
             "reply_type": ev.reply_type,
+            "action": ev.action,
+            "action_outcome": ev.action_outcome,
+            "invoker_instruction_text": self._truncate(ev.invoker_instruction_text, cap=500),
             "error_class": ev.error_class,
             "error_detail": self._truncate(ev.error_detail, cap=1000),
             "study_code": ev.study_code,
@@ -428,6 +440,7 @@ class TablesEventsStore:
         "RowKey", "mention_id", "author_id", "author_username", "tone", "outcome",
         "received_at_utc", "pipeline_ms", "study_day", "study_code",
         "reply_text", "parent_text", "reply_id", "bot_author_id", "bot_handle",
+        "action", "action_outcome", "invoker_instruction_text",
     ]
     _DROP_SELECT = [
         "RowKey", "mention_id", "author_id", "tone", "drop_reason", "received_at_utc",

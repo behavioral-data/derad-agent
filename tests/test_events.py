@@ -177,6 +177,8 @@ class TestEventWiring:
             "text": "Here are the facts.",
             "sources": ["https://a.example"],
             "verdict_label": "Refuted",
+            "action": "verify",
+            "action_outcome": "verified_refuted",
             "queries": ["query1", "query2"],
         }
         ts = events_module.utcnow()
@@ -217,6 +219,7 @@ class TestEventWiring:
         ev = self._run_process(
             fetch_snap=snap,
             generate_reply_result={"text": "", "sources": None, "verdict_label": "NotEnoughEvidence",
+                                   "action": "verify", "action_outcome": "verified_nei",
                                    "queries": []},
             post_reply_returns=[],
             monkeypatch=monkeypatch,
@@ -230,6 +233,7 @@ class TestEventWiring:
         snap = TweetSnapshot(text="claim", author_id="999", author_username="u")
         gen = {
             "text": "the response", "sources": None, "verdict_label": "Supported",
+            "action": "verify", "action_outcome": "verified_supported",
             "queries": ["q"],
         }
         ev = self._run_process(

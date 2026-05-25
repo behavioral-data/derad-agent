@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from .audit import audit
+from .audit import audit, audit_fail_outcome_for
 from .context import PipelineContext
 from .extract import ExtractionOutput, central_claim, extract_claims
 from .freeze import freeze_to_disk
@@ -26,6 +26,9 @@ from .multimodal import ImageEvidence, extract_image
 from .reconcile import reconcile
 from .verify import iterative_verify
 from .schema import (
+    Action,
+    ActionOutcome,
+    ActionSource,
     AttachedImage,
     BackendVersion,
     Claim,
@@ -43,10 +46,11 @@ from .schema import (
     ProvenanceMatch,
     SourceQualityEntry,
     UnaddressedProposition,
+    Verdict,
 )
 from .search import SearchBackend, build_default_backend
 from .sources import build_quality_table
-from .verdict import derive_verdict
+from .verdict import derive_action_outcome, derive_verdict
 
 
 logger = logging.getLogger(__name__)
@@ -73,6 +77,42 @@ def _git_sha() -> str:
 
 
 _CREDIBLE_TIERS = frozenset({"fact-checker", "reputable-news", "primary-source"})
+
+
+_PIVOT_ASKED_LABEL: dict[Action, str] = {
+    "verify": "fact-check",
+    "provide_context": "context",
+    "challenge_opinion": "push-back",
+    "surface_perspectives": "multiple views",
+    "decline": "the bot",
+}
+
+_PIVOT_ACTUAL_CLAUSE: dict[Action, str] = {
+    "verify": "this is verifiable",
+    "provide_context": "context is missing",
+    "challenge_opinion": "this is opinion",
+    "surface_perspectives": "this is contested",
+    "decline": "no actionable angle",
+}
+
+
+def _build_pivot_disclosure(extraction) -> Optional[str]:
+    """Build a tight one-clause prefix when the action was pivoted from
+    what the invoker asked for. Returns None when no pivot happened.
+
+    Format: "You asked for {asked}; {actual_state}. " — kept short
+    (~40 chars) so the renderer's body budget isn't squeezed.
+
+    Example: asked=challenge_opinion, actual=verify →
+    "You asked for push-back; this is verifiable. "
+    """
+    asked = extraction.pivoted_from
+    actual = extraction.action
+    if asked is None or asked == actual:
+        return None
+    asked_label = _PIVOT_ASKED_LABEL.get(asked, "something else")
+    actual_clause = _PIVOT_ACTUAL_CLAUSE.get(actual, "this fits better")
+    return f"You asked for {asked_label}; {actual_clause}. "
 
 
 def _has_credible_evidence(quality_table) -> bool:
@@ -168,7 +208,7 @@ def _attached_image_records(images: list[ImageEvidence]) -> list[AttachedImage]:
     return records
 
 
-def _short_circuit_no_checkable(
+def _short_circuit_decline(
     *,
     invocation_id: str,
     invocation_time,
@@ -178,16 +218,15 @@ def _short_circuit_no_checkable(
     image_evidence: list[ImageEvidence],
     extraction: ExtractionOutput,
     thread_context_str: str,
+    invoker_instruction_text: str,
     freeze_root: Optional[Path],
 ) -> FrozenVerdict:
-    """Stage 2+3 short-circuit. No search, no reconcile — bot replies with
-    a hardcoded tone-appropriate 'nothing to fact-check' template at Stage 7."""
-    logger.info("run_pipeline[%s]: short-circuit — no_checkable_claim (%s)", invocation_id, extraction.reason)
+    """Action == decline path. No search, no reconcile — the renderer emits
+    a tone-aware 'nothing actionable here' reply directly from the
+    extraction's reason field."""
+    logger.info("run_pipeline[%s]: short-circuit — action=decline (%s)", invocation_id, extraction.reason)
 
-    reason = extraction.reason or "Personal opinion or aesthetic reaction; no factually verifiable claim identified."
-    # No evidence is *sought* on this path — the extracted propositions are
-    # logged on Claim objects below; we don't restate them as unaddressed
-    # because they were never put to the test.
+    reason = extraction.reason or "No factually verifiable claim and no clear angle to push back or contextualize."
     findings = ConsolidatedFindings(unaddressed_propositions=())
     payload = PresentationPayload(
         headline_finding=reason,
@@ -222,9 +261,14 @@ def _short_circuit_no_checkable(
         ),
         attached_images=tuple(_attached_image_records(image_evidence)),
         claims=claim_objs,
-        cross_modal_report=CrossModalReport(lens_1_text_text=Lens1(narrative="Skipped: no checkable claim.")),
+        cross_modal_report=CrossModalReport(lens_1_text_text=Lens1(narrative="Skipped: action=decline.")),
         consolidated_findings=findings,
         source_quality_table=(),
+        action=extraction.action,
+        action_source=extraction.action_source,
+        pivoted_from=extraction.pivoted_from,
+        invoker_instruction_text=invoker_instruction_text,
+        action_outcome="declined",
         verdict_label="NotEnoughEvidence",
         tone_neutral_justification=reason,
         presentation_payload=payload,
@@ -241,6 +285,7 @@ def run_pipeline(
     target_tweet_id: str = "",
     image_urls: Optional[list[str]] = None,
     tweet_context: Optional[dict] = None,
+    invoker_instruction: str = "",
     freeze_root: Optional[Path] = None,
 ) -> FrozenVerdict:
     """Run the pipeline end-to-end. Returns the frozen verdict.
@@ -274,19 +319,25 @@ def run_pipeline(
         image_evidence = _run_multimodal(image_urls, backend)
         logger.info("run_pipeline[%s]: Stage 1.5 complete (%d evidence)", invocation_id, len(image_evidence))
 
-    ctx = PipelineContext(tweet_context=tweet_context, image_evidence=image_evidence)
+    ctx = PipelineContext(
+        tweet_context=tweet_context,
+        image_evidence=image_evidence,
+        invoker_instruction=invoker_instruction or "",
+    )
 
-    # ── Stage 2 + 3 — claim extraction & check-worthiness gate ──
-    logger.info("run_pipeline[%s]: Stage 2+3 — claim extraction", invocation_id)
+    # ── Stage 2 + 3 — claim extraction + action selection ──
+    logger.info("run_pipeline[%s]: Stage 2+3 — claim extraction + action selection (invoker=%r)",
+                invocation_id, (invoker_instruction or "")[:60])
     extraction = extract_claims(claim_text, ctx)
     central = central_claim(extraction)
     logger.info(
-        "run_pipeline[%s]: Stage 2+3 → %d propositions, central type=%s check_worthy=%s, overall=%s",
-        invocation_id, len(extraction.claims), central.type, central.check_worthy, extraction.overall_state,
+        "run_pipeline[%s]: Stage 2+3 → %d propositions, central type=%s, action=%s (source=%s, pivoted_from=%s)",
+        invocation_id, len(extraction.claims), central.type,
+        extraction.action, extraction.action_source, extraction.pivoted_from,
     )
 
-    if extraction.overall_state == "no_checkable_claim":
-        return _short_circuit_no_checkable(
+    if extraction.action == "decline":
+        return _short_circuit_decline(
             invocation_id=invocation_id,
             invocation_time=invocation_time,
             target_tweet_id=target_tweet_id,
@@ -295,6 +346,7 @@ def run_pipeline(
             image_evidence=image_evidence,
             extraction=extraction,
             thread_context_str=thread_context_str,
+            invoker_instruction_text=invoker_instruction or "",
             freeze_root=freeze_root,
         )
 
@@ -302,7 +354,7 @@ def run_pipeline(
     # than the raw tweet (hedges stripped, framing normalized).
     central_text = central.text
     logger.info("run_pipeline[%s]: Stage 4 — iterative verification (Papelo-style)", invocation_id)
-    text_evidence = iterative_verify(central_text, ctx, backend=backend)
+    text_evidence = iterative_verify(central_text, ctx, backend=backend, action=extraction.action)
     logger.info("run_pipeline[%s]: Stage 4 done (%d evidence records)", invocation_id, len(text_evidence))
 
     # Roll image-provenance hits into the source-quality table too — Claude is
@@ -340,6 +392,7 @@ def run_pipeline(
             evidence=text_evidence,
             source_quality_table=quality_table,
             ctx=ctx,
+            action=extraction.action,
         )
         logger.info("run_pipeline[%s]: Stage 4.5 done", invocation_id)
         stamped_evidence = [
@@ -355,12 +408,20 @@ def run_pipeline(
         payload = recon.presentation_payload
         justification = recon.tone_neutral_justification
         lens_1 = recon.lens_1
-        verdict_label = derive_verdict(findings, quality_table)
         evidence = stamped_evidence
 
-    logger.info("run_pipeline[%s]: Stage 5 — audit (declared=%s)", invocation_id, verdict_label)
+    # action_outcome is the canonical post-Stage-4.5 label. verdict_label
+    # is retained transitionally so legacy readers still get something.
+    action_outcome = derive_action_outcome(extraction.action, findings, quality_table)
+    verdict_label = derive_verdict(findings, quality_table)
+
+    logger.info(
+        "run_pipeline[%s]: Stage 5 — audit (action=%s, declared_outcome=%s)",
+        invocation_id, extraction.action, action_outcome,
+    )
     audit_result = audit(
-        declared_verdict=verdict_label,
+        action=extraction.action,
+        declared_outcome=action_outcome,
         findings=findings,
         source_quality_table=quality_table,
         presentation_payload=payload,
@@ -368,10 +429,11 @@ def run_pipeline(
     )
     logger.info(
         "run_pipeline[%s]: Stage 5 audit %s (failures=%d)",
-        invocation_id, "passed" if audit_result.passed else "FAILED → NEI",
+        invocation_id, "passed" if audit_result.passed else "FAILED → audit-fail outcome",
         len(audit_result.failures),
     )
     if not audit_result.passed:
+        action_outcome = audit_fail_outcome_for(extraction.action)
         verdict_label = "NotEnoughEvidence"
         findings, payload, justification = _nei_verdict(
             "Audit failed: " + "; ".join(audit_result.failures),
@@ -391,6 +453,13 @@ def run_pipeline(
                 evidence=evidence_for_this,
             )
         )
+
+    # When the action was pivoted from the invoker's explicit ask, prepend
+    # a one-clause disclosure to the renderer payload so the reader knows
+    # what happened.
+    pivot_text = _build_pivot_disclosure(extraction)
+    if pivot_text and payload.pivot_disclosure != pivot_text:
+        payload = payload.model_copy(update={"pivot_disclosure": pivot_text})
 
     cross_modal = CrossModalReport(lens_1_text_text=lens_1)
     if image_evidence:
@@ -435,6 +504,11 @@ def run_pipeline(
         cross_modal_report=cross_modal,
         consolidated_findings=findings,
         source_quality_table=quality_table,
+        action=extraction.action,
+        action_source=extraction.action_source,
+        pivoted_from=extraction.pivoted_from,
+        invoker_instruction_text=invoker_instruction or "",
+        action_outcome=action_outcome,
         verdict_label=verdict_label,
         tone_neutral_justification=justification,
         presentation_payload=payload,

@@ -20,6 +20,10 @@ from .multimodal import ImageEvidence
 class PipelineContext:
     tweet_context: Optional[dict] = None
     image_evidence: list[ImageEvidence] = field(default_factory=list)
+    # Raw text the invoker wrote in their mention (after stripping the
+    # bot handle). Empty string when the invoker only tagged and said
+    # nothing — Stage 2+3 then infers the action from the claim itself.
+    invoker_instruction: str = ""
 
     @property
     def image_evidence_or_none(self) -> Optional[list[ImageEvidence]]:

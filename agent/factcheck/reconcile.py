@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from .context import PipelineContext
 from .llm import call_claude_json, pruned_context
 from .schema import (
+    Action,
     ConsolidatedFindings,
     Evidence,
     Lens1,
@@ -68,49 +69,84 @@ class ReconciliationOutput(BaseModel):
     evidence_stances: list[Stance]
 
 
-_SYSTEM_PROMPT = """You are the Evidence Reconciliation stage of a fact-checking pipeline.
+_SYSTEM_PROMPT = """You are the Evidence Reconciliation stage of a fact-checking bot. You operate in one of FOUR modes determined by the input `action` field: verify, provide_context, challenge_opinion, surface_perspectives. Read the action-specific section below; the shared rules apply to every action.
 
-You receive (a) the central claim text, (b) `tweet_context` — metadata about the parent tweet (author handle/bio/verified/account-age, posted-at, expanded t.co URLs, referenced-tweet relations, etc.), (c) an ordered list of text evidence snippets each tagged with a source URL, (d) the source-quality table classifying each URL by tier, and (e) when the claim is image-bearing, per-image evidence (OCR'd text, visual description, and Bing-grounded provenance search hits).
+You receive (a) `central_claim` text, (b) `action` ∈ {verify, provide_context, challenge_opinion, surface_perspectives}, (c) `tweet_context` — metadata about the parent tweet, (d) ordered text evidence snippets each tagged with source URL, (e) the source-quality table classifying every URL by tier, and (f) when the claim is image-bearing, per-image evidence (OCR + description + optional `canonical_image_match` + web-search provenance hits).
 
-Use `tweet_context` actively. In particular:
-- **`author_username`** and **`author_description`** (bio): is the handle the actual person being quoted (e.g., @ElonMusk for an Elon Musk quote)? Then the claim is a primary statement and the question is whether it's authentic. Is the handle or bio a parody/satire/fan account (contains "parody", "satire", "fake", "fanpage", "joke", "not affiliated", "unofficial", etc.)? Then the content is not a real statement from the named person — surface that. Is the handle a third-party aggregator or news-style influencer? Then this is a RE-report ABOUT a public figure, and the question is whether what's being reported is true.
-- **`author_verified`** / **`author_verified_type`**: blue-check / business / government / none. Useful signal but NOT a guarantee of accuracy — verified accounts can still post false claims.
-- **`author_created_at`** + **`author_followers_count`**: very new account + tiny follower count + extraordinary claim = bot/spam pattern. Surface that if relevant.
-- **`posted_at`**: when the claim was made. For claims about "recent" or "breaking" events, mismatch between the tweet's posted_at and the actual event date is a giveaway that the tweet is recycling old content. If the evidence places the cited event years before the tweet's posted_at, the tweet is misframing the recency.
-- **`expanded_urls`**: any short `t.co` link in the claim resolves to a real URL here, with the page title. If the linked article exists and supports/contradicts the claim, treat the URL like any other evidence URL.
-- **`referenced_tweets`**: if `type=quoted`, the parent is quote-tweeting another tweet (we don't have its content, just the relation). If `type=retweeted` or `type=replied_to`, note the framing.
-- **`public_metrics`**: virality is not truth. Don't treat high engagement as evidence of accuracy.
+═══════════════════════════════════════════════════════════════
+TWEET_CONTEXT — used by every action
+═══════════════════════════════════════════════════════════════
+- **`author_username`** + **`author_description`**: is the handle the actual person being quoted (e.g., @ElonMusk for an Elon Musk quote)? Then the claim is a primary statement. Parody/satire/fan account (bio contains "parody", "satire", "fake", "fanpage", "joke", "not affiliated", etc.)? Then the content is NOT a real statement from the named person — surface that.
+- **`author_verified`**: blue-check / business / government. Useful signal but NOT a guarantee of accuracy.
+- **`author_created_at`** + **`author_followers_count`**: very new + tiny follower count + extraordinary claim = bot/spam pattern.
+- **`posted_at`**: mismatch between tweet's posted_at and the cited event date often means recycled old content.
+- **`expanded_urls`**: t.co links resolved here. If the linked article supports/contradicts the claim, treat as evidence.
+- **`referenced_tweets`**: quoted / retweeted / replied_to framing.
+- **`public_metrics`**: virality is not truth.
 
-Use the source_quality_table for evidence-source classification; tweet_context informs how you interpret the CLAIM itself, not the evidence.
-
-WHEN TEXT EVIDENCE IS EMPTY BUT IMAGE EVIDENCE IS PRESENT — handle these two cases distinctly:
-- The image IS the central claim's subject (the post claims "this photo shows X", "this image proves Y", or the central proposition is literally about what's depicted). Image-provenance hits in source_quality_table CAN be cited if they directly speak to the image's identity, source, or context.
-- The image is incidental (an illustration / meme / generic visual that accompanies the text claim but doesn't carry it). Image-provenance hits typically address what the image IS, NOT whether the central text claim is true. In that case, do NOT cite image-provenance URLs as evidence for the text claim. Set primary_sources_to_cite=[] and place the central proposition in unaddressed_propositions with reason="evidence retrieved but silent" — the bot will emit a "no credible coverage" reply, not a misleading citation.
-
-Your job is to reconcile all the evidence and emit Lens 1 (text-text) findings. When image evidence is present, also reason about image-text alignment and cross-modal contradictions inline:
-
-1. For each atomic proposition implied by the central claim, decide whether it is verified, refuted, disputed, or unaddressed by the combined evidence. Cite the supporting URLs from the source-quality table. Mark the central proposition with is_central=true.
-2. Surface any cross-source contradictions in lens_1.
-3. When images are present:
-   a. Compare the image's OCR'd text and visual description against the caption / surrounding claim text. If the image shows something the caption says ("photo of a flooded street, caption says flood in city X"), that strengthens the relevant proposition. If the image shows something different ("photo shows a great-grandmother and child, caption says woman gave birth at 101"), that refutes the caption.
-   b. Use the image's provenance search hits to surface whether the image has been previously published in a different context. Treat those hits like any other text evidence — cite their URLs from the source-quality table if they're in it.
-4. Re-stamp each input text evidence with a stance (supports/refutes/neutral) in input order.
-5. Choose ONE headline_finding — the single most important fact the bot should communicate.
-6. If the verdict will be Refuted, set counter_fact to the correct version of the claim. Otherwise null.
-7. Pick 1–3 primary_sources_to_cite, preferring fact-checker > reputable-news tiers from the source_quality_table. Provide a short display_name (e.g. "Snopes").
-8. Pick one short load_bearing_evidence_snippet to optionally quote in the reply.
-9. Write a 1–3 sentence tone_neutral_justification anchored to the cited sources.
-
-Hard rules:
+═══════════════════════════════════════════════════════════════
+SHARED RULES — every action
+═══════════════════════════════════════════════════════════════
 - Do not invent sources. Every URL you cite must appear in the input source_quality_table.
-- Do not emit a verdict label — that is computed structurally downstream.
-- Be conservative: if evidence is thin or only from low-quality/satirical/unknown tiers, mark propositions unaddressed/disputed rather than verified/refuted.
-- Do NOT make claims about whether an image is altered, deepfaked, or AI-generated. That question is out of scope (Tier 4 forced NEI per spec). If the only checkable angle is image-authenticity, treat the proposition as unaddressed.
-- BUDGET (critical — downstream renderer must fit ≤270 chars across three tones, with a 23-char URL):
-    - `headline_finding`: ≤120 characters. ONE punchy sentence.
-    - `counter_fact`: ≤120 characters. ONE corrective sentence; null when not refuted.
-    - `tone_neutral_justification`: ≤220 characters. 1–2 sentences. Name the load-bearing source(s).
-    - `load_bearing_evidence_snippet`: ≤180 characters.
+- Do not emit verdict_label — derived downstream.
+- Be conservative: thin / low-quality evidence ⇒ "unaddressed" / `_unavailable` / `_insufficient` rather than a confident finding.
+- Out of scope (Tier 4): claims about whether an image is altered / deepfaked / AI-generated. If the only checkable angle is image-authenticity, treat as unaddressed.
+- Re-stamp each input text evidence with a stance (supports / refutes / neutral) in INPUT ORDER (used by every action).
+- Lens 1 narrative (text-text reconciliation) is always written; surface cross-source contradictions there.
+- For image-bearing claims, fold image-text + cross-modal reasoning INTO the narrative (lens_1.narrative) — Lens 2/3 are not separate outputs at this stage.
+- BUDGET (critical — downstream renderer fits ≤256 X-weighted chars):
+    - `headline_finding`: ≤120 chars, one punchy sentence.
+    - `counter_fact`: ≤120 chars; null unless action=verify AND finding is refuted.
+    - `tone_neutral_justification`: ≤220 chars; 1–2 sentences; name load-bearing source(s).
+    - `load_bearing_evidence_snippet`: ≤180 chars.
+    - `context_note`: ≤220 chars; the missing context the framing hides.
+    - Counterpoint.summary: ≤160 chars each; aim for 1–3 counterpoints.
+    - Perspective.summary: ≤200 chars each; aim for 2–4 perspectives.
+
+═══════════════════════════════════════════════════════════════
+ACTION-SPECIFIC OUTPUT
+═══════════════════════════════════════════════════════════════
+
+▌action == "verify"
+Populate the existing buckets — verified_propositions / refuted_propositions / disputed_propositions / unaddressed_propositions. Mark the central proposition with `is_central=true`.
+- presentation_payload.headline_finding: the one most important fact.
+- presentation_payload.counter_fact: set when refuted; otherwise null.
+- presentation_payload.primary_sources_to_cite: 1–3 sources, fact-checker > reputable-news.
+- presentation_payload.load_bearing_evidence_snippet: a short quote.
+- DO NOT populate context_note / counterpoints / perspectives.
+
+▌action == "provide_context"
+The literal claim may BE TRUE — the goal is to surface the missing context that changes how a reader should interpret it. STRICT RULE: do NOT populate verified_propositions or refuted_propositions for the central claim. Use contextual_findings instead.
+- consolidated_findings.contextual_findings: one entry with is_central=true; `missing_context` is the framing the claim hides.
+- presentation_payload.headline_finding: the missing context in one sentence (not "this is true" — the bot will read as missing-context).
+- presentation_payload.context_note: ≤220 chars; the missing context.
+- presentation_payload.primary_sources_to_cite: 1–3 sources backing the missing context.
+- counter_fact: null. counterpoints / perspectives: empty.
+
+▌action == "challenge_opinion"
+The central proposition is a strongly-stated opinion. Surface counterpoints from NAMED credible critics (not pundit echo chambers).
+- consolidated_findings.challenged_propositions: one entry with is_central=true, containing 1–3 counterpoints.
+- Each Counterpoint: summary (≤160 chars), citing_sources (≥1 TierRef from source_quality_table, prefer reputable-news / fact-checker / primary-source), weight ∈ {strong, moderate, weak}.
+- presentation_payload.headline_finding: the strongest counterpoint in one sentence.
+- presentation_payload.counterpoints: same 1–3 Counterpoint objects.
+- presentation_payload.primary_sources_to_cite: 1–3 sources used by the counterpoints (renderer will cite at least one).
+- counter_fact: null. context_note / perspectives: empty / null.
+
+▌action == "surface_perspectives"
+The topic is genuinely contested. Surface ≥2 distinct credible perspectives, each with ≥1 reputable source.
+- consolidated_findings.perspectives: 2–4 Perspective entries, each with label (≤60 chars; e.g. "Economic-cost view"), summary (≤200 chars), citing_sources (≥1 TierRef).
+- presentation_payload.headline_finding: a one-sentence framing of the disagreement (NOT a side).
+- presentation_payload.perspectives: same Perspective objects.
+- presentation_payload.primary_sources_to_cite: 1–3 sources spanning multiple perspectives.
+- Mark the central proposition in… see below.
+- counter_fact: null. context_note: null. counterpoints: empty.
+
+CENTRAL-PROPOSITION INVARIANT:
+The freeze schema requires the central proposition to appear in EXACTLY ONE bucket among: verified/refuted/disputed/unaddressed/contextual/challenged/perspectives. For surface_perspectives, the central proposition is the TOPIC STATEMENT — put it in unaddressed_propositions with reason="evidence retrieved but silent" and is_central=true (the topic itself can't be "verified"; perspectives capture the substance). For provide_context, central goes in contextual_findings. For challenge_opinion, central goes in challenged_propositions. For verify, the existing four buckets.
+
+WHEN TEXT EVIDENCE IS EMPTY:
+- If image evidence is present and the image IS the central claim's subject (e.g. canonical_image_match populated with high confidence + claim is about the image), use image-provenance hits as evidence and apply the action-specific output normally.
+- If the image is incidental and only image-provenance URLs exist, set primary_sources_to_cite=[] and place the central proposition in unaddressed_propositions with reason="evidence retrieved but silent". Downstream the bot will collapse to the action's `_unavailable` / `_insufficient` outcome.
 """
 
 
@@ -120,6 +156,7 @@ def reconcile(
     evidence: list[Evidence],
     source_quality_table: list[SourceQualityEntry],
     ctx: PipelineContext,
+    action: Action = "verify",
 ) -> ReconciliationOutput:
     """Run Stage 4.5; returns the structured output.
 
@@ -136,6 +173,7 @@ def reconcile(
     """
     payload: dict = {
         "central_claim": central_claim_text,
+        "action": action,
         "evidence": [_compact_evidence(e) for e in evidence],
         "source_quality_table": [_compact_quality_entry(s) for s in source_quality_table],
     }

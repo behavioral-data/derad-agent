@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from agent.llm.config import get_llm
 
 from .llm import _extract_json
+from .schema import CanonicalImageMatch
 from .search import SearchBackend, SearchHit
 
 
@@ -42,20 +43,32 @@ _USER_AGENT = (
 
 _VLM_SYSTEM = """You are the multimodal extraction stage of a fact-checking pipeline. The downstream verification step depends on you correctly identifying *who* and *what* is in the image — generic descriptions lose information the fact-checker can't recover.
 
-For each image you receive, produce a structured output with three fields:
+For each image you receive, produce a structured output with four fields:
 
 1. OCR (`ocr_text`): transcribe every readable string in the image VERBATIM. Preserve line breaks. Include captions, watermarks, on-screen text, headlines, signs, chyrons. Do not paraphrase. If no text, return "".
 
-2. Description (`description`): 2-5 sentences. **Name people, places, events, brands, logos, and other entities whenever you recognize them with reasonable confidence.** Fact-checking REQUIRES these identifications — saying "a man in a suit" when it's clearly Elon Musk, or "a woman with long hair" when it's clearly Nicki Minaj, or "a domed building" when it's clearly the U.S. Capitol, destroys the signal that lets us check whether the surrounding claim is true. Identification is the WHOLE POINT of this step.
+2. Meta-recognition (`canonical_image_match`, OPTIONAL): if this photograph itself is a widely-known canonical artifact — not just an image containing famous things, but a specific famous PHOTO — populate this block. Examples that warrant a `canonical_image_match`:
+    - The "Tank Man" photo from Tiananmen Square, June 1989.
+    - The Apollo 11 photo of Buzz Aldrin standing on the Moon, July 1969.
+    - The AI-generated "Pope Francis in a Balenciaga puffer" image that went viral in March 2023.
+    - The "Falling Man" photograph from 9/11.
+    - Stock viral images that have been miscaptioned many times (e.g., the Rosa Camfield photo of an elderly woman with her great-granddaughter, often reposted as "101-year-old gives birth to 17th child").
+    Fill in:
+      - `name`: a short identifying name + date if known (e.g. "Tank Man, Tiananmen Square, June 1989").
+      - `confidence`: "high" only when you're certain this is the specific famous photograph (not just a similar-looking scene); "medium" when likely; "low" when it resembles a famous image but you wouldn't bet on it.
+      - `known_context`: one paragraph on the photo's documented origin / context / who's in it.
+      - `known_misuses`: short note on common ways this image gets miscaptioned or recirculated misleadingly (empty when not applicable).
+    Leave the field NULL when the photograph itself is novel / not famous (most images). A photo of a famous person taken yesterday is NOT a canonical image — only the photograph-as-artifact counts.
+
+3. Description (`description`): 2-5 sentences. **Name people, places, events, brands, logos, and other entities whenever you recognize them with reasonable confidence.** Fact-checking REQUIRES these identifications — saying "a man in a suit" when it's clearly Elon Musk, or "a woman with long hair" when it's clearly Nicki Minaj, or "a domed building" when it's clearly the U.S. Capitol, destroys the signal that lets us check whether the surrounding claim is true. Identification is the WHOLE POINT of this step.
     - **For named individuals** — apply this equally across all categories: male and female public figures, executives, politicians, athletes, journalists, AND musicians, actors, actresses, performers, models, influencers. Refusing to identify a female musician you'd identify if she were a male executive is a bias that breaks fact-checking. If you recognize the person, name them.
     - **Hedging is encouraged** when you're not 100% certain. "This appears to be Nicki Minaj" or "consistent with Nicki Minaj based on the styling and features" is FAR more useful to the fact-checker than "a woman with long hair." Default to a hedged identification over a generic one.
     - For places: landmarks, named cities, venues, neighborhoods, named geological/architectural features.
     - For events: named protests, summits, disasters, ceremonies, awards shows, concerts, conferences, games — if visual context (banners, settings, crowds, dates) makes it identifiable.
-    - For images you recognize as canonical / widely-circulated: name them ("this is the canonical Apollo 11 photo of Buzz Aldrin", "this is the Tank Man photo from Tiananmen 1989"). Note the source/context if you know it.
     - Only decline to identify when you'd be PURE guessing without grounded visual evidence — and even then, give the most specific distinguishing features (clothing era, setting, signage, distinctive scenery, props) that would help a search engine find the image's context.
     - Avoid interpretation about whether the image is real, edited, or AI-generated — that's Tier 4 (out of scope here).
 
-3. Search hint (`search_hint`): one short paragraph (≤120 words) suitable for pasting into a web search to find articles ABOUT this image or its subject. Use the most distinctive named entities and details from your description. If you named a public figure or known image in (2), use those names here too. No invented facts.
+4. Search hint (`search_hint`): one short paragraph (≤120 words) suitable for pasting into a web search to find articles ABOUT this image or its subject. Use the most distinctive named entities and details from your description. When `canonical_image_match` is populated, use that name verbatim in the search hint. No invented facts.
 
 Output a single JSON object that validates against the provided schema.
 """
@@ -65,6 +78,7 @@ class MultimodalExtraction(BaseModel):
     """Stage 1.5 output for one image."""
 
     ocr_text: str = ""
+    canonical_image_match: Optional[CanonicalImageMatch] = None
     description: str = ""
     search_hint: str = ""
 
@@ -78,18 +92,23 @@ class ImageEvidence:
     description: str
     search_hint: str
     provenance_hits: tuple[SearchHit, ...]
+    canonical_image_match: Optional[CanonicalImageMatch] = None
 
     def to_prompt_summary(self) -> dict:
-        """3-key dict for prompts that only need image identity/content."""
-        return {
+        """4-key dict for prompts that only need image identity/content.
+        Includes canonical_image_match when populated so extract sees it."""
+        out: dict = {
             "image_url": self.image_url,
             "ocr_text": self.ocr_text,
             "description": self.description,
         }
+        if self.canonical_image_match is not None:
+            out["canonical_image_match"] = self.canonical_image_match.model_dump()
+        return out
 
     def to_prompt_with_provenance(self) -> dict:
-        """Extended dict for reconcile — includes provenance hits."""
-        return {
+        """Extended dict for reconcile — includes provenance hits + canonical match."""
+        out: dict = {
             "image_url": self.image_url,
             "ocr_text": self.ocr_text,
             "description": self.description,
@@ -99,6 +118,9 @@ class ImageEvidence:
                 for h in self.provenance_hits
             ],
         }
+        if self.canonical_image_match is not None:
+            out["canonical_image_match"] = self.canonical_image_match.model_dump()
+        return out
 
 
 def fetch_image_bytes(url: str) -> Optional[tuple[bytes, str]]:
@@ -246,4 +268,5 @@ def extract_image(url: str, *, search_backend: SearchBackend, provenance_top_k: 
         description=extract.description,
         search_hint=extract.search_hint,
         provenance_hits=provenance_hits,
+        canonical_image_match=extract.canonical_image_match,
     )

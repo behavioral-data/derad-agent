@@ -1,20 +1,26 @@
 """Stage 7 — tone renderer. Reads ONLY the RendererView (design §3.2).
 
-Three renderers — agreeable, neutral, agonistic — share a single payload and
-differ only in register. The tone-specific system prompt is the only thing
-that varies; everything else (hard constraints, URL-containment, retry
-behaviour, refusal cascade) is shared.
+The renderer composes one system prompt from three pieces:
 
-Every reply that ships is produced by the model. There are NO hardcoded
-templates — even the "no checkable claim" and "no sources" cases route
-through a tone-aware prompt whose URL requirement is conditional on whether
-primary_sources_to_cite is non-empty.
+  system = _ACTION_TEMPLATES[action] + _TONE_REGISTERS[tone] + _hard_constraints_for(action, state)
 
-Refusal handling: a `call_claude_json` failure inside the renderer (parse
-error, schema validation, or detected refusal text) triggers a same-tone
-retry with a re-framing nudge that emphasizes the fact-checking /
-harm-reduction purpose. If that also fails, the renderer raises — the app
-records `pipeline_error` rather than silently posting nothing.
+Five action templates × three tone registers = compositional, not a
+15-prompt Cartesian product. Each action template owns its goal,
+state-aware examples, and field expectations. Each tone register owns
+rhetorical guidance (style, register, off-limit moves). Hard constraints
+are action-aware (verify-refuted needs counter_fact; challenge_opinion
+needs a counterpoint URL; surface_perspectives needs ≥2 perspectives).
+
+`pivot_disclosure` is prepended when the action was pivoted from what the
+invoker asked (e.g. "fact check this" + claim is opinion → action becomes
+challenge_opinion; the disclosure tells the reader what happened).
+
+Every reply is produced by the model. There are NO hardcoded templates —
+even the "decline" path goes through a tone-aware prompt.
+
+Refusal handling: a `call_claude_json` failure (parse, schema, or detected
+refusal) triggers a same-tone retry with a harm-reduction nudge. If that
+also fails, the renderer raises → `pipeline_error`.
 """
 from __future__ import annotations
 
@@ -26,7 +32,7 @@ from agent.shared.text import URL_RE, X_TCO_LEN, X_TWEET_LIMIT, x_weighted_lengt
 
 from .freeze import RendererView
 from .llm import call_claude_json
-from .schema import Tone
+from .schema import Action, Tone
 
 
 logger = logging.getLogger(__name__)
@@ -34,8 +40,7 @@ logger = logging.getLogger(__name__)
 
 # The poster appends a t.co-shortened /info link after the rendered reply:
 # "<reply>\n<info_url>". The /info URL counts as 23 chars + 1 for the
-# newline. Renderer ceiling must leave room for that or the poster's
-# truncation eats the last words of the reply.
+# newline. Renderer ceiling must leave room for that.
 _X_INFO_APPEND_LEN = X_TCO_LEN + 1  # 23 + newline
 _X_TWEET_LIMIT = X_TWEET_LIMIT - _X_INFO_APPEND_LEN  # = 256
 
@@ -50,242 +55,356 @@ class RenderedReply(BaseModel):
     text: str
 
 
-# ── Shared building blocks ──────────────────────────────────────────────────
+# ── State derivation ───────────────────────────────────────────────────────
 
-_INPUT_CONTRACT = """You receive: presentation_payload + tone_neutral_justification + a `state` field describing what the pipeline could establish.
-
-`state` is one of:
-- "verified" — credible sources support / refute / contextualize the claim. primary_sources_to_cite is non-empty.
-- "no_sources" — there IS a factually checkable claim, but the pipeline could not surface credible coverage either way. primary_sources_to_cite is empty.
-- "no_checkable_claim" — the post is opinion / aesthetic reaction / personal reflection; there's no testable factual claim to verify. primary_sources_to_cite is empty.
-
-The reply you produce must match the `state`:
-- state="verified": write a substantive reply that communicates the headline_finding and CITES at least one URL from primary_sources_to_cite.
-- state="no_sources": write a brief reply acknowledging the claim is testable but credible coverage couldn't be found. DO NOT include any URL (the app appends a follow-up /info link separately).
-- state="no_checkable_claim": write a brief reply pointing out there's no factual claim to check. DO NOT include any URL."""
+_RenderState = str  # "actionable" | "no_evidence" | "declined"
 
 
-_HARD_CONSTRAINTS = """HARD CONSTRAINTS (renders that violate these are rejected and retried):
-- Communicate the headline_finding faithfully.
-- Reproduce every proper noun (people, places, organizations, dates, publications) that appears in tone_neutral_justification or presentation_payload, VERBATIM. Do not generalize: keep names like "World News Daily Report", "Buzz Aldrin", "Snopes", and dates like "March 2015" intact.
-- URL rule, conditioned on `state`:
-    - state="verified": MUST include at least one URL from primary_sources_to_cite, as a plain http(s) link.
-    - state="no_sources" or "no_checkable_claim": MUST NOT include any URL. The bot's follow-up /info link is appended by the poster.
-- Never introduce a URL outside primary_sources_to_cite.
-- Never introduce facts outside presentation_payload + tone_neutral_justification.
-- No emojis, no hashtags, no @-mentions.
-- ≤250 X-weighted chars (X counts every URL as 23 chars; the bot appends a 24-char /info link after this reply, so the renderer's hard ceiling is 256; aim for ≤250 for retry headroom).
-- Output a JSON object with a single "text" field. No preamble, no prose around the JSON."""
+def _state_for(view: RendererView) -> _RenderState:
+    """Derive the renderer's state from the action_outcome.
+
+    actionable = the action produced something the bot can cite or quote
+                 (verify supported/refuted/conflicting, context_provided,
+                  challenged, perspectives_surfaced).
+    no_evidence = action ran but couldn't surface a usable result
+                 (verified_nei, context_unavailable, challenge_unavailable,
+                  perspectives_insufficient).
+    declined = no actionable angle (action=decline).
+    """
+    outcome = view.action_outcome
+    if outcome == "declined":
+        return "declined"
+    if outcome in {"verified_nei", "context_unavailable", "challenge_unavailable", "perspectives_insufficient"}:
+        return "no_evidence"
+    return "actionable"
 
 
-# ── Per-tone register guidance ──────────────────────────────────────────────
+# ── Per-action templates ───────────────────────────────────────────────────
 
-_NEUTRAL_SYSTEM = f"""You are a fact-checking bot. You write ONE reply tweet.
+_VERIFY_TEMPLATE = """You are the fact-check bot writing ONE reply tweet.
 
-{_INPUT_CONTRACT}
+INPUT: RendererView with `presentation_payload` + `tone_neutral_justification`. The pipeline has VERIFIED the claim against evidence. The substance of your reply MUST come from `presentation_payload.headline_finding` and `tone_neutral_justification`.
 
-REGISTER — plain correction with source. Bode, Vraga & Tully (2020) style: straightforward, evidence-first, detached. The voice is that of a careful researcher reporting findings — declarative sentences, named sources, no rhetorical flourish.
+YOUR JOB BY STATE:
+- state="actionable": communicate the headline_finding. Cite ≥1 URL from `primary_sources_to_cite` as a plain http(s) link. If `counter_fact` is set (verify-refuted), incorporate the corrective.
+- state="no_evidence": briefly acknowledge the claim is testable but credible coverage wasn't found. NO URL.
+- state="declined": (handled by the decline template — this template shouldn't see it.)
 
-Style examples (do not copy verbatim; match the actual evidence):
-- state="verified": "This is not accurate. According to [source], …" / "The image is real but miscaptioned. [Source] documented the original context …"
-- state="no_sources": "Not enough credible coverage to verify this claim." / "We didn't find credible reporting either supporting or refuting this."
-- state="no_checkable_claim": "No factually checkable statement here — this reads as opinion."
+STYLE EXAMPLES (do not copy verbatim; match the actual evidence):
+- "This is not accurate. According to [source], …"
+- "Real photo, miscaptioned: [source] documented the original context."
+- (no_evidence) "Not enough credible coverage to verify this claim either way."
+"""
 
-{_HARD_CONSTRAINTS}
+_PROVIDE_CONTEXT_TEMPLATE = """You are a fact-check bot writing ONE reply tweet to SUPPLY MISSING CONTEXT. The literal claim may be accurate, but the framing leaves out something material.
+
+INPUT: RendererView. Read `presentation_payload.context_note` for the missing piece, `primary_sources_to_cite` for sources backing it.
+
+YOUR JOB BY STATE:
+- state="actionable": surface the missing context plainly. Cite ≥1 URL from `primary_sources_to_cite`. Don't argue the literal claim is wrong — frame as "what this leaves out is …" or "important context here: …".
+- state="no_evidence": acknowledge the framing seems incomplete but credible context coverage wasn't found. NO URL.
+
+DO NOT phrase your reply as a fact-check verdict (Supported / Refuted) — this is context-supply mode. The reader should leave with the missing piece in hand.
+
+STYLE EXAMPLES:
+- "Worth noting the context [source] reports: the base rate here was …"
+- "The figure is real, but [source] documents that the comparison period excludes …"
+"""
+
+_CHALLENGE_OPINION_TEMPLATE = """You are a fact-check bot writing ONE reply tweet to PUSH BACK on a strongly-stated opinion.
+
+INPUT: RendererView. Read `presentation_payload.counterpoints` for the credible counter-arguments and their citing sources, `primary_sources_to_cite` for the URLs used.
+
+YOUR JOB BY STATE:
+- state="actionable": present the strongest counterpoint from `counterpoints`. NAME the credible critic / outlet / study by name. Cite ≥1 URL from `primary_sources_to_cite`. Be substantive — your job is to put credible push-back in front of the reader.
+- state="no_evidence": acknowledge the opinion is contested but credible push-back wasn't found in this window. NO URL.
+
+TONE-NEUTRAL POSTURE: push back on the OPINION, not the person. "Researchers at [outlet] argue …" / "[Critic] published a rebuttal …" — focus on the empirical counter.
+
+STYLE EXAMPLES:
+- "Worth weighing the counter: [credible critic] argues that … [source]."
+- "[Outlet] documented evidence that …, which complicates this take."
+"""
+
+_SURFACE_PERSPECTIVES_TEMPLATE = """You are a fact-check bot writing ONE reply tweet to SURFACE MULTIPLE PERSPECTIVES on a contested topic.
+
+INPUT: RendererView. Read `presentation_payload.perspectives` (≥2 distinct credible viewpoints, each with `citing_sources`), `primary_sources_to_cite` for URLs.
+
+YOUR JOB BY STATE:
+- state="actionable": present 2 perspectives in tension. Use the perspective LABELS verbatim. Cite ≥1 URL from `primary_sources_to_cite` across the perspectives. DO NOT take a side — frame each viewpoint in its own terms.
+- state="no_evidence": acknowledge the topic is contested but credible perspectives weren't surfaced. NO URL.
+
+STRICT NEUTRALITY: every perspective gets the same charitable framing. Don't editorialize about which side is "right".
+
+STYLE EXAMPLES:
+- "Two views in play: [Label-A] argues … [Label-B] argues … [source]."
+- "Contested space — [Label-A] cites [source]; [Label-B] cites the same data differently."
+"""
+
+_DECLINE_TEMPLATE = """You are a fact-check bot writing ONE reply tweet when the parent post has NO actionable angle — no factually verifiable claim, no opinion worth contesting, no contested space to surface.
+
+INPUT: RendererView with `presentation_payload.headline_finding` carrying a short reason (e.g. "Personal opinion, no checkable claim.").
+
+YOUR JOB: a brief acknowledgment that there's nothing to fact-check / push back on / contextualize. Don't editorialize. NO URL. Keep it short — ≤ 120 chars is fine.
+
+STYLE EXAMPLES:
+- "No factual claim to check here — reads as opinion."
+- "Personal take, nothing for the fact-checker to weigh in on."
 """
 
 
-_AGREEABLE_SYSTEM = f"""You are a fact-checking bot. You write ONE reply tweet.
-
-{_INPUT_CONTRACT}
-
-REGISTER — empathetic, non-judgemental correction. Lewandowsky Debunking Handbook structure: acknowledge why a reasonable person might have shared this, then provide the corrective fact and the source. Avoid bare negation; lead with the alternative fact.
-
-Concrete patterns:
-- Affirm the impulse: "Easy to see why this caught attention — …"
-- Provide the alternative directly, don't pivot through a "but actually" turn.
-- Warm, never condescending. Never "well, actually". Never "let me explain".
-
-Style examples (do not copy verbatim; match the actual evidence):
-- state="verified": "Totally get why this is striking — the real story is …" / "Real photo, just a different occasion: …"
-- state="no_sources": "Worth keeping in mind — we couldn't find credible reporting either way on this." / "Open question for now — credible coverage isn't there yet."
-- state="no_checkable_claim": "Looks like a personal take — not really something to fact-check."
-
-{_HARD_CONSTRAINTS}
-"""
-
-
-_AGONISTIC_SYSTEM = f"""You are a fact-checking bot. You write ONE reply tweet.
-
-{_INPUT_CONTRACT}
-
-REGISTER — pointed, ridiculing, sarcastic. Boukes & Hameleers (2022) style: the correction lands inside a wrapper of mockery. The voice is dry, sardonic, often a single rhetorical line, always grounded in the evidence.
-
-STRATEGY — read tone_neutral_justification carefully. When it flags a specific damning signal, make THAT the centerpiece of the mockery rather than generic sarcasm. Targeted ridicule lands; generic ridicule sounds canned. Signals and effective angles:
-- "self-described satirical/parody site" → mock that the source openly disclosed it. "World News Daily Report literally describes itself as fictional. And yet, here we are."
-- "AI-generated" / "Midjourney" / "deepfake" → mock the generation artefact or the un-checked viral spread. "Real photo? No — generated on Midjourney. Look at the hand."
-- "self-described parody / fan account" → mock the impersonation framing. "A two-month-old fan page is breaking 'news' about a billionaire's love life. Sure."
-- "miscaptioned" / "out-of-context" / "different occasion" → mock the trivial-verification miss. "Ten seconds with reverse image search would have settled this."
-- recycled old event → mock the recency theatre. "Breaking, apparently, from [year]."
-- separate photos paired as evidence of a relationship → mock the leap. "Two unrelated portraits next to each other are not a couple."
-- mainstream fact-checker already covered it → mock the unforced error. "Snopes covered this in [year]. The post still went up."
-
-state="no_sources" — the sarcasm angle is the *absence* of corroboration. "Big claim. Zero credible reporting. Make of that what you will." Stay sharp but make sure the mockery sits on the lack of evidence, not on the speaker.
-
-state="no_checkable_claim" — the sarcasm angle is the opinion-presented-as-fact pattern. "Strong opinion energy. No facts attached." Keep it tight.
-
-STRICT BOUNDARY — refusal triggers if violated:
-- NO profanity. NO slurs.
-- NO attack on any individual's identity, appearance, demographics, gender, race, religion, nationality, accent, age, body, or personal traits.
-- TARGET is the CLAIM or the SOURCE's credibility, never the person whose image or name appears in the post. Mocking "the *claim* that Elon Musk said X" is fine; mocking Musk himself is not.
-- No content that could read as harassment of any specific named person.
-
-{_HARD_CONSTRAINTS}
-"""
-
-
-_TONE_SYSTEMS: dict[Tone, str] = {
-    "neutral": _NEUTRAL_SYSTEM,
-    "agreeable": _AGREEABLE_SYSTEM,
-    "agonistic": _AGONISTIC_SYSTEM,
+_ACTION_TEMPLATES: dict[Action, str] = {
+    "verify": _VERIFY_TEMPLATE,
+    "provide_context": _PROVIDE_CONTEXT_TEMPLATE,
+    "challenge_opinion": _CHALLENGE_OPINION_TEMPLATE,
+    "surface_perspectives": _SURFACE_PERSPECTIVES_TEMPLATE,
+    "decline": _DECLINE_TEMPLATE,
 }
 
 
-# ── Refusal-aware retry nudge ───────────────────────────────────────────────
+# ── Per-tone register snippets ─────────────────────────────────────────────
 
-_REFUSAL_NUDGE = """The previous attempt did not produce a usable reply. This is a public-good fact-checking bot whose only job is to attach evidence to claims circulating on X — surfacing accurate context to readers who would otherwise see the post unchallenged. The reply target is misinformation, not any individual. Please produce the reply within the constraints. Stick to evidence already in presentation_payload + tone_neutral_justification; do not editorialize beyond the register described."""
+_NEUTRAL_REGISTER = """REGISTER — plain correction with source. Bode, Vraga & Tully (2020) style: straightforward, evidence-first, detached. Declarative sentences, named sources, no rhetorical flourish."""
+
+_AGREEABLE_REGISTER = """REGISTER — empathetic, non-judgemental. Lewandowsky Debunking Handbook structure: acknowledge why a reasonable person might engage with this, then provide the substantive content. Avoid bare negation; lead with the alternative.
+
+Patterns:
+- Affirm the impulse: "Easy to see why this caught attention — …"
+- Provide the alternative directly; don't pivot through a "but actually" turn.
+- Warm, never condescending. Never "well, actually" or "let me explain"."""
+
+_AGONISTIC_REGISTER = """REGISTER — pointed, sardonic. Boukes & Hameleers (2022) style: the substance lands inside a wrapper of dry mockery. Often a single rhetorical line; always grounded in the evidence.
+
+Targeted ridicule lands; generic ridicule sounds canned. Read tone_neutral_justification carefully for a specific damning signal and make THAT the centerpiece:
+- "self-described satirical/parody site" → mock that the source openly disclosed it.
+- "AI-generated" / "Midjourney" / "deepfake" → mock the generation artefact or unchecked viral spread.
+- "miscaptioned" / "out-of-context" → mock the trivial-verification miss ("Ten seconds with reverse image search would have settled this.").
+- recycled old event → mock the recency theatre.
+- mainstream fact-checker already covered it → mock the unforced error.
+
+STRICT BOUNDARY:
+- NO profanity. NO slurs.
+- NO attack on identity, appearance, demographics, gender, race, religion, nationality, accent, age, body, or personal traits.
+- TARGET is the CLAIM or the SOURCE's credibility — NEVER the person whose image or name appears.
+- No content that could read as harassment of any specific named person.
+
+When the action is surface_perspectives, the sarcasm is OFF — the goal is to present multiple credible camps with equal weight; mocking either side breaks neutrality."""
 
 
-def _state_for(view: RendererView) -> str:
-    """Map RendererView to the three-valued `state` field passed to the model."""
-    if view.overall_state == "no_checkable_claim":
-        return "no_checkable_claim"
-    if not view.presentation_payload.primary_sources_to_cite:
-        return "no_sources"
-    return "verified"
+_TONE_REGISTERS: dict[Tone, str] = {
+    "neutral": _NEUTRAL_REGISTER,
+    "agreeable": _AGREEABLE_REGISTER,
+    "agonistic": _AGONISTIC_REGISTER,
+}
 
 
-def _looks_like_refusal(text: str) -> bool:
-    """Refusal almost always leads — anchor markers to start-of-text so
-    legitimate replies that quote refusal phrases ("X did not say 'I cannot
-    believe Y'") don't false-trigger."""
-    lower = text.lstrip().lower()
-    return any(lower.startswith(marker) for marker in _REFUSAL_MARKERS)
+# ── Hard constraints ───────────────────────────────────────────────────────
+
+def _body_budget(view: RendererView) -> int:
+    """Compute the X-weighted char budget for the model's BODY output.
+    When the pipeline pivoted, the renderer prepends `pivot_disclosure`
+    mechanically after rendering, so the model gets a tighter budget."""
+    if view.presentation_payload.pivot_disclosure:
+        # Reserve room for the prefix (the prefix is plain text, no URLs,
+        # so x_weighted_length == len). 4 chars of breathing room.
+        return max(80, _X_TWEET_LIMIT - len(view.presentation_payload.pivot_disclosure) - 4)
+    return _X_TWEET_LIMIT
 
 
-def _build_prompt(view: RendererView, state: str) -> str:
+def _hard_constraints_for(
+    action: Action, state: _RenderState, body_limit: int
+) -> str:
+    """Action-aware hard constraints. Renderer output that violates these is
+    rejected and retried with the failure as feedback."""
+    base = [
+        "HARD CONSTRAINTS (violations are rejected and retried):",
+        "- Communicate the headline_finding faithfully.",
+        '- Reproduce every proper noun (people, places, organizations, dates, publications) that appears in tone_neutral_justification or presentation_payload VERBATIM. Do not generalize: keep names like "World News Daily Report", "Buzz Aldrin", "Snopes", and dates like "March 2015" intact.',
+        "- Never introduce a URL outside primary_sources_to_cite.",
+        "- Never introduce facts outside presentation_payload + tone_neutral_justification.",
+        "- No emojis, no hashtags, no @-mentions.",
+        f"- ≤{body_limit} X-weighted chars total (X counts every URL as 23 chars). Aim a few chars under.",
+        '- Output a JSON object with a single "text" field. No preamble, no prose around the JSON.',
+        "- DO NOT prepend any disclosure / 'You asked for X' clause to your reply. If the pipeline pivoted, the runtime prepends that clause for you; just write the substantive body.",
+    ]
+
+    # URL rule per state
+    if state == "actionable":
+        base.append("- URL rule: state=actionable requires at least one URL from primary_sources_to_cite as a plain http(s) link.")
+    else:
+        base.append("- URL rule: state=no_evidence / declined — DO NOT include any URL. The bot's follow-up /info link is appended by the poster.")
+
+    # Action-specific URL counter-rules (already covered above, but reinforce)
+    if action == "verify" and state == "actionable":
+        base.append("- This is a verify action — quoting load_bearing_evidence_snippet (when present and short) inside quotes is encouraged.")
+    if action == "challenge_opinion" and state == "actionable":
+        base.append("- This is a challenge_opinion action — explicitly NAME the credible critic / outlet whose counterpoint you're citing (not just the publication).")
+    if action == "surface_perspectives" and state == "actionable":
+        base.append("- This is a surface_perspectives action — present ≥ 2 distinct perspectives. Use each perspective's `label` verbatim.")
+
+    return "\n".join(base)
+
+
+# ── Composition ────────────────────────────────────────────────────────────
+
+def _system_prompt_for(
+    action: Action, tone: Tone, state: _RenderState, body_limit: int
+) -> str:
+    template = _ACTION_TEMPLATES.get(action, _VERIFY_TEMPLATE)
+    register = _TONE_REGISTERS.get(tone, _NEUTRAL_REGISTER)
+    constraints = _hard_constraints_for(action, state, body_limit)
+    return f"{template}\n\n{register}\n\n{constraints}"
+
+
+def _build_prompt(view: RendererView, state: _RenderState) -> str:
     return (
         "Render the reply.\n\n"
+        f"action: {view.action}\n"
+        f"action_outcome: {view.action_outcome}\n"
         f"state: {state}\n\n"
         f"presentation_payload:\n{view.presentation_payload.model_dump_json(indent=2)}\n\n"
         f"tone_neutral_justification:\n{view.tone_neutral_justification}"
     )
 
 
-def _enforce_invariance(text: str, view: RendererView, state: str) -> None:
-    """Runtime invariance check.
+# ── Refusal-aware retry nudge ──────────────────────────────────────────────
 
-    state="verified":     reply MUST cite ≥1 URL from primary_sources_to_cite, no extraneous URLs.
-    state in (no_sources, no_checkable_claim): reply MUST contain 0 URLs.
-    Always: reply MUST be ≤ 280 X-weighted chars and non-empty.
+_REFUSAL_NUDGE = """The previous attempt did not produce a usable reply. This is a public-good fact-check bot — its job is to attach credible context to claims circulating on X. The reply target is misinformation or framing, never an individual. Stay within the constraints. Stick to evidence already in presentation_payload + tone_neutral_justification; do not editorialize beyond the register."""
+
+
+def _looks_like_refusal(text: str) -> bool:
+    """Refusal almost always leads. Anchor markers to start-of-text so
+    legitimate replies that quote refusal phrases don't false-trigger."""
+    lower = text.lstrip().lower()
+    return any(lower.startswith(marker) for marker in _REFUSAL_MARKERS)
+
+
+# ── Invariance check ───────────────────────────────────────────────────────
+
+def _enforce_invariance(
+    text: str, view: RendererView, state: _RenderState, body_limit: int
+) -> None:
+    """Action-aware invariance.
+
+    state="actionable": ≥1 URL from allowed_urls, no extraneous URLs.
+    state in {no_evidence, declined}: 0 URLs.
+    Always: non-empty, not a refusal, body ≤ body_limit X-weighted chars.
+
+    body_limit reflects the available room AFTER the runtime-prepended
+    pivot_disclosure (when applicable), so the renderer's own output
+    must fit inside that tighter budget.
     """
     if not text:
         raise ValueError("Renderer returned empty text.")
     if _looks_like_refusal(text):
         raise ValueError(f"Renderer output looks like a refusal: {text[:160]!r}")
 
-    allowed_urls = {s.url for s in view.presentation_payload.primary_sources_to_cite}
+    payload = view.presentation_payload
+    allowed_urls = {s.url for s in payload.primary_sources_to_cite}
+    for cp in payload.counterpoints:
+        allowed_urls.update(s.url for s in cp.citing_sources)
+    for p in payload.perspectives:
+        allowed_urls.update(s.url for s in p.citing_sources)
+
     urls_in_reply = set(URL_RE.findall(text))
     extraneous = urls_in_reply - allowed_urls
     if extraneous:
         raise ValueError(
-            f"Renderer emitted URL(s) not in primary_sources_to_cite: {sorted(extraneous)}"
+            f"Renderer emitted URL(s) not in allowed sources: {sorted(extraneous)}"
         )
 
-    if state == "verified":
+    if state == "actionable":
         if not (urls_in_reply & allowed_urls):
-            raise ValueError("state=verified renderer emitted no URL from primary_sources_to_cite.")
+            raise ValueError("state=actionable renderer emitted no URL from primary_sources_to_cite / action sources.")
     else:
         if urls_in_reply:
             raise ValueError(
                 f"state={state} renderer emitted URL(s) (none should be present): {sorted(urls_in_reply)}"
             )
 
-    if x_weighted_length(text) > _X_TWEET_LIMIT:
+    if x_weighted_length(text) > body_limit:
         raise ValueError(
-            f"Rendered reply is {x_weighted_length(text)} X-weighted chars (limit {_X_TWEET_LIMIT})."
+            f"Rendered reply body is {x_weighted_length(text)} X-weighted chars (body limit {body_limit})."
         )
 
 
-def render(view: RendererView, tone: Tone, *, max_invariance_retries: int = 2) -> str:
-    """Render a reply. Always uses the model — no hardcoded templates.
+# ── Public entry point ─────────────────────────────────────────────────────
 
-    Retry strategy:
-    1. Up to `max_invariance_retries` attempts at the tone's normal prompt
-       with feedback if the invariance check fails (e.g. missing URL,
-       overflow, extraneous URL).
-    2. If `call_claude_json` itself raises (parse error, schema validation,
-       likely refusal in the JSON), one more attempt with the refusal nudge
-       appended to the system prompt — same tone, softer framing emphasizing
-       the harm-reduction purpose.
-    3. If that also fails, raise — the caller writes a `pipeline_error`
-       event so we have visibility into refusal patterns instead of silently
-       posting nothing.
-    """
-    if tone not in _TONE_SYSTEMS:
+def render(view: RendererView, tone: Tone, *, max_invariance_retries: int = 3) -> str:
+    """Compose system = action_template + tone_register + hard_constraints,
+    call Claude, enforce invariance with retries, fall back to refusal nudge
+    on call_claude_json failure, raise on second failure."""
+    if tone not in _TONE_REGISTERS:
         raise ValueError(f"Unknown tone {tone!r}")
+    if view.action not in _ACTION_TEMPLATES:
+        raise ValueError(f"Unknown action {view.action!r}")
 
     state = _state_for(view)
+    body_limit = _body_budget(view)
+    system_prompt = _system_prompt_for(view.action, tone, state, body_limit)
     base_prompt = _build_prompt(view, state)
     last_error: Exception | None = None
+    pivot_prefix = view.presentation_payload.pivot_disclosure or ""
 
     # Pass 1 — normal prompt, invariance-feedback retries
     for attempt in range(max_invariance_retries + 1):
         prompt = base_prompt
         if last_error is not None and isinstance(last_error, ValueError):
+            # Make overflow feedback specific so the model knows how much to cut.
+            err_msg = str(last_error)
+            extra = ""
+            if "body limit" in err_msg or "X-weighted chars" in err_msg:
+                extra = (
+                    " Cut adjectives, drop the verbatim quote from load_bearing_evidence_snippet, "
+                    "and shorten to the bone — proper nouns + verdict + URL is the only must-keep set."
+                )
             prompt += (
-                f"\n\nYour previous attempt failed this hard constraint: {last_error}. "
+                f"\n\nYour previous attempt failed this hard constraint: {err_msg}.{extra} "
                 "Fix it and try again. Stay within all the other constraints."
             )
         try:
             reply = call_claude_json(
                 prompt=prompt,
                 schema=RenderedReply,
-                system=_TONE_SYSTEMS[tone],
+                system=system_prompt,
                 reasoning_effort=None,
                 max_tokens=512,
                 timeout=30.0,
             )
         except ValueError as exc:
-            # Most likely a refusal that broke JSON parsing — break to pass 2.
-            logger.warning("render[%s]: pass-1 call_claude_json failed (%s) — escalating to refusal nudge", tone, exc)
+            logger.warning(
+                "render[%s/%s]: pass-1 call_claude_json failed (%s) — escalating to refusal nudge",
+                view.action, tone, exc,
+            )
             last_error = exc
             break
         text = reply.text.strip()
         try:
-            _enforce_invariance(text, view, state)
-            return text
+            _enforce_invariance(text, view, state, body_limit)
+            return pivot_prefix + text if pivot_prefix else text
         except ValueError as exc:
             last_error = exc
-            logger.info("render[%s]: invariance retry %d/%d (%s)", tone, attempt + 1, max_invariance_retries, exc)
+            logger.info(
+                "render[%s/%s]: invariance retry %d/%d (%s)",
+                view.action, tone, attempt + 1, max_invariance_retries, exc,
+            )
 
     # Pass 2 — refusal nudge once
     try:
         reply = call_claude_json(
             prompt=base_prompt + "\n\n" + _REFUSAL_NUDGE,
             schema=RenderedReply,
-            system=_TONE_SYSTEMS[tone],
+            system=system_prompt,
             reasoning_effort=None,
             max_tokens=512,
             timeout=30.0,
         )
         text = reply.text.strip()
-        _enforce_invariance(text, view, state)
-        logger.info("render[%s]: succeeded after refusal nudge", tone)
-        return text
+        _enforce_invariance(text, view, state, body_limit)
+        logger.info("render[%s/%s]: succeeded after refusal nudge", view.action, tone)
+        return pivot_prefix + text if pivot_prefix else text
     except Exception as exc:
-        logger.warning("render[%s]: refusal-nudge pass also failed (%s)", tone, exc)
-        # Re-raise the most informative error.
+        logger.warning("render[%s/%s]: refusal-nudge pass also failed (%s)", view.action, tone, exc)
         if last_error is not None:
             raise last_error
         raise

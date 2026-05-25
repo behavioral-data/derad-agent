@@ -413,6 +413,27 @@ def _append_url(text: str, url: str, limit: int = TWEET_LIMIT) -> str:
     return f"{text}\n{url}"
 
 
+def _clean_invoker_text(text: str, bot_handle: str) -> str:
+    """Strip the bot handle from the mention text and collapse whitespace.
+
+    Returns whatever's left — typically the invoker's instruction (e.g.
+    "fact check this", "what's the context", "push back on this nonsense").
+    Empty when the invoker only tagged the bot and said nothing.
+    """
+    if not text:
+        return ""
+    handle = (bot_handle or "").lstrip("@").strip()
+    if not handle:
+        return " ".join(text.split())
+    # Remove "@bothandle" tokens anywhere in the text, case-insensitive.
+    # Use a regex that requires word boundaries so we don't chew into
+    # legit handles that share a prefix.
+    import re
+    pattern = re.compile(rf"@{re.escape(handle)}\b", re.IGNORECASE)
+    stripped = pattern.sub("", text)
+    return " ".join(stripped.split())
+
+
 def _author_username(tweet: dict) -> str | None:
     user = tweet.get("user") or {}
     return user.get("screen_name") or user.get("username")
@@ -516,9 +537,15 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             logger.info("DRY_RUN: parent_text=%r", statement)
 
         parent_image_urls = list(snap.image_urls or [])
+        # Extract the invoker's instruction from the mention tweet itself
+        # (NOT the parent) — what they wrote alongside @eddiexbot is the
+        # signal the extractor uses to choose the bot's action.
+        invoker_instruction = _clean_invoker_text(tweet.get("text") or "", BOT_HANDLE)
+        ev.invoker_instruction_text = invoker_instruction
         logger.info(
-            "process_mention[%s]: parent fetched (author=@%s, text_chars=%d, images=%d) — entering generate_reply",
+            "process_mention[%s]: parent fetched (author=@%s, text_chars=%d, images=%d, invoker=%r) — entering generate_reply",
             mention_id, snap.author_username or "?", len(statement), len(parent_image_urls),
+            invoker_instruction[:60],
         )
         tweet_context = {
             "author_username": snap.author_username,
@@ -545,22 +572,34 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             tone=tone,
             image_urls=parent_image_urls,
             tweet_context=tweet_context,
+            invoker_instruction=invoker_instruction,
         )
         logger.info(
-            "process_mention[%s]: generate_reply returned (reply_text_chars=%d, sources=%s)",
-            mention_id, len(reply.get("text") or ""), reply.get("sources"),
+            "process_mention[%s]: generate_reply returned (action=%s outcome=%s reply_chars=%d sources=%s)",
+            mention_id, reply.get("action"), reply.get("action_outcome"),
+            len(reply.get("text") or ""), reply.get("sources"),
         )
         ev.queries = reply.get("queries") or []
+        ev.action = reply.get("action")
+        ev.action_outcome = reply.get("action_outcome")
 
         if not reply.get("text"):
             logger.info("Empty reply text for mention %s; skipping", mention_id)
             _finalize("empty_reply")
             return
 
-        # Tag the row with the structural verdict (NEI vs grounded). Used by
-        # downstream analysis to bucket by what the pipeline could establish.
-        verdict = reply.get("verdict_label") or "Unknown"
-        ev.reply_type = "no_factcheck" if verdict == "NotEnoughEvidence" else "factcheck"
+        # Legacy reply_type, derived now from action_outcome — kept so older
+        # analytics queries that group on this column keep working.
+        # _unavailable / _insufficient / _nei / declined outcomes ⇒ no_factcheck.
+        ao = (reply.get("action_outcome") or "") or ""
+        no_factcheck_outcomes = {
+            "verified_nei",
+            "context_unavailable",
+            "challenge_unavailable",
+            "perspectives_insufficient",
+            "declined",
+        }
+        ev.reply_type = "no_factcheck" if ao in no_factcheck_outcomes else "factcheck"
 
         token = _make_info_token(
             tone,
@@ -744,6 +783,8 @@ def api_activity():
 
     outcome_counts: dict[str, int] = {}
     tone_counts: dict[str, int] = {t: 0 for t in _participants.VALID_TONES}
+    action_counts: dict[str, int] = {}
+    action_outcome_counts: dict[str, int] = {}
     latencies: list[int] = []
     for ev in recent_events:
         outcome = ev.get("outcome") or "unknown"
@@ -751,6 +792,12 @@ def api_activity():
         tone = ev.get("tone") or ""
         if tone in tone_counts:
             tone_counts[tone] += 1
+        action = ev.get("action") or ""
+        if action:
+            action_counts[action] = action_counts.get(action, 0) + 1
+        ao = ev.get("action_outcome") or ""
+        if ao:
+            action_outcome_counts[ao] = action_outcome_counts.get(ao, 0) + 1
         ms = ev.get("pipeline_ms")
         if ms:
             latencies.append(int(ms))
@@ -769,6 +816,8 @@ def api_activity():
             "total_events": len(recent_events),
             "outcome_counts": outcome_counts,
             "tone_counts": tone_counts,
+            "action_counts": action_counts,
+            "action_outcome_counts": action_outcome_counts,
             "avg_pipeline_ms": int(sum(latencies) / len(latencies)) if latencies else 0,
             "participant_count": len(all_parts),
             "participant_tone_counts": participant_tone_counts,
