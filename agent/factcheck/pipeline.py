@@ -71,6 +71,15 @@ def _git_sha() -> str:
         return "unknown"
 
 
+_CREDIBLE_TIERS = frozenset({"fact-checker", "reputable-news", "primary-source"})
+
+
+def _has_credible_evidence(quality_table) -> bool:
+    """True if at least one URL is in a credible tier; otherwise reconcile
+    would land on NEI without learning anything useful."""
+    return any(e.tier in _CREDIBLE_TIERS for e in quality_table)
+
+
 def _resolve_modality(image_urls: list[str], claim_text: str) -> Modality:
     if image_urls and claim_text.strip():
         return "mixed"
@@ -313,9 +322,25 @@ def run_pipeline(
         all_urls.extend(h.url for h in img.provenance_hits)
     quality_table = build_quality_table(all_urls)
 
+    evidence = text_evidence  # default; the reconcile branch re-stamps with stances
+
     if not text_evidence and not image_evidence:
         findings, payload, justification = _nei_verdict(central_text)
         lens_1 = Lens1(narrative="No evidence retrieved.")
+        verdict_label = "NotEnoughEvidence"
+    elif not text_evidence and not _has_credible_evidence(quality_table):
+        # Image-only mention whose provenance hits are all in
+        # low-quality/satirical/unknown/aggregator tiers — reconcile would
+        # land on NEI anyway. Skip the expensive reasoning_effort=medium
+        # call (~5-10s + one Claude call saved).
+        logger.info(
+            "run_pipeline[%s]: Stage 4.5 — skipping reconcile (image-only, no credible-tier provenance)",
+            invocation_id,
+        )
+        findings, payload, justification = _nei_verdict(
+            central_text, reason_label="evidence retrieved but silent",
+        )
+        lens_1 = Lens1(narrative="Image provenance retrieved but no credible-tier sources.")
         verdict_label = "NotEnoughEvidence"
     else:
         logger.info("run_pipeline[%s]: Stage 4.5 — reconcile", invocation_id)
@@ -342,8 +367,6 @@ def run_pipeline(
         lens_1 = recon.lens_1
         verdict_label = derive_verdict(findings, quality_table)
         evidence = stamped_evidence
-    if not text_evidence and not image_evidence:
-        evidence = text_evidence  # empty list; bound for the no-recon branch
 
     logger.info("run_pipeline[%s]: Stage 5 — audit (declared=%s)", invocation_id, verdict_label)
     audit_result = audit(

@@ -81,6 +81,27 @@ _participants_store = _participants.get_store()
 _PARTICIPANTS_BY_ID: dict[str, _participants.Participant] = {}
 
 
+def _warm_search_backend() -> None:
+    """Pre-build the search-backend client at startup so the first mention
+    doesn't pay DefaultAzureCredential chain resolution + AIProjectClient
+    init on its critical path.
+    """
+    try:
+        from agent.factcheck.search import build_default_backend
+        backend = build_default_backend()
+        # _ensure_client is the slow part; calling .search would trigger the
+        # web_search tool which we don't want at startup.
+        ensure = getattr(backend, "_ensure_client", None)
+        if callable(ensure):
+            ensure()
+            logger.info("Search backend warmed up: %s", backend.name)
+    except Exception:
+        logger.warning("Search-backend warmup failed; first mention will pay the cost.", exc_info=True)
+
+
+threading.Thread(target=_warm_search_backend, daemon=True, name="warm-search").start()
+
+
 # Info-URL store: token → {tone, reply_text, reasons, parent_id}
 # In-memory cache for fast reads; Azure Tables for durable persistence across restarts.
 _INFO_STORE: dict[str, dict] = {}
