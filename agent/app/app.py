@@ -67,6 +67,13 @@ RATE_LIMIT_PER_SEC = int(os.getenv("DERAD_RATE_LIMIT_PER_SEC", "3"))
 USER_DAILY_CAP = int(os.getenv("DERAD_USER_DAILY_CAP", "20"))  # mentions/UTC-day/user; 0 disables
 TWEET_LIMIT = 280
 
+# Cap concurrent fact-check pipelines so a mention burst can't blow through
+# Foundry/Claude rate limits. Threads beyond the cap block on acquire; if a
+# slot doesn't open in DERAD_PIPELINE_QUEUE_TIMEOUT_S the mention is dropped.
+PIPELINE_MAX_CONCURRENT = int(os.getenv("DERAD_PIPELINE_MAX_CONCURRENT", "5"))
+PIPELINE_QUEUE_TIMEOUT_S = float(os.getenv("DERAD_PIPELINE_QUEUE_TIMEOUT_S", "600"))
+_PIPELINE_SEMAPHORE = threading.BoundedSemaphore(PIPELINE_MAX_CONCURRENT)
+
 # Participant metadata loaded for study tracking only — no longer gates bot access.
 _participants_store = _participants.get_store()
 _PARTICIPANTS_BY_ID: dict[str, _participants.Participant] = {
@@ -384,6 +391,41 @@ def _author_username(tweet: dict) -> str | None:
     return user.get("screen_name") or user.get("username")
 
 
+def _process_mention_throttled(tone: str, tweet: dict, received_at_utc: datetime) -> None:
+    """Cap concurrent pipelines via PIPELINE_MAX_CONCURRENT. Threads beyond
+    the cap wait up to PIPELINE_QUEUE_TIMEOUT_S; over that we drop the
+    mention, log a warning, and write a `pipeline_queue_timeout` drop event."""
+    mention_id = tweet.get("id_str", "?")
+    t_queued = time.monotonic()
+    acquired = _PIPELINE_SEMAPHORE.acquire(timeout=PIPELINE_QUEUE_TIMEOUT_S)
+    if not acquired:
+        wait_s = time.monotonic() - t_queued
+        logger.warning(
+            "Pipeline queue timed out after %.0fs for mention %s (cap=%d) — dropping; consider scaling out",
+            wait_s, mention_id, PIPELINE_MAX_CONCURRENT,
+        )
+        try:
+            log_mention_drop(MentionDrop(
+                received_at_utc=received_at_utc,
+                tweet_id=str(mention_id),
+                reason="pipeline_queue_timeout",
+            ))
+        except Exception:
+            logger.exception("Failed to write drop event for queue-timeout mention %s", mention_id)
+        return
+
+    wait_s = time.monotonic() - t_queued
+    if wait_s > 0.5:
+        logger.info(
+            "Pipeline slot acquired for mention %s after %.1fs wait (cap=%d)",
+            mention_id, wait_s, PIPELINE_MAX_CONCURRENT,
+        )
+    try:
+        process_mention(tone, tweet, received_at_utc)
+    finally:
+        _PIPELINE_SEMAPHORE.release()
+
+
 def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
     """Run the pipeline, post the reply, and write the event row."""
     mention_id = tweet.get("id_str") or ""
@@ -591,7 +633,7 @@ def _dispatch_tweet(tweet: dict, received_at_utc: datetime) -> bool:
     )
     metrics.mentions_accepted.add(1, {"tone": tone})
     threading.Thread(
-        target=process_mention,
+        target=_process_mention_throttled,
         args=(tone, tweet, received_at_utc),
         daemon=False,
     ).start()
