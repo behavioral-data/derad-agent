@@ -155,11 +155,12 @@ def reconcile(
             reasoning_effort="medium",
             max_tokens=4096,
         )
-    except Exception as exc:
-        # Refusal or parse failure. Degrade to a "could not reason" output —
-        # central claim lands in unaddressed_propositions, no source citations.
-        # The renderer's state becomes "no_sources" and produces a tone-aware
-        # reply via the model. Pipeline keeps going; mention gets a real reply.
+    except (ValueError, TimeoutError) as exc:
+        # Refusal/parse failure or stage timeout. Degrade to a "could not
+        # reason" output — central claim lands in unaddressed_propositions,
+        # no source citations. The renderer's state becomes "no_sources"
+        # and produces a tone-aware reply via the model. Pipeline keeps
+        # going; mention gets a real reply.
         logger.warning(
             "reconcile: call_claude_json failed (%s) — degrading to no-sources output", exc,
         )

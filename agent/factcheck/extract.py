@@ -119,8 +119,8 @@ def extract_claims(
 
     user_prompt = json.dumps(payload, indent=2)
     try:
-        # ExtractionOutput's @model_validator enforces exactly-one-central.
-        # call_claude_json raises ValueError on schema failure → fallback below.
+        # ExtractionOutput's @model_validator enforces exactly-one-central;
+        # call_claude_json raises ValueError on JSON-parse or schema failure.
         return call_claude_json(
             prompt=user_prompt,
             schema=ExtractionOutput,
@@ -128,8 +128,10 @@ def extract_claims(
             reasoning_effort="low",
             max_tokens=2048,
         )
-    except Exception:
-        logger.exception("Claim extraction call failed; falling back to whole-tweet-as-claim.")
+    except (ValueError, TimeoutError) as exc:
+        # Parse/schema failure or wall-clock timeout — degrade to fallback so
+        # the pipeline still produces a reply. Unexpected exceptions propagate.
+        logger.warning("extract_claims: degrading to whole-tweet fallback (%s)", exc)
         return _fallback(claim_text)
 
 

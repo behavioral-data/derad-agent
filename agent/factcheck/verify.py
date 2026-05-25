@@ -132,8 +132,11 @@ def _decide_next(
             reasoning_effort="low",
             max_tokens=1024,
         )
-    except Exception:
-        logger.exception("Verification-loop controller call failed.")
+    except (ValueError, TimeoutError):
+        # Parse/schema failure or wall-clock timeout. Caller distinguishes
+        # first-iteration failure (raise VerifyControllerError) from later
+        # ones (graceful stop with partial evidence).
+        logger.warning("Verification-loop controller call failed.", exc_info=True)
         return None
 
 

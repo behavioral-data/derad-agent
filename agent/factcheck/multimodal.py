@@ -156,8 +156,11 @@ def _shrink_for_claude(image_bytes: bytes, media_type: str) -> tuple[bytes, str]
                 return data, "image/jpeg"
         logger.warning("Could not shrink image below Claude limit; sending best-effort.")
         return data, "image/jpeg"
-    except Exception:
-        logger.exception("Image resize failed; will attempt as-is.")
+    except (OSError, ValueError) as exc:
+        # OSError covers Pillow's UnidentifiedImageError + decoder I/O errors;
+        # ValueError covers bad mode / format issues. Unexpected exceptions
+        # (MemoryError on giant HEIF, etc.) should propagate.
+        logger.warning("Image resize failed (%s); attempting as-is for %s.", exc, media_type)
         return image_bytes, media_type
 
 
@@ -217,8 +220,10 @@ def extract_image(url: str, *, search_backend: SearchBackend, provenance_top_k: 
     image_bytes, media_type = fetched
     try:
         extract = _vlm_extract(image_bytes, media_type)
-    except Exception:
-        logger.exception("VLM extraction failed for %s", url)
+    except (ValueError, TimeoutError) as exc:
+        # ValueError covers JSON parse + schema validation; TimeoutError
+        # covers the per-stage budget. Other exceptions propagate.
+        logger.warning("VLM extraction failed for %s: %s", url, exc)
         return None
 
     provenance_hits: tuple[SearchHit, ...] = ()
@@ -226,8 +231,10 @@ def extract_image(url: str, *, search_backend: SearchBackend, provenance_top_k: 
         try:
             hits = search_backend.search(extract.search_hint, top_k=provenance_top_k)
             provenance_hits = tuple(hits)
-        except Exception:
-            logger.exception("Provenance search failed for %s", url)
+        except (requests.RequestException, TimeoutError) as exc:
+            # Network / search-API failure — the rest of the image evidence
+            # is still useful for OCR + description in reconcile.
+            logger.warning("Provenance search failed for %s: %s", url, exc)
 
     logger.info(
         "Stage 1.5 done: url=%s ocr_chars=%d desc_chars=%d provenance_hits=%d",
