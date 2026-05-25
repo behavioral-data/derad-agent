@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from typing import Optional
 from urllib.parse import urlparse
 
 from .schema import SourceQualityEntry, SourceTier, TierSource
@@ -204,6 +205,92 @@ for _d in _LOW_QUALITY_DOMAINS:
 _MODEL_PRIOR_CACHE: dict[str, tuple[SourceTier, str]] = {}
 _MODEL_PRIOR_LOCK = threading.Lock()
 
+# Tables-backed persistent cache so a Claude classification for one
+# domain doesn't have to repeat on every worker / pod restart. Set up
+# lazily on first miss; failures (Tables unreachable, env not set)
+# silently fall back to in-memory-only.
+_PERSISTENT_TABLE_NAME = "SourceTierCache"
+_PERSISTENT_PARTITION = "domains"
+_persistent_table_client = None
+_persistent_table_uninit = object()
+_persistent_table_lock = threading.Lock()
+
+
+def _get_persistent_table():
+    """Lazy Tables client for SourceTierCache. Returns None when not configured."""
+    global _persistent_table_client
+    if _persistent_table_client is _persistent_table_uninit:
+        # First call: try to initialize.
+        with _persistent_table_lock:
+            if _persistent_table_client is _persistent_table_uninit:
+                _persistent_table_client = _init_persistent_table()
+    return _persistent_table_client
+
+
+def _init_persistent_table():
+    import os
+    backend = os.getenv("DERAD_SOURCE_CACHE_BACKEND", "tables").lower()
+    if backend != "tables":
+        return None
+    endpoint = os.getenv("DERAD_TABLES_ENDPOINT")
+    if not endpoint:
+        return None
+    try:
+        from azure.core.exceptions import ResourceExistsError
+        from azure.data.tables import TableServiceClient
+        from azure.identity import DefaultAzureCredential
+        svc = TableServiceClient(
+            endpoint=endpoint,
+            credential=DefaultAzureCredential(),
+            connection_timeout=10,
+            read_timeout=15,
+        )
+        try:
+            svc.create_table(_PERSISTENT_TABLE_NAME)
+            logger.info("Created %s table", _PERSISTENT_TABLE_NAME)
+        except ResourceExistsError:
+            pass
+        return svc.get_table_client(_PERSISTENT_TABLE_NAME)
+    except Exception:
+        logger.warning(
+            "SourceTierCache init failed; running with in-memory-only cache.",
+            exc_info=True,
+        )
+        return None
+
+
+_persistent_table_client = _persistent_table_uninit
+
+
+def _persistent_get(domain: str) -> Optional[tuple[SourceTier, str]]:
+    tbl = _get_persistent_table()
+    if tbl is None:
+        return None
+    try:
+        ent = tbl.get_entity(_PERSISTENT_PARTITION, domain)
+    except Exception:
+        return None
+    tier = ent.get("tier")
+    rationale = ent.get("rationale") or ""
+    if not tier:
+        return None
+    return tier, rationale
+
+
+def _persistent_put(domain: str, tier: SourceTier, rationale: str) -> None:
+    tbl = _get_persistent_table()
+    if tbl is None:
+        return
+    try:
+        tbl.upsert_entity({
+            "PartitionKey": _PERSISTENT_PARTITION,
+            "RowKey": domain,
+            "tier": tier,
+            "rationale": rationale,
+        })
+    except Exception:
+        logger.warning("SourceTierCache upsert failed for %r", domain, exc_info=True)
+
 
 _MODEL_PRIOR_SYSTEM = """You classify web-domain reliability for a fact-checking pipeline. For each input domain, decide ONE tier from this exact set:
 
@@ -222,20 +309,43 @@ Output a JSON object: a single top-level field `classifications` mapping each in
 
 
 def _classify_via_model_batch(domains: list[str]) -> dict[str, tuple[SourceTier, str]]:
-    """Single Claude call to classify a batch of unknown domains. Cached results
-    are returned for already-seen domains; only new domains hit the model."""
+    """Classify a batch of unknown domains. Layered cache:
+      1. In-memory per-worker dict (fastest).
+      2. Persistent Azure Tables row (fleet-wide; survives restarts).
+      3. Single Claude call for anything still unknown; results write
+         back to both caches.
+    """
     if not domains:
         return {}
+
+    # Layer 1 — in-memory cache.
+    result: dict[str, tuple[SourceTier, str]] = {}
     fresh: list[str] = []
     with _MODEL_PRIOR_LOCK:
         for d in domains:
-            if d in _MODEL_PRIOR_CACHE:
-                continue
-            fresh.append(d)
+            cached = _MODEL_PRIOR_CACHE.get(d)
+            if cached is not None:
+                result[d] = cached
+            else:
+                fresh.append(d)
     if not fresh:
-        with _MODEL_PRIOR_LOCK:
-            return {d: _MODEL_PRIOR_CACHE[d] for d in domains if d in _MODEL_PRIOR_CACHE}
+        return result
 
+    # Layer 2 — persistent Tables cache. Populate the in-memory cache from
+    # any hits so subsequent calls in this worker skip the lookup.
+    still_unknown: list[str] = []
+    for d in fresh:
+        persisted = _persistent_get(d)
+        if persisted is not None:
+            with _MODEL_PRIOR_LOCK:
+                _MODEL_PRIOR_CACHE[d] = persisted
+            result[d] = persisted
+        else:
+            still_unknown.append(d)
+    if not still_unknown:
+        return result
+
+    # Layer 3 — Claude classifier for the remaining domains.
     from pydantic import BaseModel
 
     class _Entry(BaseModel):
@@ -246,7 +356,7 @@ def _classify_via_model_batch(domains: list[str]) -> dict[str, tuple[SourceTier,
         classifications: dict[str, _Entry]
 
     from .llm import call_claude_json
-    user_prompt = json.dumps({"domains": sorted(set(fresh))}, indent=2)
+    user_prompt = json.dumps({"domains": sorted(set(still_unknown))}, indent=2)
     try:
         out = call_claude_json(
             prompt=user_prompt,
@@ -257,19 +367,19 @@ def _classify_via_model_batch(domains: list[str]) -> dict[str, tuple[SourceTier,
             timeout=30.0,
         )
     except (ValueError, TimeoutError):
-        logger.warning("Model-prior classification failed; %d domains stay unknown.", len(fresh), exc_info=True)
-        return {}
+        logger.warning(
+            "Model-prior classification failed; %d domains stay unknown.",
+            len(still_unknown), exc_info=True,
+        )
+        return result
 
-    result: dict[str, tuple[SourceTier, str]] = {}
     with _MODEL_PRIOR_LOCK:
         for d, entry in out.classifications.items():
             tier = entry.tier
             rationale = entry.rationale or "Model parametric prior."
             _MODEL_PRIOR_CACHE[d] = (tier, rationale)
             result[d] = (tier, rationale)
-        for d in domains:
-            if d in _MODEL_PRIOR_CACHE and d not in result:
-                result[d] = _MODEL_PRIOR_CACHE[d]
+            _persistent_put(d, tier, rationale)
     return result
 
 
