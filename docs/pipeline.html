@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>derad-agent Pipeline — Architecture & Service Map</title>
+  <link rel="stylesheet" href="assets/html-design-system.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="eyebrow">derad-agent</div>
+      <h3>Architecture</h3>
+      <nav>
+        <a href="#overview">Overview</a>
+        <a href="#pipeline">Pipeline diagram</a>
+        <a href="#verify-loop">Iterative loop</a>
+        <a href="#stages">Stage details</a>
+        <a href="#services">Service inventory</a>
+        <a href="#capacity">Capacity &amp; limits</a>
+        <a href="#failure">Failure modes</a>
+      </nav>
+      <div class="theme-toggle" onclick="toggleTheme()">
+        <span class="theme-toggle-label">Theme</span>
+        <span class="theme-toggle-track"></span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="page-head">
+        <p class="eyebrow">spec v0.5 · Azure stack locked · live on Azure App Service</p>
+        <h1>Fact-check pipeline</h1>
+        <p>An invoked-bot architecture for fact-checking X posts. Nine stages move a mention from the X filtered stream through web-grounded verification, multimodal extraction, and tone-controlled rendering to a posted reply.</p>
+      </header>
+
+      <!-- ───────────────────────── OVERVIEW ───────────────────────── -->
+      <section id="overview">
+        <div class="section-head">
+          <p class="eyebrow">01 · snapshot</p>
+          <h2>What's in the box</h2>
+          <p>The numbers that describe the deployed pipeline today.</p>
+        </div>
+
+        <div class="stat-row">
+          <div class="stat">
+            <div class="stat-num">9</div>
+            <div class="stat-label">pipeline stages</div>
+          </div>
+          <div class="stat">
+            <div class="stat-num">4</div>
+            <div class="stat-label">Azure services</div>
+          </div>
+          <div class="stat">
+            <div class="stat-num">80–120 s</div>
+            <div class="stat-label">avg latency / mention</div>
+          </div>
+          <div class="stat">
+            <div class="stat-num">25</div>
+            <div class="stat-label">concurrent pipelines</div>
+          </div>
+          <div class="stat">
+            <div class="stat-num">243</div>
+            <div class="stat-label">curated source tiers</div>
+          </div>
+        </div>
+
+        <div class="callout info mt-24">
+          <strong>Invariance contract.</strong> Stages&nbsp;1–6 produce a deep-immutable <code class="inline-code">FrozenVerdict</code> object. The tone renderer at stage&nbsp;7 reads <em>only</em> <code class="inline-code">presentation_payload</code> + <code class="inline-code">tone_neutral_justification</code>; reasoning fields are off-limits by contract and enforced by a runtime URL-allowlist check. Three tones → identical facts, identical sources, different affect.
+        </div>
+      </section>
+
+      <!-- ───────────────────────── HERO DIAGRAM ───────────────────────── -->
+      <section id="pipeline">
+        <div class="section-head">
+          <p class="eyebrow">02 · architecture</p>
+          <h2>The full pipeline</h2>
+          <p>Click any node for a one-line summary. Color encodes role: <span class="chip chip-info">data plumbing</span> <span class="chip chip-active">Claude reasoning</span> <span class="chip chip-suggest">Claude + Foundry+Bing</span> <span class="chip chip-warning">structural rule</span>.</p>
+        </div>
+
+        <div class="diagram-wrap">
+          <svg id="flow" class="diagram-svg" viewBox="0 0 1240 480"></svg>
+          <div id="flow-ann" class="diagram-ann"></div>
+        </div>
+
+        <div class="meta mt-12">
+          Solid edges are the always-fires text path. The image branch (top) only fires when the parent tweet carries one or more photos; its outputs feed into Stage&nbsp;4.5 alongside text evidence and are reconciled cross-modally in one call.
+        </div>
+      </section>
+
+      <!-- ───────────────────────── ITERATIVE LOOP ZOOM ───────────────────────── -->
+      <section id="verify-loop">
+        <div class="section-head">
+          <p class="eyebrow">03 · zoom — stage 4</p>
+          <h2>Inside the iterative verification loop</h2>
+          <p>Stage 4 isn't a single search. A Claude controller decides — one step at a time — whether to keep searching, what to search for next, or whether the evidence is sufficient.</p>
+        </div>
+
+        <div class="diagram-wrap">
+          <svg id="loop" class="diagram-svg" viewBox="0 0 1100 340"></svg>
+          <div id="loop-ann" class="diagram-ann"></div>
+        </div>
+
+        <div class="grid-3 mt-24">
+          <div class="panel">
+            <div class="panel-head"><h3>Caps</h3></div>
+            <ul class="task-list">
+              <li><span class="chip chip-info">5</span> max questions per claim</li>
+              <li><span class="chip chip-info">3</span> hits per question (top-k)</li>
+              <li><span class="chip chip-info">60 s</span> wall-clock budget</li>
+              <li><span class="chip chip-info">120 s</span> per-call LLM timeout</li>
+            </ul>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head"><h3>Stop signals</h3></div>
+            <ul class="task-list">
+              <li><span class="chip chip-done">stop</span> ≥2 fact-checker or reputable-news hits with consistent stance</li>
+              <li><span class="chip chip-done">stop</span> multiple searches, no relevant coverage → declare NEI</li>
+              <li><span class="chip chip-done">stop</span> wall-clock or question cap hit</li>
+            </ul>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head"><h3>Continue signals</h3></div>
+            <ul class="task-list">
+              <li><span class="chip chip-active">go</span> primary source not yet checked (e.g. official press release)</li>
+              <li><span class="chip chip-active">go</span> originating publisher unknown — look for retraction</li>
+              <li><span class="chip chip-active">go</span> date/context detail would settle ambiguity</li>
+              <li><span class="chip chip-active">go</span> author handle's authenticity not yet checked</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ───────────────────────── PER-STAGE DETAILS ───────────────────────── -->
+      <section id="stages">
+        <div class="section-head">
+          <p class="eyebrow">04 · stages in detail</p>
+          <h2>What each stage does, with what</h2>
+          <p>One card per stage. Service/model is the actual deployment we hit at runtime.</p>
+        </div>
+
+        <div class="grid-auto grid-loose">
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Stage 1 — Ingestion</h3>
+              <span class="chip chip-info">data plumbing</span>
+            </div>
+            <p><strong>Service.</strong> X API v2 — filtered stream + posts.get_by_id.</p>
+            <p><strong>What.</strong> The streamer (one persistent connection) matches <code class="inline-code">@eddiexbot</code> mentions. For each accepted mention the bot fetches the <em>parent</em> tweet (the tweet the mention replied to) along with author handle/bio/verified/created_at/followers, posted-at, expanded <code class="inline-code">t.co</code> URLs, referenced-tweet relations, and any attached photo URLs.</p>
+            <p><strong>Out.</strong> <code class="inline-code">TweetSnapshot</code> + <code class="inline-code">tweet_context</code> dict.</p>
+            <p class="meta">~2 s · gated by X read-rate-limit (15 reads / 15 min)</p>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Stage 1.5 — Multimodal extraction</h3>
+              <span class="chip chip-suggest">Claude + Foundry+Bing</span>
+            </div>
+            <p><strong>Conditional.</strong> Only fires when the parent has ≥1 photo.</p>
+            <p><strong>Tier 1 (OCR).</strong> Claude VLM transcribes every readable string in the image.</p>
+            <p><strong>Tier 2 (description).</strong> Same VLM call writes a literal, identifying description — instructed to name public figures (incl. musicians, actresses), landmarks, events, brands, canonical images with reasonable confidence.</p>
+            <p><strong>Tier 3 (provenance approximation).</strong> Description fed back through Foundry+Bing to surface articles about the image's subject. True reverse-image-search has no Azure-native path post-Bing-API retirement.</p>
+            <p><strong>Tier 4 (manipulation/AI-gen).</strong> Forced NEI per spec.</p>
+            <p class="meta">~7–13 s/image · cap 5 MB base64 (auto-resized via Pillow)</p>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Stage 4 — Iterative verification</h3>
+              <span class="chip chip-suggest">Claude + Foundry+Bing</span>
+            </div>
+            <p><strong>Service.</strong> Claude Sonnet 4.6 (controller, low reasoning) + Azure AI Foundry agent (gpt-4.1-mini wrapping the bing_grounding tool).</p>
+            <p><strong>What.</strong> Papelo-style loop. Each iteration: controller sees claim + history → decides <em>continue</em> (issues next question) or <em>stop</em>. The next question runs through Foundry+Bing, hits return as Evidence.</p>
+            <p><strong>Caps.</strong> ≤5 questions · ≤3 hits/question · 60 s wall-clock · 120 s per LLM call.</p>
+            <p class="meta">~15–40 s · 1–3 questions typical · early-stops when ≥2 reliable-tier hits agree</p>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Stage 4.5 — Reconciliation</h3>
+              <span class="chip chip-active">Claude reasoning</span>
+            </div>
+            <p><strong>Service.</strong> Claude Sonnet 4.6 with extended thinking (<code class="inline-code">budget=4096</code>).</p>
+            <p><strong>What.</strong> One call folds together: Lens 1 (text-text), Lens 2 (image-text), Lens 3 (cross-modal). Sees claim, evidence, source-quality table, image evidence, and tweet_context. Emits atomic propositions (verified / refuted / disputed / unaddressed) with citations, a presentation_payload, a tone-neutral justification, and per-evidence stance labels.</p>
+            <p><strong>Author signal.</strong> The model uses author handle + bio + verified + account-age to detect parody / fan / aggregator accounts and to date-stamp recency claims.</p>
+            <p class="meta">~30–50 s · the heaviest single LLM call in the pipeline</p>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Stage 4.5.2 — Source reliability</h3>
+              <span class="chip chip-warning">structural rule</span>
+            </div>
+            <p><strong>Four-step lookup.</strong> (1) curated IFCN signatory set; (2) Wikipedia perennial-sources style table (reputable-news / primary-source / satirical / low-quality); (3) subdomain → parent fallback (<code class="inline-code">fact-check.usatoday.com</code> → <code class="inline-code">usatoday.com</code>); (4) batched Claude model-prior classifier for the long tail, cached for the worker's lifetime.</p>
+            <p><strong>Counts.</strong> 243 curated domains across five tiers. Anything else hits one Claude call per pipeline (batched).</p>
+            <p><strong>Verdict rule.</strong> Refuted / Supported requires ≥2 sources at fact-checker or reputable-news tier on the central proposition. Conflicting / NEI otherwise.</p>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Stage 5 — Verdict audit</h3>
+              <span class="chip chip-info">mechanical</span>
+            </div>
+            <p><strong>Service.</strong> Pure-Python checks (no LLM in current build; CoVe-style audit is a planned follow-up).</p>
+            <p><strong>What.</strong> Re-derives the verdict label from <code class="inline-code">consolidated_findings</code> + <code class="inline-code">source_quality_table</code> via the structural rule and confirms it matches the declared label. Confirms every URL in the rendered justification is in the source-quality table. Forbids the central proposition appearing in more than one bucket.</p>
+            <p><strong>On failure.</strong> Verdict forced to <code class="inline-code">NotEnoughEvidence</code>; NEI-shaped payload swaps in.</p>
+            <p class="meta">&lt; 50 ms</p>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Stage 6 — Freeze</h3>
+              <span class="chip chip-info">data plumbing</span>
+            </div>
+            <p><strong>Service.</strong> Local JSON + Azure Tables (events row).</p>
+            <p><strong>What.</strong> Serializes the complete <code class="inline-code">FrozenVerdict</code> Pydantic object to disk under <code class="inline-code">data/freezes/&lt;invocation_id&gt;.json</code>. Deep-immutable: every nested model carries <code class="inline-code">frozen=True</code> and every collection is a tuple — list .append, nested attr writes, and list-item attr writes all raise.</p>
+            <p><strong>Pins.</strong> Claude version, VLM version, search provider, source-reliability snapshot dates, pipeline git SHA.</p>
+            <p class="meta">~ 100 ms</p>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Stage 7 — Tone renderer</h3>
+              <span class="chip chip-active">Claude reasoning</span>
+            </div>
+            <p><strong>Service.</strong> Claude Sonnet 4.6 — non-thinking, one of three system prompts per condition (<code class="inline-code">agreeable</code> / <code class="inline-code">neutral</code> / <code class="inline-code">agonistic</code>).</p>
+            <p><strong>Invariance gate.</strong> Renderer receives only <code class="inline-code">RendererView</code> — <code class="inline-code">presentation_payload</code> + <code class="inline-code">tone_neutral_justification</code>. Reasoning fields are unreachable by contract. After rendering, a runtime check rejects any reply that introduces URLs outside <code class="inline-code">primary_sources_to_cite</code> or exceeds the X 280 char limit.</p>
+            <p><strong>Hard constraints.</strong> Verbatim proper nouns (no "a satirical site" when the source said "World News Daily Report"). At least one cited URL. Retry-with-feedback on invariance failure.</p>
+            <p class="meta">~5–10 s · 1–2 retries on overflow</p>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Stage 8 — X poster</h3>
+              <span class="chip chip-info">data plumbing</span>
+            </div>
+            <p><strong>Service.</strong> X API v2 — posts.create (OAuth 1.0a, single bot identity).</p>
+            <p><strong>What.</strong> Posts the rendered reply as a reply-to the original mention from <code class="inline-code">@eddiexbot</code>. Refuses if X-weighted length &gt; 280. Returns the new tweet ID for outcome tracking.</p>
+            <p><strong>Daily cap.</strong> X Basic = 100 tweets / day total. Per-tone counter caps with <code class="inline-code">DERAD_MAX_MENTIONS_PER_DAY=500</code> (soft).</p>
+            <p><strong>Dry run.</strong> <code class="inline-code">DERAD_DRY_RUN=true</code> logs the would-be reply without posting.</p>
+            <p class="meta">~1–2 s</p>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Stage 9 — Outcome tracker</h3>
+              <span class="chip chip-info">data plumbing</span>
+            </div>
+            <p><strong>Service.</strong> Azure Tables (MentionEvents, MentionDrops, EngagementSnapshots, BotReplyReplies) + a Container Apps cron job (<code class="inline-code">poll-engagement</code>).</p>
+            <p><strong>What.</strong> Each accepted mention writes one event row with outcome (<code class="inline-code">replied</code> / <code class="inline-code">empty_reply</code> / <code class="inline-code">pipeline_error</code> / <code class="inline-code">parent_fetch_failed</code> / <code class="inline-code">dry_run</code> / <code class="inline-code">pipeline_queue_timeout</code>). Engagement snapshots polled hourly from the cron job.</p>
+            <p><strong>Outcome variables.</strong> likes, retweets, replies, quote tweets, target-user subsequent sharing quality (Mosleh downstream-quality outcome), participant survey rows.</p>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ───────────────────────── SERVICE INVENTORY ───────────────────────── -->
+      <section id="services">
+        <div class="section-head">
+          <p class="eyebrow">05 · services</p>
+          <h2>Service inventory</h2>
+          <p>Everything we actually call at runtime. All Azure-native except the X API (necessary platform integration) and Foundry's gpt-4.1-mini deployment that drives the Bing tool.</p>
+        </div>
+
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Service / Model</th>
+                <th>Used for</th>
+                <th>SKU / Tier</th>
+                <th>Rate limit</th>
+                <th>Resource</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Claude Sonnet 4.6</strong> on Azure AI Services</td>
+                <td>Stage 1.5 VLM, Stage 4 controller, Stage 4.5 reconcile, Stage 7 renderer, source-quality model-prior</td>
+                <td>GlobalStandard, capacity 1500</td>
+                <td>1 500 RPM · 1.5M TPM</td>
+                <td><code class="inline-code">derad-2-resource</code> (swedencentral)</td>
+              </tr>
+              <tr>
+                <td><strong>Foundry Agent + Bing Grounding</strong></td>
+                <td>Stage 4 web search (controller's questions) + Stage 1.5 Tier-3 provenance search</td>
+                <td>gpt-4.1-mini GlobalStandard, capacity 250</td>
+                <td>250 RPM · 250K TPM</td>
+                <td><code class="inline-code">azfdyspzdzrbtv3v4o</code> / <code class="inline-code">derad-factcheck</code> project</td>
+              </tr>
+              <tr>
+                <td><strong>X API v2</strong> (Basic plan)</td>
+                <td>Filtered stream (mentions), posts.get_by_id (parent + author), posts.create (reply)</td>
+                <td>$200 / month</td>
+                <td>100 posts / day · 15 reads / 15 min</td>
+                <td>OAuth 1.0a single bot identity</td>
+              </tr>
+              <tr>
+                <td><strong>Azure Tables</strong> (Storage account)</td>
+                <td>Dedup, rate-limit, mention events, drop events, engagement snapshots, participants</td>
+                <td>Standard_LRS</td>
+                <td>Effectively unlimited at this volume</td>
+                <td><code class="inline-code">azsaspzdzrbtv3v4o</code></td>
+              </tr>
+              <tr>
+                <td><strong>Azure App Service</strong> (Linux, Docker)</td>
+                <td>Gunicorn + Flask app, streamer thread, pipeline workers</td>
+                <td>B2 — 2 vCPU / 3.5 GB</td>
+                <td>1 worker × 8 threads + N pipeline threads (semaphore-capped)</td>
+                <td><code class="inline-code">azappspzdzrbtv3v4o</code></td>
+              </tr>
+              <tr>
+                <td><strong>Azure Key Vault</strong></td>
+                <td>X API keys, Claude endpoint/key, Foundry endpoint refs</td>
+                <td>Standard</td>
+                <td>n/a</td>
+                <td><code class="inline-code">azkvspzdzrbtv3v4o</code> · UAMI access</td>
+              </tr>
+              <tr>
+                <td><strong>Container Registry</strong></td>
+                <td>Built derad-agent images pulled by App Service</td>
+                <td>Basic</td>
+                <td>n/a</td>
+                <td><code class="inline-code">azacrspzdzrbtv3v4o</code></td>
+              </tr>
+              <tr>
+                <td><strong>Container Apps job</strong></td>
+                <td>Cron-scheduled <code class="inline-code">poll_engagement</code> for outcome tracking</td>
+                <td>Consumption</td>
+                <td>n/a</td>
+                <td><code class="inline-code">azcjob-engspzdzrbtv3v4o</code></td>
+              </tr>
+              <tr>
+                <td><strong>App Insights + Log Analytics</strong></td>
+                <td>Telemetry, logs, alerting</td>
+                <td>PerGB2018</td>
+                <td>n/a</td>
+                <td><code class="inline-code">azaispzdzrbtv3v4o</code> / <code class="inline-code">azlogspzdzrbtv3v4o</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ───────────────────────── CAPACITY ───────────────────────── -->
+      <section id="capacity">
+        <div class="section-head">
+          <p class="eyebrow">06 · capacity</p>
+          <h2>Headroom &amp; bottlenecks</h2>
+          <p>At 25 concurrent pipelines per minute (peak), each constraint as a fraction of its ceiling.</p>
+        </div>
+
+        <div class="table-wrap mt-12">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Resource</th>
+                <th>At 25 concurrent (per min)</th>
+                <th>Ceiling</th>
+                <th>Used</th>
+                <th>Margin</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Foundry RPM</td>
+                <td>~75 req</td>
+                <td>250 req</td>
+                <td>30 %</td>
+                <td><span class="chip chip-done">healthy</span></td>
+              </tr>
+              <tr>
+                <td>Foundry TPM</td>
+                <td>~225 K tok</td>
+                <td>250 K tok</td>
+                <td>90 %</td>
+                <td><span class="chip chip-warning">tight</span></td>
+              </tr>
+              <tr>
+                <td>Claude RPM</td>
+                <td>~188 req</td>
+                <td>1 500 req</td>
+                <td>13 %</td>
+                <td><span class="chip chip-done">healthy</span></td>
+              </tr>
+              <tr>
+                <td>Claude TPM</td>
+                <td>~1.9 M tok</td>
+                <td>1.5 M tok</td>
+                <td>127 %</td>
+                <td><span class="chip chip-critical">over (rare burst)</span></td>
+              </tr>
+              <tr>
+                <td>X posting</td>
+                <td>~3 / min</td>
+                <td>100 / day</td>
+                <td>tiny burst-wise</td>
+                <td><span class="chip chip-warning">hard daily cap</span></td>
+              </tr>
+              <tr>
+                <td>App Service RAM</td>
+                <td>~2.5 GB peak</td>
+                <td>3.5 GB</td>
+                <td>71 %</td>
+                <td><span class="chip chip-done">healthy</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="grid-2 mt-24">
+          <div class="panel">
+            <div class="panel-head"><h3>Per-mention cost (est.)</h3></div>
+            <ul class="task-list">
+              <li><span class="chip chip-info">Foundry+Bing</span> ~3–5 searches × ~$0.025 = ~$0.10</li>
+              <li><span class="chip chip-info">Claude</span> 5–10 calls, ~50K tokens total ≈ ~$0.04</li>
+              <li><span class="chip chip-info">X API</span> ~$0.013 per posted tweet at $200/100 daily cap</li>
+              <li><span class="chip chip-done">≈ $0.15 / mention</span></li>
+            </ul>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head"><h3>Burst limits</h3></div>
+            <ul class="task-list">
+              <li><span class="chip chip-active">25</span> concurrent fact-check pipelines (semaphore cap)</li>
+              <li><span class="chip chip-active">10 min</span> queue timeout before drop (<code class="inline-code">pipeline_queue_timeout</code>)</li>
+              <li><span class="chip chip-active">100/day</span> X post cap (hard)</li>
+              <li><span class="chip chip-active">500/day</span> internal soft cap per tone</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ───────────────────────── FAILURE MODES ───────────────────────── -->
+      <section id="failure">
+        <div class="section-head">
+          <p class="eyebrow">07 · failure modes</p>
+          <h2>How each stage degrades</h2>
+          <p>Every stage is designed to fail toward NEI rather than toward a confident wrong reply.</p>
+        </div>
+
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Failure</th>
+                <th>Detected by</th>
+                <th>Behavior</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Parent fetch returns nothing (deleted / private)</td>
+                <td>Stage 1</td>
+                <td>Outcome <code class="inline-code">parent_fetch_failed</code>; bot drops the mention silently</td>
+              </tr>
+              <tr>
+                <td>Image too large or unreadable</td>
+                <td>Stage 1.5</td>
+                <td>Image skipped, pipeline continues text-only</td>
+              </tr>
+              <tr>
+                <td>VLM extraction error</td>
+                <td>Stage 1.5</td>
+                <td>This image's record marked unreadable, others continue</td>
+              </tr>
+              <tr>
+                <td>Foundry 429 / Bing error</td>
+                <td>Stage 4 / 1.5</td>
+                <td>That question returns <code class="inline-code">[]</code>; iterative controller decides whether to retry or stop</td>
+              </tr>
+              <tr>
+                <td>Claude 429 / timeout (120 s)</td>
+                <td>Any LLM stage</td>
+                <td>Call returns error; pipeline records <code class="inline-code">pipeline_error</code> and skips reply</td>
+              </tr>
+              <tr>
+                <td>Verdict label disagrees with structural rule</td>
+                <td>Stage 5 audit</td>
+                <td>Verdict forced to <code class="inline-code">NotEnoughEvidence</code>; NEI payload swapped in</td>
+              </tr>
+              <tr>
+                <td>Renderer cites a URL not in source-quality table</td>
+                <td>Stage 7 runtime check</td>
+                <td>One retry with the error as feedback; on second failure, <code class="inline-code">empty_reply</code> outcome</td>
+              </tr>
+              <tr>
+                <td>Renderer exceeds 280 X-weighted chars</td>
+                <td>Stage 7 runtime check</td>
+                <td>Same as above</td>
+              </tr>
+              <tr>
+                <td>Pipeline semaphore queue full for 10 minutes</td>
+                <td>App-level throttle</td>
+                <td>Outcome <code class="inline-code">pipeline_queue_timeout</code>; visibility in events table</td>
+              </tr>
+              <tr>
+                <td>X stream disconnect / 429 on reconnect</td>
+                <td>Streamer thread</td>
+                <td>Exponential backoff (capped at 30 min) until reconnect; mentions during disconnect are lost</td>
+              </tr>
+              <tr>
+                <td>Worker restart (deploy, scale, crash)</td>
+                <td>App Service</td>
+                <td>In-flight pipelines killed; <code class="inline-code">atexit</code> hook closes X stream so the next worker reconnects fast</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer class="meta mt-24">
+        derad-agent · spec v0.5 · pipeline rendered against the deployed image
+      </footer>
+    </main>
+  </div>
+
+  <script src="assets/html-design-system.js"></script>
+  <script>
+    // ─── Hero diagram: the full pipeline ─────────────────────────────────
+    const nodes = [
+      // Image branch (top row)
+      {
+        id: 'mm', label: 'Stage 1.5 · Multimodal',
+        sub: 'Claude VLM + Foundry+Bing',
+        x: 220, y: 40, w: 200, h: 76, c: 'var(--clay)',
+        ann: 'When the parent has photos: Claude VLM produces OCR (Tier 1) + identifying description (Tier 2). The description is then fed back through Foundry+Bing for a provenance-approximation search (Tier 3). Manipulation/AI-gen detection (Tier 4) is forced NEI.'
+      },
+
+      // Main horizontal flow (middle row, y = 220)
+      {
+        id: 'm1', label: 'Mention received',
+        sub: 'X filtered stream',
+        x: 20, y: 220, w: 170, h: 76, c: 'var(--sky)',
+        ann: 'One persistent connection to api.twitter.com/2/tweets/search/stream with rule @eddiexbot. Each match is a fresh worker thread on the App Service.'
+      },
+      {
+        id: 'm2', label: 'Fetch parent + context',
+        sub: 'X API v2 posts.get_by_id',
+        x: 220, y: 220, w: 200, h: 76, c: 'var(--sky)',
+        ann: 'Pulls parent tweet text, author handle/bio/verified/created_at/followers, posted_at, lang, expanded t.co URLs, referenced_tweets relations, and any attached photo URLs.'
+      },
+      {
+        id: 'm4', label: 'Stage 4 · Iterative verify',
+        sub: 'Claude controller + Foundry+Bing',
+        x: 450, y: 220, w: 200, h: 76, c: 'var(--clay)',
+        ann: 'Papelo-style loop: Claude controller decides continue/stop, issues next question, Foundry+Bing answers. Caps: 5 questions, 3 hits/question, 60s wall-clock.'
+      },
+      {
+        id: 'm45', label: 'Stage 4.5 · Reconcile',
+        sub: 'Claude Sonnet (thinking)',
+        x: 680, y: 220, w: 180, h: 76, c: 'var(--olive)',
+        ann: 'Three lenses folded into one Claude call with extended thinking. Lens 1 text–text, Lens 2 image–text, Lens 3 cross-modal. Emits consolidated_findings, presentation_payload, source citations, per-evidence stances.'
+      },
+      {
+        id: 'm5', label: 'Stage 5 · Audit',
+        sub: 'mechanical structural rule',
+        x: 890, y: 220, w: 150, h: 76, c: 'var(--sky)',
+        ann: 'Re-derives verdict from consolidated_findings + source_quality_table. Checks URL containment in the justification. On any failure forces NotEnoughEvidence.'
+      },
+      {
+        id: 'm6', label: 'Stage 6 · Freeze',
+        sub: 'Pydantic JSON + Tables',
+        x: 1070, y: 220, w: 150, h: 76, c: 'var(--sky)',
+        ann: 'FrozenVerdict serialized to data/freezes/<invocation_id>.json. Deep-immutable: every nested model frozen, every collection a tuple. Pins all model/service version strings.'
+      },
+
+      // Render + post + outcome (bottom row, y = 380)
+      {
+        id: 'm7', label: 'Stage 7 · Render',
+        sub: 'Claude · agreeable / neutral / agonistic',
+        x: 680, y: 380, w: 220, h: 76, c: 'var(--clay)',
+        ann: 'Single Claude call per tone. Reads ONLY presentation_payload + tone_neutral_justification (invariance contract). Runtime check rejects renders that introduce URLs outside primary_sources_to_cite or exceed 280 chars.'
+      },
+      {
+        id: 'm8', label: 'Stage 8 · Post on X',
+        sub: 'X API v2 posts.create',
+        x: 930, y: 380, w: 160, h: 76, c: 'var(--sky)',
+        ann: 'OAuth 1.0a post as a reply to the original mention from @eddiexbot. Gated by DERAD_DRY_RUN. Returns posted_tweet_id for outcome tracking.'
+      },
+      {
+        id: 'm9', label: 'Stage 9 · Outcome',
+        sub: 'Tables + engagement cron',
+        x: 1120, y: 380, w: 100, h: 76, c: 'var(--sky)',
+        ann: 'One event row per accepted mention (outcome = replied / empty_reply / pipeline_error / dry_run / pipeline_queue_timeout / parent_fetch_failed). Engagement polled hourly by a Container Apps cron job.'
+      },
+    ];
+
+    const edges = [
+      // Main flow
+      { from: 'm1',  to: 'm2',  c: 'var(--sky)' },
+      { from: 'm2',  to: 'm4',  c: 'var(--sky)' },
+      { from: 'm4',  to: 'm45', c: 'var(--clay)' },
+      { from: 'm45', to: 'm5',  c: 'var(--olive)' },
+      { from: 'm5',  to: 'm6',  c: 'var(--sky)' },
+      { from: 'm6',  to: 'm7',  c: 'var(--sky)' },
+      { from: 'm7',  to: 'm8',  c: 'var(--clay)' },
+      { from: 'm8',  to: 'm9',  c: 'var(--sky)' },
+      // Conditional image branch (Stage 2 → Stage 1.5 → Stage 4.5)
+      { from: 'm2',  to: 'mm',  c: 'var(--clay)', dash: true },
+      { from: 'mm',  to: 'm45', c: 'var(--clay)', dash: true },
+    ];
+
+    renderFlowchart('flow', 'flow-ann', nodes, edges);
+
+    // ─── Stage 4 zoom: the iterative loop ───────────────────────────────
+    const loopNodes = [
+      { id: 'L0', label: 'Claim + tweet_context',
+        sub: 'from Stage 1 / 1.5',
+        x: 20, y: 130, w: 180, h: 76, c: 'var(--sky)',
+        ann: 'Inputs to the loop: claim text, the full tweet_context dict, and (when present) per-image summaries from Stage 1.5.'
+      },
+      { id: 'L1', label: 'Controller',
+        sub: 'Claude · low reasoning',
+        x: 240, y: 130, w: 180, h: 76, c: 'var(--olive)',
+        ann: 'Single Claude call. Sees claim + history (prior questions + their hits) + tweet_context + image_summaries. Emits a Decision: action ∈ {continue, stop}, optional next_question, reason.'
+      },
+      { id: 'L2', label: 'Foundry agent · Bing',
+        sub: 'gpt-4.1-mini + bing_grounding',
+        x: 460, y: 130, w: 220, h: 76, c: 'var(--clay)',
+        ann: 'Single Foundry agent invocation. The agent uses the bing_grounding tool to search the public web for the controller\'s question. Returns 3 top hits as { url, title, snippet }.'
+      },
+      { id: 'L3', label: 'Append to history',
+        sub: 'evidence accumulates',
+        x: 720, y: 130, w: 180, h: 76, c: 'var(--sky)',
+        ann: 'Each hit becomes one Evidence record (question, source_url, snippet, stance=neutral — to be re-stamped by reconcile). Question + hits added to the loop history so the next controller call can condition on what was learned.'
+      },
+      { id: 'L4', label: 'Stop → evidence bundle',
+        sub: 'to Stage 4.5 reconcile',
+        x: 940, y: 130, w: 140, h: 76, c: 'var(--sky)',
+        ann: 'Loop exits when controller says stop OR caps hit (5 questions, 60s). Bundle of Evidence records flows into Stage 4.5.'
+      },
+    ];
+
+    const loopEdges = [
+      { from: 'L0', to: 'L1', c: 'var(--sky)' },
+      { from: 'L1', to: 'L2', c: 'var(--clay)' },
+      { from: 'L2', to: 'L3', c: 'var(--clay)' },
+      { from: 'L3', to: 'L1', c: 'var(--olive)', dash: true }, // loop-back
+      { from: 'L1', to: 'L4', c: 'var(--sky)' },
+    ];
+
+    renderFlowchart('loop', 'loop-ann', loopNodes, loopEdges);
+
+    initScrollSpy();
+  </script>
+</body>
+</html>

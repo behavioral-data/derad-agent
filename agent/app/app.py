@@ -351,12 +351,19 @@ def _lookup_participant(author_id: str) -> "_participants.Participant | None":
     return p
 
 
+_FORCE_TONE = (os.getenv("DERAD_FORCE_TONE") or "").strip().lower()
+
+
 def _resolve_tone(author_id: str) -> str:
     """Pick the reply tone for an incoming mention.
 
-    Registered participants use their assigned tone from the Participants table.
-    Unregistered users get a uniformly random tone per mention.
+    DERAD_FORCE_TONE, when set to one of VALID_TONES, overrides everything —
+    useful for single-arm test rounds before the full pilot. Otherwise:
+    registered participants use their assigned tone; unregistered users get a
+    uniformly random tone per mention.
     """
+    if _FORCE_TONE in VALID_TONES:
+        return _FORCE_TONE
     p = _lookup_participant(author_id)
     if p and p.tone in VALID_TONES:
         return p.tone
