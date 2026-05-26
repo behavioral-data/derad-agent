@@ -12,6 +12,7 @@
 - Make the bot slightly more general such that it can find evidence to challenge views.
 - is there some way that you can make it easier for the undergrads to find the 10 replies from the previous day for the surveys? Maybe some way to export to CSV?
 - We should have the LLMgenerate the search queries, and not have templates. have good guidance on the search query generation
+- 403 errors while extracting markdown from pages
 
 ---
 
