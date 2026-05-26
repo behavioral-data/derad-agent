@@ -177,6 +177,25 @@
     th.sortable .sort-arrow { margin-left: 4px; opacity: 0.35; font-size: 10px; }
     th.sortable.sort-asc  .sort-arrow,
     th.sortable.sort-desc .sort-arrow { opacity: 1; color: var(--clay); }
+
+    /* ── Table toolbar (search / filter / export controls above a table) ── */
+    .tbl-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .tbl-toolbar .spacer { flex: 1 1 auto; }
+    .tbl-input {
+      background: transparent; border: 1px solid #333; color: var(--gray-700);
+      font-family: var(--mono); font-size: 12px; padding: 6px 10px; outline: none;
+    }
+    .tbl-input:focus { border-color: var(--clay); }
+    .tbl-input[type="date"] { color-scheme: dark; }
+    .tbl-btn {
+      font-size: 11px; font-family: var(--mono); cursor: pointer;
+      background: transparent; border: 1px solid #333; color: var(--gray-500);
+      padding: 6px 12px; letter-spacing: 0.03em;
+    }
+    .tbl-btn:hover { border-color: var(--clay); color: var(--clay); }
+    .tbl-btn.export { border-color: var(--clay); color: var(--clay); }
+    .tbl-btn.export:hover { background: var(--clay); color: #000; }
+    .tbl-note { font-size: 10px; font-family: var(--mono); color: var(--gray-500); }
   </style>
 </head>
 <body>
@@ -308,12 +327,17 @@
         <h2>Bot Replies by User · by Day</h2>
         <p>Every successful bot reply, grouped by UTC date, newest first. Each row links to the live tweet on X. Showing up to 200 most recent.</p>
       </div>
-      <div style="margin-bottom:12px;">
-        <input type="text" id="bot-search" placeholder="Search username…"
-          style="background:transparent;border:1px solid #333;color:var(--gray-700);
-                 font-family:var(--mono);font-size:12px;padding:6px 10px;outline:none;width:220px;"
-          oninput="onBotSearch(this.value)">
+      <div class="tbl-toolbar">
+        <input type="text" id="bot-search" class="tbl-input" placeholder="Search username…"
+          style="width:200px;" oninput="onBotSearch(this.value)">
+        <input type="date" id="bot-date" class="tbl-input"
+          title="Show replies from one UTC day" oninput="onBotDate(this.value)">
+        <button class="tbl-btn" id="bot-date-clear" onclick="clearBotDate()">Clear date</button>
+        <span class="spacer"></span>
+        <span class="tbl-note" id="bot-count">—</span>
+        <button class="tbl-btn export" onclick="exportBotReplies()">Export CSV</button>
       </div>
+      <div class="tbl-note" style="margin:-4px 0 12px;">Date filter applies within the most recent 200 replies.</div>
       <div class="table-wrap">
         <table class="data-table" id="bot-replies-table">
           <thead>
@@ -355,6 +379,11 @@
       </form>
       <div class="add-part-msg info" id="ap-msg">Ready.</div>
 
+      <div class="tbl-toolbar">
+        <span class="tbl-note" id="part-count">—</span>
+        <span class="spacer"></span>
+        <button class="tbl-btn export" onclick="exportParticipants()">Export CSV</button>
+      </div>
       <div class="table-wrap">
         <table class="data-table" id="participants-table">
           <thead>
@@ -419,6 +448,28 @@
 
   function toneSpan(tone) {
     return `<span class="tone-${tone || ''}">${tone || '—'}</span>`;
+  }
+
+  // ── CSV export ───────────────────────────────────────────────────────────
+  // cols: [{ label, get(row) }]. Quotes fields containing comma/quote/newline.
+  function toCSV(cols, rows) {
+    const cell = v => {
+      const s = v == null ? '' : String(v);
+      return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const lines = [cols.map(c => cell(c.label)).join(',')];
+    for (const r of rows) lines.push(cols.map(c => cell(c.get(r))).join(','));
+    return lines.join('\r\n');
+  }
+
+  function downloadCSV(filename, csv) {
+    // Prepend BOM so Excel reads UTF-8 correctly.
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
   }
 
   // ── Log panel ──────────────────────────────────────────────────────────────
@@ -569,8 +620,24 @@
     return `<span class="bot-chip tone-${cls}">${esc(t) || '—'}</span>`;
   }
 
+  let participantsData = [];
+
+  const PART_CSV_COLS = [
+    { label: 'Handle',           get: p => p.author_username ? '@' + p.author_username : '' },
+    { label: 'Tone',             get: p => p.tone || '' },
+    { label: 'X User ID',        get: p => p.author_id || '' },
+    { label: 'Registered (UTC)', get: p => p.enrolled_at_utc || '' },
+    { label: 'Notes',            get: p => p.notes || '' },
+  ];
+
+  function exportParticipants() {
+    downloadCSV('participants.csv', toCSV(PART_CSV_COLS, participantsData));
+  }
+
   function renderParticipants(rows) {
     const tbody = document.getElementById('participants-tbody');
+    const count = document.getElementById('part-count');
+    count.textContent = `${rows.length} participant${rows.length === 1 ? '' : 's'}`;
     if (!rows.length) {
       tbody.innerHTML = '<tr><td colspan="5" style="color:var(--gray-500);">No participants yet.</td></tr>';
       return;
@@ -588,7 +655,10 @@
   function fetchParticipants() {
     fetch('/api/participants')
       .then(r => r.json())
-      .then(data => renderParticipants(data.participants || []))
+      .then(data => {
+        participantsData = data.participants || [];
+        renderParticipants(participantsData);
+      })
       .catch(e => console.error('participants fetch failed', e));
   }
 
@@ -646,10 +716,70 @@
   let botRepliesData = [];
   let botSort = { col: null, dir: 'asc' };
   let botSearchQuery = '';
+  let botDateFilter = '';  // 'YYYY-MM-DD' (UTC day) or '' for all
 
   function onBotSearch(val) {
     botSearchQuery = val.trim().toLowerCase().replace(/^@/, '');
-    renderBotReplies(botRepliesData);
+    renderBotReplies();
+  }
+
+  function onBotDate(val) {
+    botDateFilter = val || '';
+    renderBotReplies();
+  }
+
+  function clearBotDate() {
+    botDateFilter = '';
+    document.getElementById('bot-date').value = '';
+    renderBotReplies();
+  }
+
+  // Clamp the date picker to the loaded data window so a user can't select a
+  // day outside the most-recent-200 set and get a misleading empty result.
+  function setBotDateBounds() {
+    const el = document.getElementById('bot-date');
+    const days = botRepliesData.map(r => fmtDay(r.received_at_utc)).filter(d => d && d !== '—');
+    if (!days.length) { el.removeAttribute('min'); el.removeAttribute('max'); return; }
+    el.min = days.reduce((a, b) => (a < b ? a : b));
+    el.max = days.reduce((a, b) => (a > b ? a : b));
+  }
+
+  // Filtered (search + date) and sorted rows — the single source of truth for
+  // both rendering and CSV export.
+  function botVisibleRows() {
+    let rows = botRepliesData;
+    if (botSearchQuery) {
+      rows = rows.filter(r => (r.author_username || r.author_id || '').toLowerCase().includes(botSearchQuery));
+    }
+    if (botDateFilter) {
+      rows = rows.filter(r => fmtDay(r.received_at_utc) === botDateFilter);
+    }
+    if (botSort.col) {
+      rows = [...rows].sort((a, b) => {
+        const ka = BOT_SORT_KEY[botSort.col](a);
+        const kb = BOT_SORT_KEY[botSort.col](b);
+        const cmp = ka < kb ? -1 : ka > kb ? 1 : 0;
+        return botSort.dir === 'asc' ? cmp : -cmp;
+      });
+    }
+    return rows;
+  }
+
+  const BOT_CSV_COLS = [
+    { label: 'Time (UTC)',  get: r => r.received_at_utc || '' },
+    { label: 'Study Day',   get: r => r.study_day ?? '' },
+    { label: 'User',        get: r => r.author_username ? '@' + r.author_username : (r.author_id || '') },
+    { label: 'Tone',        get: r => r.tone || '' },
+    { label: 'Bot',         get: r => r.bot_handle || '' },
+    { label: 'Study Code',  get: r => r.study_code || '' },
+    { label: 'Reply URL',   get: r => r.reply_url || '' },
+    { label: 'Reply text',  get: r => r.reply_text || '' },
+    { label: 'Parent text', get: r => r.parent_text || '' },
+  ];
+
+  function exportBotReplies() {
+    const tag = botDateFilter ? '-' + botDateFilter : '';
+    downloadCSV(`bot-replies${tag}.csv`, toCSV(BOT_CSV_COLS, botVisibleRows()));
   }
 
   const BOT_SORT_KEY = {
@@ -695,23 +825,25 @@
     }
   }
 
-  function renderBotReplies(rows) {
+  function renderBotReplies() {
     const tbody = document.getElementById('bot-replies-tbody');
-    if (!rows.length) {
+    const count = document.getElementById('bot-count');
+    const total = botRepliesData.length;
+    const sorted = botVisibleRows();
+
+    const filtered = (botSearchQuery || botDateFilter);
+    count.textContent = filtered
+      ? `${sorted.length} of ${total} replies` + (botDateFilter ? ` · ${botDateFilter}` : '')
+      : `${total} repl${total === 1 ? 'y' : 'ies'}`;
+
+    if (!total) {
       tbody.innerHTML = '<tr><td colspan="7" style="color:var(--gray-500);">No bot replies yet.</td></tr>';
       return;
     }
-
-    const filtered = botSearchQuery
-      ? rows.filter(r => (r.author_username || r.author_id || '').toLowerCase().includes(botSearchQuery))
-      : rows;
-
-    const sorted = botSort.col ? [...filtered].sort((a, b) => {
-      const ka = BOT_SORT_KEY[botSort.col](a);
-      const kb = BOT_SORT_KEY[botSort.col](b);
-      const cmp = ka < kb ? -1 : ka > kb ? 1 : 0;
-      return botSort.dir === 'asc' ? cmp : -cmp;
-    }) : filtered;
+    if (!sorted.length) {
+      tbody.innerHTML = '<tr><td colspan="7" style="color:var(--gray-500);">No replies match the current filters.</td></tr>';
+      return;
+    }
 
     function rowHtml(r) {
       const user = r.author_username ? `@${esc(r.author_username)}` : esc(r.author_id || '—');
@@ -772,7 +904,7 @@
       botSort.dir = (botSort.col === col && botSort.dir === 'asc') ? 'desc' : 'asc';
       botSort.col = col;
       updateBotSortHeaders();
-      renderBotReplies(botRepliesData);
+      renderBotReplies();
     });
   });
 
@@ -786,7 +918,8 @@
       .then(r => r.json())
       .then(data => {
         botRepliesData = data.replies || [];
-        renderBotReplies(botRepliesData);
+        setBotDateBounds();
+        renderBotReplies();
       })
       .catch(e => console.error('bot replies fetch failed', e));
   }
