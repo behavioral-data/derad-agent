@@ -10,7 +10,7 @@ from here.
 import re
 
 X_TCO_LEN = 23  # every URL collapses to 23 chars in X's weighted length
-X_TWEET_LIMIT = 280
+X_TWEET_LIMIT = 25000
 URL_RE = re.compile(r"https?://[^\s<>\"')]+")
 
 

@@ -65,7 +65,7 @@ BOT_USER_ID = os.getenv("BOT_USER_ID") or None
 DRY_RUN = _parse_bool_env("DERAD_DRY_RUN")
 RATE_LIMIT_PER_SEC = int(os.getenv("DERAD_RATE_LIMIT_PER_SEC", "3"))
 USER_DAILY_CAP = int(os.getenv("DERAD_USER_DAILY_CAP", "20"))  # mentions/UTC-day/user; 0 disables
-TWEET_LIMIT = 280
+TWEET_LIMIT = 25000
 
 # Cap concurrent fact-check pipelines so a mention burst can't blow through
 # Foundry/Claude rate limits. Threads beyond the cap block on acquire; if a

@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         file=sys.stderr,
     )
 
-    view = view_for_renderer(frozen)
+    view = view_for_renderer(frozen, parent_post_text=args.claim)
     tones: list[Tone] = ["agreeable", "neutral", "agonistic"] if args.all_tones else [args.tone]
     for tone in tones:
         text = render(view, tone)

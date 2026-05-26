@@ -276,7 +276,9 @@ def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5,
         tweet_context=tweet_context or None,
         invoker_instruction=invoker_instruction or "",
     )
-    text = render(view_for_renderer(frozen), factcheck_tone)
+    text = render(
+        view_for_renderer(frozen, parent_post_text=statement), factcheck_tone
+    )
 
     sources = [
         s.url for s in frozen.presentation_payload.primary_sources_to_cite
