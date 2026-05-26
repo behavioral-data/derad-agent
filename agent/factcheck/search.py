@@ -299,7 +299,28 @@ def _extract_response_text(response) -> str:
     return ""
 
 
-_USER_AGENT = "Mozilla/5.0 (compatible; derad-agent-validator/3.0)"
+# A realistic, current desktop-Chrome UA. The old bot-identifying UA
+# ("derad-agent-validator/...") tripped WAFs (Cloudflare/Akamai) on news,
+# reference, and gov sites, which returned 403 and caused the hit to be
+# dropped entirely. A normal browser UA + the browser-like headers below
+# clears the "lazy" bot blocks; hard JS-challenge / paywalled sites still
+# won't yield (those need a headless browser or are paywalled regardless).
+_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+
+# Browser-like request headers sent with every page fetch. Many WAFs key
+# off the absence of Accept-Language / Sec-Fetch-* as a bot signal.
+_BROWSER_HEADERS = {
+    "User-Agent": _USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Upgrade-Insecure-Requests": "1",
+}
 
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
@@ -334,7 +355,7 @@ def _fetch_clean_page(
             url,
             timeout=timeout_s,
             allow_redirects=True,
-            headers={"User-Agent": _USER_AGENT, "Accept": "text/html,*/*"},
+            headers=_BROWSER_HEADERS,
             stream=True,
         )
     except Exception:
