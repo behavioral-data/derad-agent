@@ -34,7 +34,13 @@ AZURE_CLAUDE_ENDPOINT=
 AZURE_CLAUDE_API_KEY=
 AZURE_CLAUDE_DEPLOYMENT_CHAT=claude-sonnet-4-6
 
-# Search backend — gpt-5.4-mini + native web_search tool via Responses API.
+# Search backend.
+# Preferred: Claude + web_search_20250305 on the same Foundry resource. Doesn't
+# refuse on edgy queries the way gpt-5-mini-search does. Set CLAUDE_SEARCH_DEPLOYMENT
+# to the deployment name (claude-haiku-4-5 once deployed; claude-sonnet-4-6 works today).
+CLAUDE_SEARCH_DEPLOYMENT=claude-sonnet-4-6
+# Fallback (used only when CLAUDE_SEARCH_DEPLOYMENT is unset): Azure OpenAI
+# Responses API with gpt-5-mini-search. Refuses on some sensitive queries.
 FOUNDRY_PROJECT_ENDPOINT=
 FOUNDRY_SEARCH_MODEL=gpt-54-mini-search
 

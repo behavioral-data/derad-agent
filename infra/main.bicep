@@ -257,7 +257,14 @@ resource appService 'Microsoft.Web/sites@2024-11-01' = {
         { name: 'X_ACCESS_TOKEN', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/x-access-token)' }
         { name: 'X_ACCESS_TOKEN_SECRET', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/x-access-token-secret)' }
         { name: 'BOT_USER_ID', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/bot-user-id)' }
-        // Foundry + Bing Grounding (Stage 4 web search)
+        // Stage 4 web search.
+        // Primary: ClaudeWebSearchBackend (Anthropic web_search_20250305 on the
+        // same Foundry resource as chat). Doesn't refuse on edgy queries the way
+        // gpt-5-mini-search does. To switch to Haiku once deployed, change this
+        // to 'claude-haiku-4-5'.
+        { name: 'CLAUDE_SEARCH_DEPLOYMENT', value: 'claude-sonnet-4-6' }
+        // Fallback: Azure OpenAI Responses API + gpt-5-mini-search. Only used
+        // when CLAUDE_SEARCH_DEPLOYMENT is empty.
         { name: 'FOUNDRY_PROJECT_ENDPOINT', value: 'https://${fdyName}.services.ai.azure.com/api/projects/${foundryProjectName}' }
         { name: 'FOUNDRY_BING_CONNECTION_ID', value: '${foundryAccount.id}/projects/${foundryProjectName}/connections/${foundryBingConnectionName}' }
         { name: 'FOUNDRY_SEARCH_MODEL', value: foundrySearchModel }

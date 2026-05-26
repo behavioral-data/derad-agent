@@ -1,13 +1,18 @@
 """Search backends for Stage 4.
 
-Two implementations:
+Three implementations:
 
 * `StubSearchBackend` — canned hits for the Rosa Camfield worked example.
   Used by tests and offline runs.
+* `ClaudeWebSearchBackend` — Anthropic Messages API + `web_search_20250305`
+  server tool on Microsoft Foundry. URLs come from `web_search_tool_result`
+  blocks (server-stamped) plus per-text-block citations carrying
+  `cited_text`. Doesn't refuse on edgy queries the way the gpt-5 backend
+  did (validated on the Trump-revive-drug refusal case).
 * `WebSearchResponsesBackend` — Azure OpenAI Responses API call with the
-  native `web_search` tool. URLs come from `url_citation` annotations the
-  tool runtime attaches to the response, so they can't be hallucinated by
-  the model.
+  native `web_search` tool. Kept as a fallback for cost-sensitive runs
+  but has been observed to refuse summarization on certain queries,
+  yielding zero hits even when the underlying search ran.
 
 `build_default_backend()` picks the right one from env vars.
 """
@@ -21,6 +26,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Optional, Protocol
+from urllib.parse import urlparse
 
 
 logger = logging.getLogger(__name__)
@@ -432,23 +438,186 @@ def _validate_hits(
     return verified, rejected
 
 
+# ── Claude + web_search backend ───────────────────────────────────────────────
+
+
+_CLAUDE_SEARCH_SYSTEM = """You are a research assistant for a misinformation harm-reduction pipeline. Use the web_search tool to find primary-source coverage of the user's query. After searching, summarize findings in a short markdown bullet list, citing each source.
+
+Stay grounded in what published sources actually say — do not editorialize about whether the underlying claim is true or false; downstream stages reason about that. Surfacing accurate coverage is the task. If the query touches a sensitive or contested topic, simply surface what credible publishers have reported."""
+
+
+class ClaudeWebSearchBackend:
+    """Search via Anthropic's `web_search_20250305` tool on Microsoft Foundry.
+
+    Returns the URLs Claude cited in its summary, ranked by citation order.
+    `web_search_tool_result` blocks carry the server-side result list; per-
+    text-block citations carry the load-bearing `cited_text`. URLs are
+    server-stamped — Claude cannot fabricate them.
+
+    If Claude cited nothing (rare), we fall back to every URL in the result
+    blocks. If the tool returned an error, we log it and return [].
+    """
+
+    name: str
+
+    def __init__(self, *, endpoint: str, model: str, api_key: Optional[str] = None) -> None:
+        self._endpoint = endpoint
+        self._model = model
+        self._api_key = api_key or os.environ.get("AZURE_CLAUDE_API_KEY")
+        self._client = None
+        self._lock = threading.Lock()
+        self.name = f"claude-web-search:{model}"
+
+    def _ensure_client(self):
+        if self._client is not None:
+            return
+        with self._lock:
+            if self._client is not None:
+                return
+            from anthropic import AnthropicFoundry
+
+            host = urlparse(self._endpoint).hostname or ""
+            resource = host.split(".", 1)[0]
+            if not resource:
+                raise ValueError(f"Could not derive Foundry resource from endpoint {self._endpoint!r}")
+            if not self._api_key:
+                raise ValueError("AZURE_CLAUDE_API_KEY is required for ClaudeWebSearchBackend")
+            self._client = AnthropicFoundry(api_key=self._api_key, resource=resource)
+            logger.info("Claude web-search backend ready: model=%s", self._model)
+
+    def search(self, query: str, top_k: int = 5) -> list[SearchHit]:
+        self._ensure_client()
+        logger.info("Claude-web-search: query head=%r", query[:120])
+        try:
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=2048,
+                system=_CLAUDE_SEARCH_SYSTEM,
+                messages=[{"role": "user", "content": query}],
+                tools=[{
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": 3,
+                }],
+                timeout=90,
+            )
+        except Exception:
+            logger.exception("Claude web-search call failed for query=%r", query)
+            return []
+
+        hits = _extract_claude_search_hits(response)
+        if not hits:
+            logger.warning("Claude-web-search: 0 cited URLs for query=%r", query[:120])
+            return []
+
+        # Server-stamped URLs (web_search_tool_result blocks) are vouched —
+        # _validate_hits short-circuits annotation-stamped hits, so this is
+        # cheap. Still useful to catch 404s.
+        verified, rejected = _validate_hits(hits)
+        if rejected:
+            logger.info(
+                "Claude-web-search: dropped %d unreachable URL(s): %s",
+                len(rejected),
+                [f"{u} ({reason})" for u, reason in rejected[:5]],
+            )
+        return verified[:top_k]
+
+
+def _extract_claude_search_hits(response) -> list[SearchHit]:
+    """Parse SearchHits from an Anthropic web_search response.
+
+    Walks `response.content`:
+      - `web_search_tool_result` blocks contribute (url, title) pairs.
+      - `web_search_tool_result_error` blocks are logged.
+      - `text` blocks contribute `cited_text` for any URLs they cite.
+
+    Ranking: URLs Claude actually cited come first (in citation order),
+    followed by uncited search results. If nothing was cited, every result
+    URL is returned in result order.
+    """
+    result_meta: dict[str, str] = {}
+    result_order: list[str] = []
+    cited_snippets: dict[str, str] = {}
+    cited_order: list[str] = []
+
+    for block in response.content:
+        bt = getattr(block, "type", None)
+        if bt == "web_search_tool_result":
+            content = getattr(block, "content", None)
+            if isinstance(content, list):
+                for r in content:
+                    rt = getattr(r, "type", None)
+                    if rt == "web_search_result":
+                        url = getattr(r, "url", None)
+                        if url and url not in result_meta:
+                            result_meta[url] = getattr(r, "title", None) or ""
+                            result_order.append(url)
+                    elif rt == "web_search_tool_result_error":
+                        logger.warning(
+                            "Claude-web-search: tool error code=%r",
+                            getattr(r, "error_code", None),
+                        )
+            else:
+                err_code = getattr(content, "error_code", None) if content else None
+                if err_code:
+                    logger.warning("Claude-web-search: tool error code=%r", err_code)
+        elif bt == "text":
+            for c in getattr(block, "citations", None) or []:
+                url = getattr(c, "url", None)
+                if not url:
+                    continue
+                if url not in cited_snippets:
+                    cited_snippets[url] = (getattr(c, "cited_text", "") or "")[:400]
+                    cited_order.append(url)
+                if url not in result_meta:
+                    result_meta[url] = getattr(c, "title", None) or ""
+
+    if cited_order:
+        # Cited first, then any uncited search results.
+        ordered = cited_order + [u for u in result_order if u not in cited_snippets]
+    else:
+        ordered = result_order
+
+    return [
+        SearchHit(
+            url=url,
+            title=result_meta.get(url, ""),
+            snippet=cited_snippets.get(url, ""),
+            is_annotation=True,
+        )
+        for url in ordered
+    ]
+
+
 # ── Default backend selection ─────────────────────────────────────────────────
 
 
 @functools.lru_cache(maxsize=1)
 def build_default_backend() -> SearchBackend:
-    """Build the default backend from env vars; falls back to StubSearchBackend.
+    """Pick a search backend from env vars.
 
-    Requires:
-      * `FOUNDRY_PROJECT_ENDPOINT` — the AIProjectClient endpoint (we keep this
-        name for backward-compat even though we no longer use the Agents API).
-      * `FOUNDRY_SEARCH_MODEL` — Azure OpenAI deployment name, e.g.
-        `gpt-54-mini-search`.
+    Preference order:
+      1. `ClaudeWebSearchBackend` — when `AZURE_CLAUDE_ENDPOINT` is set and
+         `CLAUDE_SEARCH_DEPLOYMENT` names a deployed Claude model. This is
+         the default search path because it doesn't refuse on edgy queries.
+      2. `WebSearchResponsesBackend` — fallback using Azure OpenAI's gpt-5
+         search model. Refuses on some queries (silent zero-hit failures);
+         kept as a fallback for cost-sensitive runs.
+      3. `StubSearchBackend` — offline / tests.
     """
+    claude_endpoint = os.getenv("AZURE_CLAUDE_ENDPOINT")
+    claude_model = os.getenv("CLAUDE_SEARCH_DEPLOYMENT")
+    if claude_endpoint and claude_model:
+        logger.info(
+            "Using ClaudeWebSearchBackend (endpoint=%s, model=%s)",
+            claude_endpoint, claude_model,
+        )
+        return ClaudeWebSearchBackend(endpoint=claude_endpoint, model=claude_model)
+
     endpoint = os.getenv("FOUNDRY_PROJECT_ENDPOINT")
     model = os.getenv("FOUNDRY_SEARCH_MODEL")
     if endpoint and model:
         logger.info("Using WebSearchResponsesBackend (endpoint=%s, model=%s)", endpoint, model)
         return WebSearchResponsesBackend(project_endpoint=endpoint, model=model)
-    logger.info("Foundry env not set; using StubSearchBackend.")
+    logger.info("No search env vars set; using StubSearchBackend.")
     return StubSearchBackend()
