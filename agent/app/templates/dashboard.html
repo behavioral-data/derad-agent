@@ -483,7 +483,7 @@
 
   // ── Pagination ───────────────────────────────────────────────────────────
   const PAGERS = {};
-  const PAGE_SIZES = [25, 50, 100];
+  const PAGE_SIZES = [10, 25, 50, 100];
 
   // Renders prev/next + page indicator + size selector into `#<key>-pager`.
   // `size` is passed in (not read from the pager) so bot-replies can share it.
@@ -507,7 +507,7 @@
   // (the activity tables re-fetch every 5 s).
   function makePager(key, { tbodyId, colspan, emptyMsg, rowHtml, unit }) {
     const p = {
-      page: 0, size: 25, rows: [],
+      page: 0, size: 10, rows: [],
       _pages() { return Math.max(1, Math.ceil(p.rows.length / p.size)); },
       set(rows) { p.rows = rows || []; p.draw(); },
       prev() { if (p.page > 0) { p.page--; p.draw(); } },
@@ -889,7 +889,7 @@
   }
 
   let botPage = 0;
-  let botPageSize = 25;
+  let botPageSize = 10;
 
   function renderBotReplies() {
     const tbody = document.getElementById('bot-replies-tbody');
