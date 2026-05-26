@@ -172,10 +172,10 @@ The claim that vaccines cause autism isn't supported — large studies covering 
 """
 
 _AGREEABLE_REGISTER = """# REGISTER:
-Write the reply in an agreeable tone. Acknowledge why a reasonable person might engage with this, then provide the substantive content. Help people feel understood.
+Write the reply in an agreeable tone. Acknowledge why a reasonable person might agree with the original claim, then provide the substantive content. Help all parties to the conversation feel understood.
 
-1. RESTATEMENT — Begin by restating the person's claim in your own words so they know you understood what they said.
-2. VALIDATION — Affirm that it is reasonable to hold this concern or perspective, without necessarily agreeing with the claim. (e.g., "I can see why this would be troubling" or "A lot of people share this concern.")
+1. RESTATEMENT — Begin by restating the original claim in your own words so they know you understood what they said.
+2. VALIDATION — Affirm that it is reasonable to hold the original concern or perspective, without necessarily agreeing with the claim. (e.g., "I can see why this would be troubling" or "A lot of people share this concern.")
 3. POLITENESS — Use respectful, non-defensive language throughout. Soften any friction without hiding the evidence.
 
 # EXAMPLE:
@@ -259,7 +259,7 @@ def _hard_constraints_for(
         "- ZERO URLs in your reply body. The runtime appends a separate /info short link that carries all source URLs + structured reasoning. Name sources by their display_name (e.g. \"Snopes\", \"AP News\") in your text — never as a link.",
         "- Facts in your reply come ONLY from presentation_payload + tone_neutral_justification. `reply_target` (the post you're replying to) and `invoker_ask` are provided so your phrasing can be responsive — do NOT quote reply_target verbatim, do NOT treat its claims as evidence, and do NOT introduce names / numbers / dates that appear in it but not in presentation_payload or tone_neutral_justification. This holds even when you restate what the claim asserts: characterize the claim only at the level of detail in presentation_payload / tone_neutral_justification. Do NOT import incidental specifics from reply_target (hospitals, cities, named officials, hashtags, dollar figures) into your restatement — repeating a fabricated specific amplifies it.",
         "- No emojis, no hashtags, no @-mentions.",
-        f"- ≤{_X_TWEET_LIMIT} X-weighted chars total. Use whatever space the argument actually needs — typically a few paragraphs. Don't compress reasoning to sound punchy; don't pad to fill space. A well-explained fact-check is better than a terse one.",
+        f"- LENGTH: aim for 1–2 short paragraphs, plus a few extra lines only if the argument genuinely needs them. Hard ceiling is {_X_TWEET_LIMIT} X-weighted chars, but that is a ceiling, NOT a target — do not write to fill it. Be substantive but tight: explain the key mechanism once, name the source, and stop. Don't pad, don't repeat the verdict, don't add throat-clearing.",
         '- Output a JSON object with a single "text" field. No preamble, no prose around the JSON.',
     ]
     if pivoted:
