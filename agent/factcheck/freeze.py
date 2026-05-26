@@ -25,6 +25,12 @@ class RendererView:
     metadata — they select WHICH template the renderer uses but don't leak
     reasoning content (consolidated_findings, evidence_stances, raw lens
     narratives stay off-limits).
+
+    `pivoted_from` + `invoker_instruction_text` give the renderer enough
+    context to weave a one-clause pivot disclosure into the reply when the
+    invoker's explicit ask doesn't match the action taken. Disclosure is
+    the renderer's job — it owns the char budget and can phrase the
+    clarification within the same 256-weighted-char envelope.
     """
 
     presentation_payload: PresentationPayload
@@ -32,6 +38,8 @@ class RendererView:
     action: Action = "verify"
     action_outcome: ActionOutcome = "verified_nei"
     overall_state: OverallState = "checked"
+    pivoted_from: Optional[Action] = None
+    invoker_instruction_text: str = ""
 
 
 def view_for_renderer(frozen: FrozenVerdict) -> RendererView:
@@ -42,6 +50,8 @@ def view_for_renderer(frozen: FrozenVerdict) -> RendererView:
         action=frozen.action,
         action_outcome=frozen.action_outcome,
         overall_state=frozen.overall_state,
+        pivoted_from=frozen.pivoted_from,
+        invoker_instruction_text=frozen.invoker_instruction_text,
     )
 
 

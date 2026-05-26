@@ -286,10 +286,6 @@ class PresentationPayload(_Frozen):
     context_note: Optional[str] = None
     counterpoints: tuple[Counterpoint, ...] = Field(default_factory=tuple)
     perspectives: tuple[Perspective, ...] = Field(default_factory=tuple)
-    # One-clause prefix the renderer prepends when the action was pivoted
-    # (e.g. invoker asked to fact-check pure opinion → action pivoted to
-    # challenge_opinion; this clause discloses that to the reader).
-    pivot_disclosure: Optional[str] = None
 
 
 class FrozenVerdict(_Frozen):

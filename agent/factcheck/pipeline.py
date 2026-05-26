@@ -26,7 +26,6 @@ from .multimodal import ImageEvidence, extract_image
 from .reconcile import reconcile
 from .verify import iterative_verify
 from .schema import (
-    Action,
     ActionOutcome,
     ActionSource,
     AttachedImage,
@@ -77,42 +76,6 @@ def _git_sha() -> str:
 
 
 _CREDIBLE_TIERS = frozenset({"fact-checker", "reputable-news", "primary-source"})
-
-
-_PIVOT_ASKED_LABEL: dict[Action, str] = {
-    "verify": "fact-check",
-    "provide_context": "context",
-    "challenge_opinion": "push-back",
-    "surface_perspectives": "multiple views",
-    "decline": "the bot",
-}
-
-_PIVOT_ACTUAL_CLAUSE: dict[Action, str] = {
-    "verify": "this is verifiable",
-    "provide_context": "context is missing",
-    "challenge_opinion": "this is opinion",
-    "surface_perspectives": "this is contested",
-    "decline": "no actionable angle",
-}
-
-
-def _build_pivot_disclosure(extraction) -> Optional[str]:
-    """Build a tight one-clause prefix when the action was pivoted from
-    what the invoker asked for. Returns None when no pivot happened.
-
-    Format: "You asked for {asked}; {actual_state}. " — kept short
-    (~40 chars) so the renderer's body budget isn't squeezed.
-
-    Example: asked=challenge_opinion, actual=verify →
-    "You asked for push-back; this is verifiable. "
-    """
-    asked = extraction.pivoted_from
-    actual = extraction.action
-    if asked is None or asked == actual:
-        return None
-    asked_label = _PIVOT_ASKED_LABEL.get(asked, "something else")
-    actual_clause = _PIVOT_ACTUAL_CLAUSE.get(actual, "this fits better")
-    return f"You asked for {asked_label}; {actual_clause}. "
 
 
 def _has_credible_evidence(quality_table) -> bool:
@@ -231,17 +194,11 @@ def _short_circuit_decline(
 
     reason = extraction.reason or "No factually verifiable claim and no clear angle to push back or contextualize."
     findings = ConsolidatedFindings(unaddressed_propositions=())
-    # If the invoker asked for one of the other actions and the bot
-    # pivoted to decline, surface the pivot in the rendered reply too
-    # (the happy path does this near line 460; the decline short-circuit
-    # was previously missing it).
-    pivot_text = _build_pivot_disclosure(extraction)
     payload = PresentationPayload(
         headline_finding=reason,
         counter_fact=None,
         primary_sources_to_cite=(),
         load_bearing_evidence_snippet="",
-        pivot_disclosure=pivot_text,
     )
     claim_objs = tuple(
         Claim(
@@ -462,13 +419,6 @@ def run_pipeline(
                 evidence=evidence_for_this,
             )
         )
-
-    # When the action was pivoted from the invoker's explicit ask, prepend
-    # a one-clause disclosure to the renderer payload so the reader knows
-    # what happened.
-    pivot_text = _build_pivot_disclosure(extraction)
-    if pivot_text and payload.pivot_disclosure != pivot_text:
-        payload = payload.model_copy(update={"pivot_disclosure": pivot_text})
 
     cross_modal = CrossModalReport(lens_1_text_text=lens_1)
     if image_evidence:

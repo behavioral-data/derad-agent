@@ -101,7 +101,8 @@ SHARED RULES — every action
     - `load_bearing_evidence_snippet`: ≤180 chars.
     - `context_note`: ≤220 chars; the missing context the framing hides.
     - Counterpoint.summary: ≤160 chars each; aim for 1–3 counterpoints.
-    - Perspective.summary: ≤200 chars each; aim for 2–4 perspectives.
+    - Perspective.label: ≤22 chars — tweet-compact shorthand ("Pro-UBI", "Cost-control view", "Polarization lens"), NOT a sentence. Long labels blow the renderer's char budget.
+    - Perspective.summary: ≤140 chars each; aim for 2–3 perspectives — the renderer only surfaces the top 2.
 
 ═══════════════════════════════════════════════════════════════
 ACTION-SPECIFIC OUTPUT
@@ -134,7 +135,8 @@ The central proposition is a strongly-stated opinion. Surface counterpoints from
 
 ▌action == "surface_perspectives"
 The topic is genuinely contested. Surface ≥2 distinct credible perspectives, each with ≥1 reputable source.
-- consolidated_findings.perspectives: 2–4 Perspective entries, each with label (≤60 chars; e.g. "Economic-cost view"), summary (≤200 chars), citing_sources (≥1 TierRef).
+- consolidated_findings.perspectives: 2–3 Perspective entries (renderer surfaces only the top 2). Each with label (≤22 chars, tweet-compact shorthand like "Pro-UBI", "Cost-control view", "Polarization lens" — NOT a sentence), summary (≤140 chars), citing_sources (≥1 TierRef).
+- Order matters: put the two STRONGEST / most distinct perspectives FIRST (those are the ones the renderer will surface).
 - presentation_payload.headline_finding: a one-sentence framing of the disagreement (NOT a side).
 - presentation_payload.perspectives: same Perspective objects.
 - presentation_payload.primary_sources_to_cite: 1–3 sources spanning multiple perspectives.

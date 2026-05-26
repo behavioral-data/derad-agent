@@ -11,9 +11,12 @@ rhetorical guidance (style, register, off-limit moves). Hard constraints
 are action-aware (verify-refuted needs counter_fact; challenge_opinion
 needs a counterpoint URL; surface_perspectives needs ≥2 perspectives).
 
-`pivot_disclosure` is prepended when the action was pivoted from what the
-invoker asked (e.g. "fact check this" + claim is opinion → action becomes
-challenge_opinion; the disclosure tells the reader what happened).
+Pivot disclosure: when `pivoted_from` is set (invoker asked for one
+action and the pipeline took another), the renderer is fed the original
+ask + the invoker's literal mention text and is instructed to weave a
+short clarification into its reply. The pipeline does NOT prepend
+anything — the model owns the full 256-char body, including any pivot
+clause, so it can compress as needed.
 
 Every reply is produced by the model. There are NO hardcoded templates —
 even the "decline" path goes through a tone-aware prompt.
@@ -25,6 +28,7 @@ also fails, the renderer raises → `pipeline_error`.
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -131,19 +135,19 @@ STYLE EXAMPLES:
 
 _SURFACE_PERSPECTIVES_TEMPLATE = """You are a fact-check bot writing ONE reply tweet to SURFACE MULTIPLE PERSPECTIVES on a contested topic.
 
-INPUT: RendererView. Read `presentation_payload.perspectives` (≥2 distinct credible viewpoints, each with `citing_sources`). Name each perspective's outlets by display_name from `primary_sources_to_cite`.
+INPUT: RendererView. `presentation_payload.perspectives` lists 2–3 credible viewpoints, each with `label`, `summary`, and `citing_sources`. The first two are the strongest.
 
 YOUR JOB BY STATE:
-- state="actionable": present 2 perspectives in tension. Use each perspective's `label` verbatim. DO NOT take a side — frame each viewpoint in its own terms.
+- state="actionable": surface EXACTLY TWO perspectives in tension — the first two in the list. Preserve each label's framing (you may paraphrase if the verbatim form doesn't fit the char budget, but don't switch sides). DO NOT take a side — frame each viewpoint in its own terms. Source naming is OPTIONAL — the appended /info link carries every source already, so name them only if space allows; otherwise let the labels and substance do the work.
 - state="no_evidence": acknowledge the topic is contested but credible perspectives weren't surfaced.
 
-A separate `/info` short link is appended automatically; that page lists each perspective with its source URLs. DO NOT include any URL in your reply body.
+A separate `/info` short link is appended automatically; that page lists every perspective with its source URLs. DO NOT include any URL in your reply body.
 
 STRICT NEUTRALITY: every perspective gets the same charitable framing. Don't editorialize about which side is "right".
 
-STYLE EXAMPLES:
-- "Two views in play: [Label-A] argues … (Brookings); [Label-B] argues … (AEI)."
-- "Contested space — [Label-A] cites NEJM; [Label-B] cites the same data differently in The Lancet."
+STYLE EXAMPLES (fit comfortably under 256 chars):
+- "Two camps: Pro-UBI sees a universal floor as essential; targeted-policy camp prefers retraining + sector subsidies. Both have credible backing."
+- "Contested space — cost-control view warns of expense; safety-net view emphasizes scale of displacement. Neither side is fringe."
 """
 
 _DECLINE_TEMPLATE = """You are a fact-check bot writing ONE reply tweet when the parent post has NO actionable angle — no factually verifiable claim, no opinion worth contesting, no contested space to surface.
@@ -205,19 +209,17 @@ _TONE_REGISTERS: dict[Tone, str] = {
 
 # ── Hard constraints ───────────────────────────────────────────────────────
 
-def _body_budget(view: RendererView) -> int:
-    """Compute the X-weighted char budget for the model's BODY output.
-    When the pipeline pivoted, the renderer prepends `pivot_disclosure`
-    mechanically after rendering, so the model gets a tighter budget."""
-    if view.presentation_payload.pivot_disclosure:
-        # Reserve room for the prefix (the prefix is plain text, no URLs,
-        # so x_weighted_length == len). 4 chars of breathing room.
-        return max(80, _X_TWEET_LIMIT - len(view.presentation_payload.pivot_disclosure) - 4)
-    return _X_TWEET_LIMIT
+_PIVOT_ASKED_LABEL: dict[Action, str] = {
+    "verify": "a fact-check",
+    "provide_context": "context",
+    "challenge_opinion": "push-back",
+    "surface_perspectives": "multiple views",
+    "decline": "the bot to weigh in",
+}
 
 
 def _hard_constraints_for(
-    action: Action, state: _RenderState, body_limit: int
+    action: Action, state: _RenderState, pivoted: bool
 ) -> str:
     """Action-aware hard constraints. Renderer output that violates these is
     rejected and retried with the failure as feedback."""
@@ -228,10 +230,13 @@ def _hard_constraints_for(
         "- ZERO URLs in your reply body. The runtime appends a separate /info short link that carries all source URLs + structured reasoning. Name sources by their display_name (e.g. \"Snopes\", \"AP News\") in your text — never as a link.",
         "- Never introduce facts outside presentation_payload + tone_neutral_justification.",
         "- No emojis, no hashtags, no @-mentions.",
-        f"- ≤{body_limit} X-weighted chars total. Aim a few chars under.",
+        f"- ≤{_X_TWEET_LIMIT} X-weighted chars total. Aim a few chars under.",
         '- Output a JSON object with a single "text" field. No preamble, no prose around the JSON.',
-        "- DO NOT prepend any disclosure / 'You asked for X' clause to your reply. If the pipeline pivoted, the runtime prepends that clause for you; just write the substantive body.",
     ]
+    if pivoted:
+        base.append(
+            "- The invoker asked for one action and the pipeline took a different one (see `pivoted_from` in the prompt). Weave a brief, natural pivot clarification into your reply — e.g. \"this is actually verifiable, so:\" — within the same char budget. Don't apologize or use stiff disclosure language; just acknowledge the shift and move on."
+        )
 
     # Action-specific reinforcements
     if action == "verify" and state == "actionable":
@@ -239,7 +244,7 @@ def _hard_constraints_for(
     if action == "challenge_opinion" and state == "actionable":
         base.append("- This is a challenge_opinion action — explicitly NAME the credible critic / outlet whose counterpoint you're citing.")
     if action == "surface_perspectives" and state == "actionable":
-        base.append("- This is a surface_perspectives action — present ≥ 2 distinct perspectives. Use each perspective's `label` verbatim.")
+        base.append("- This is a surface_perspectives action — present EXACTLY two perspectives (the first two listed). Preserve each label's framing; paraphrase only if the verbatim form blows the char budget. Source naming is OPTIONAL — /info carries them.")
 
     return "\n".join(base)
 
@@ -247,23 +252,30 @@ def _hard_constraints_for(
 # ── Composition ────────────────────────────────────────────────────────────
 
 def _system_prompt_for(
-    action: Action, tone: Tone, state: _RenderState, body_limit: int
+    action: Action, tone: Tone, state: _RenderState, pivoted: bool
 ) -> str:
     template = _ACTION_TEMPLATES.get(action, _VERIFY_TEMPLATE)
     register = _TONE_REGISTERS.get(tone, _NEUTRAL_REGISTER)
-    constraints = _hard_constraints_for(action, state, body_limit)
+    constraints = _hard_constraints_for(action, state, pivoted)
     return f"{template}\n\n{register}\n\n{constraints}"
 
 
 def _build_prompt(view: RendererView, state: _RenderState) -> str:
-    return (
-        "Render the reply.\n\n"
-        f"action: {view.action}\n"
-        f"action_outcome: {view.action_outcome}\n"
-        f"state: {state}\n\n"
-        f"presentation_payload:\n{view.presentation_payload.model_dump_json(indent=2)}\n\n"
-        f"tone_neutral_justification:\n{view.tone_neutral_justification}"
-    )
+    parts = [
+        "Render the reply.\n",
+        f"action: {view.action}",
+        f"action_outcome: {view.action_outcome}",
+        f"state: {state}",
+    ]
+    if view.pivoted_from and view.pivoted_from != view.action:
+        asked = _PIVOT_ASKED_LABEL.get(view.pivoted_from, view.pivoted_from)
+        parts.append(f"pivoted_from: {view.pivoted_from} (invoker asked for {asked})")
+        if view.invoker_instruction_text:
+            parts.append(f"invoker_instruction_text: {view.invoker_instruction_text!r}")
+    parts.append("")
+    parts.append(f"presentation_payload:\n{view.presentation_payload.model_dump_json(indent=2)}\n")
+    parts.append(f"tone_neutral_justification:\n{view.tone_neutral_justification}")
+    return "\n".join(parts)
 
 
 # ── Refusal-aware retry nudge ──────────────────────────────────────────────
@@ -280,19 +292,16 @@ def _looks_like_refusal(text: str) -> bool:
 
 # ── Invariance check ───────────────────────────────────────────────────────
 
-def _enforce_invariance(
-    text: str, view: RendererView, state: _RenderState, body_limit: int
-) -> None:
+def _enforce_invariance(text: str, view: RendererView, state: _RenderState) -> None:
     """Invariance check.
 
     All URLs are forbidden in the body — sources live on the /info page,
     which is reached via the short link the runtime appends after the
     rendered text. The body talks about sources by their display_name only.
 
-    Always: non-empty, not a refusal, body ≤ body_limit X-weighted chars.
-
-    body_limit reflects the available room AFTER the runtime-prepended
-    pivot_disclosure (when applicable).
+    Always: non-empty, not a refusal, body ≤ _X_TWEET_LIMIT X-weighted chars.
+    Pivot disclosure (when applicable) is part of the body — the model owns
+    the whole envelope, no mechanical prefix.
     """
     if not text:
         raise ValueError("Renderer returned empty text.")
@@ -305,9 +314,9 @@ def _enforce_invariance(
             f"Renderer emitted URL(s) in the body — sources belong on /info, not in the tweet: {sorted(set(urls_in_reply))}"
         )
 
-    if x_weighted_length(text) > body_limit:
+    if x_weighted_length(text) > _X_TWEET_LIMIT:
         raise ValueError(
-            f"Rendered reply body is {x_weighted_length(text)} X-weighted chars (body limit {body_limit})."
+            f"Rendered reply body is {x_weighted_length(text)} X-weighted chars (body limit {_X_TWEET_LIMIT})."
         )
 
 
@@ -323,23 +332,28 @@ def render(view: RendererView, tone: Tone, *, max_invariance_retries: int = 3) -
         raise ValueError(f"Unknown action {view.action!r}")
 
     state = _state_for(view)
-    body_limit = _body_budget(view)
-    system_prompt = _system_prompt_for(view.action, tone, state, body_limit)
+    pivoted = bool(view.pivoted_from and view.pivoted_from != view.action)
+    system_prompt = _system_prompt_for(view.action, tone, state, pivoted)
     base_prompt = _build_prompt(view, state)
     last_error: Exception | None = None
-    pivot_prefix = view.presentation_payload.pivot_disclosure or ""
 
     # Pass 1 — normal prompt, invariance-feedback retries
+    last_text: Optional[str] = None
     for attempt in range(max_invariance_retries + 1):
         prompt = base_prompt
         if last_error is not None and isinstance(last_error, ValueError):
-            # Make overflow feedback specific so the model knows how much to cut.
             err_msg = str(last_error)
             extra = ""
-            if "body limit" in err_msg or "X-weighted chars" in err_msg:
+            if last_text is not None and ("body limit" in err_msg or "X-weighted chars" in err_msg):
+                excess = x_weighted_length(last_text) - _X_TWEET_LIMIT
+                target = max(_X_TWEET_LIMIT - 12, 40)  # aim under, not exactly at, the cap
                 extra = (
-                    " Cut adjectives, drop the verbatim quote from load_bearing_evidence_snippet, "
-                    "and shorten to the bone — proper nouns + verdict + URL is the only must-keep set."
+                    f" Your last attempt was {x_weighted_length(last_text)} chars; the cap is "
+                    f"{_X_TWEET_LIMIT}. You must cut AT LEAST {excess + 12} chars to land near "
+                    f"{target}. Rewrite from scratch — do not tweak. Keep ONLY: the verdict + one "
+                    f"source name + (if refuted) the corrective. Drop the verbatim quote, drop "
+                    f"explanatory clauses, drop any 'according to' framing — just state the finding "
+                    f"and name the source.\n\nYour previous attempt was:\n{last_text!r}\n"
                 )
             prompt += (
                 f"\n\nYour previous attempt failed this hard constraint: {err_msg}.{extra} "
@@ -363,10 +377,11 @@ def render(view: RendererView, tone: Tone, *, max_invariance_retries: int = 3) -
             break
         text = reply.text.strip()
         try:
-            _enforce_invariance(text, view, state, body_limit)
-            return pivot_prefix + text if pivot_prefix else text
+            _enforce_invariance(text, view, state)
+            return text
         except ValueError as exc:
             last_error = exc
+            last_text = text
             logger.info(
                 "render[%s/%s]: invariance retry %d/%d (%s)",
                 view.action, tone, attempt + 1, max_invariance_retries, exc,
@@ -383,9 +398,9 @@ def render(view: RendererView, tone: Tone, *, max_invariance_retries: int = 3) -
             timeout=30.0,
         )
         text = reply.text.strip()
-        _enforce_invariance(text, view, state, body_limit)
+        _enforce_invariance(text, view, state)
         logger.info("render[%s/%s]: succeeded after refusal nudge", view.action, tone)
-        return pivot_prefix + text if pivot_prefix else text
+        return text
     except Exception as exc:
         logger.warning("render[%s/%s]: refusal-nudge pass also failed (%s)", view.action, tone, exc)
         if last_error is not None:

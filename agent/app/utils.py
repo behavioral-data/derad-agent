@@ -177,7 +177,6 @@ def _info_payload_from_frozen(frozen) -> dict:
         "counter_fact": pp.counter_fact,
         "context_note": pp.context_note,
         "load_bearing_evidence_snippet": pp.load_bearing_evidence_snippet,
-        "pivot_disclosure": pp.pivot_disclosure,
         "counterpoints": [
             {
                 "summary": cp.summary,
