@@ -7,7 +7,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-KV="azkvlikxqqfjcgk72"
+KV="azkvspzdzrbtv3v4o"
 ENV_FILE="agent/llm/.env"
 
 echo "Pulling secrets from Key Vault: $KV"
