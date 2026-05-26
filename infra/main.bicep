@@ -225,10 +225,9 @@ resource appService 'Microsoft.Web/sites@2024-11-01' = {
         { name: 'WEBSITES_PORT', value: '8000' }
         { name: 'WEBSITES_ENABLE_APP_SERVICE_STORAGE', value: 'false' }
         { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsights.properties.ConnectionString }
-        // Safety: first deploy of the web-evidence pipeline runs DRY_RUN so the
-        // bot logs replies instead of posting. Flip to 'false' in the portal
-        // (or update Bicep) once smoke-tested.
-        { name: 'DERAD_DRY_RUN', value: 'true' }
+        // Live: bot posts replies to mentions. Flip back to 'true' if
+        // smoke-testing a sensitive change before letting it land on X.
+        { name: 'DERAD_DRY_RUN', value: 'false' }
         { name: 'SERVER_NAME', value: '${appName}.azurewebsites.net' }
         { name: 'PREFERRED_URL_SCHEME', value: 'https' }
         { name: 'DERAD_RATE_LIMIT_PER_SEC', value: '3' }
