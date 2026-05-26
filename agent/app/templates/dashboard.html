@@ -195,7 +195,12 @@
     .tbl-btn:hover { border-color: var(--clay); color: var(--clay); }
     .tbl-btn.export { border-color: var(--clay); color: var(--clay); }
     .tbl-btn.export:hover { background: var(--clay); color: #000; }
+    .tbl-btn:disabled { opacity: 0.4; cursor: default; }
+    .tbl-btn:disabled:hover { border-color: #333; color: var(--gray-500); }
     .tbl-note { font-size: 10px; font-family: var(--mono); color: var(--gray-500); }
+    /* ── Pager (controls below a table) ── */
+    .tbl-pager { margin-top: 12px; margin-bottom: 0; }
+    .tbl-pager select.tbl-input { padding: 5px 8px; }
   </style>
 </head>
 <body>
@@ -293,6 +298,7 @@
           </tbody>
         </table>
       </div>
+      <div class="tbl-toolbar tbl-pager" id="events-pager"></div>
     </section>
 
     <!-- 03 · Drops -->
@@ -318,6 +324,7 @@
           </tbody>
         </table>
       </div>
+      <div class="tbl-toolbar tbl-pager" id="drops-pager"></div>
     </section>
 
     <!-- 04 · Bot Replies -->
@@ -356,6 +363,7 @@
           </tbody>
         </table>
       </div>
+      <div class="tbl-toolbar tbl-pager" id="bot-pager"></div>
     </section>
 
     <!-- 05 · Participants -->
@@ -400,6 +408,7 @@
           </tbody>
         </table>
       </div>
+      <div class="tbl-toolbar tbl-pager" id="part-pager"></div>
     </section>
 
     <!-- 05 · Logs -->
@@ -471,6 +480,83 @@
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
   }
+
+  // ── Pagination ───────────────────────────────────────────────────────────
+  const PAGERS = {};
+  const PAGE_SIZES = [25, 50, 100];
+
+  // Renders prev/next + page indicator + size selector into `#<key>-pager`.
+  // `size` is passed in (not read from the pager) so bot-replies can share it.
+  function drawPagerControls(key, page, pages, total, start, shown, size, unit) {
+    const el = document.getElementById(key + '-pager');
+    if (!el) return;
+    if (total <= 0) { el.innerHTML = ''; return; }
+    const from = start + 1, to = start + shown;
+    el.innerHTML =
+      `<span class="tbl-note">${from}–${to} of ${total}${unit ? ' ' + unit : ''}</span>` +
+      `<span class="spacer"></span>` +
+      `<button class="tbl-btn" ${page <= 0 ? 'disabled' : ''} onclick="PAGERS['${key}'].prev()">‹ Prev</button>` +
+      `<span class="tbl-note">Page ${page + 1} / ${pages}</span>` +
+      `<button class="tbl-btn" ${page >= pages - 1 ? 'disabled' : ''} onclick="PAGERS['${key}'].next()">Next ›</button>` +
+      `<select class="tbl-input" title="Rows per page" onchange="PAGERS['${key}'].setSize(this.value)">` +
+        PAGE_SIZES.map(n => `<option value="${n}" ${n === size ? 'selected' : ''}>${n}/page</option>`).join('') +
+      `</select>`;
+  }
+
+  // Generic client-side pager for a flat table. Page persists across re-renders
+  // (the activity tables re-fetch every 5 s).
+  function makePager(key, { tbodyId, colspan, emptyMsg, rowHtml, unit }) {
+    const p = {
+      page: 0, size: 25, rows: [],
+      _pages() { return Math.max(1, Math.ceil(p.rows.length / p.size)); },
+      set(rows) { p.rows = rows || []; p.draw(); },
+      prev() { if (p.page > 0) { p.page--; p.draw(); } },
+      next() { if (p.page < p._pages() - 1) { p.page++; p.draw(); } },
+      setSize(s) { p.size = +s; p.page = 0; p.draw(); },
+      draw() {
+        const tbody = document.getElementById(tbodyId);
+        const total = p.rows.length;
+        if (!total) {
+          tbody.innerHTML = `<tr><td colspan="${colspan}" style="color:var(--gray-500);">${emptyMsg}</td></tr>`;
+          drawPagerControls(key, 0, 1, 0, 0, 0, p.size, unit);
+          return;
+        }
+        const pages = p._pages();
+        if (p.page >= pages) p.page = pages - 1;
+        const start = p.page * p.size;
+        const slice = p.rows.slice(start, start + p.size);
+        tbody.innerHTML = slice.map(rowHtml).join('');
+        drawPagerControls(key, p.page, pages, total, start, slice.length, p.size, unit);
+      },
+    };
+    PAGERS[key] = p;
+    return p;
+  }
+
+  // Row templates + pager instances for the flat activity tables.
+  function eventRowHtml(ev) {
+    return `<tr>
+      <td style="white-space:nowrap;">${fmtTime(ev.received_at_utc)}</td>
+      <td>@${esc(ev.author_username || ev.author_id)}</td>
+      <td>${toneSpan(ev.tone)}</td>
+      <td>${outcomeChip(ev.outcome)}</td>
+      <td>${esc(ev.study_day)}</td>
+      <td>${ev.study_code ? `<code class="inline-code">${esc(ev.study_code)}</code>` : '—'}</td>
+      <td>${esc(ev.pipeline_ms)}</td>
+      <td class="reply-text-cell" title="${esc(ev.reply_text)}">${esc(ev.reply_text)}</td>
+    </tr>`;
+  }
+  function dropRowHtml(d) {
+    return `<tr>
+      <td style="white-space:nowrap;">${fmtTime(d.received_at_utc)}</td>
+      <td>${esc(d.author_id)}</td>
+      <td>${toneSpan(d.tone)}</td>
+      <td><span class="drop-reason">${esc(d.drop_reason)}</span></td>
+      <td><code class="inline-code">${esc(d.mention_id)}</code></td>
+    </tr>`;
+  }
+  makePager('events', { tbodyId: 'events-tbody', colspan: 8, emptyMsg: 'No events yet.', rowHtml: eventRowHtml, unit: 'events' });
+  makePager('drops',  { tbodyId: 'drops-tbody',  colspan: 5, emptyMsg: 'No drops yet.',  rowHtml: dropRowHtml,  unit: 'drops' });
 
   // ── Log panel ──────────────────────────────────────────────────────────────
   let paused = false;
@@ -573,34 +659,9 @@
     }));
     if (outcomes.length) renderStackedBar('outcome-bar', outcomes);
 
-    // Events table
-    const tbody = document.getElementById('events-tbody');
-    tbody.innerHTML = data.events.length
-      ? data.events.map(ev => `
-          <tr>
-            <td style="white-space:nowrap;">${fmtTime(ev.received_at_utc)}</td>
-            <td>@${esc(ev.author_username || ev.author_id)}</td>
-            <td>${toneSpan(ev.tone)}</td>
-            <td>${outcomeChip(ev.outcome)}</td>
-            <td>${esc(ev.study_day)}</td>
-            <td>${ev.study_code ? `<code class="inline-code">${esc(ev.study_code)}</code>` : '—'}</td>
-            <td>${esc(ev.pipeline_ms)}</td>
-            <td class="reply-text-cell" title="${esc(ev.reply_text)}">${esc(ev.reply_text)}</td>
-          </tr>`).join('')
-      : '<tr><td colspan="8" style="color:var(--gray-500);">No events yet.</td></tr>';
-
-    // Drops table
-    const dtbody = document.getElementById('drops-tbody');
-    dtbody.innerHTML = data.drops.length
-      ? data.drops.map(d => `
-          <tr>
-            <td style="white-space:nowrap;">${fmtTime(d.received_at_utc)}</td>
-            <td>${esc(d.author_id)}</td>
-            <td>${toneSpan(d.tone)}</td>
-            <td><span class="drop-reason">${esc(d.drop_reason)}</span></td>
-            <td><code class="inline-code">${esc(d.mention_id)}</code></td>
-          </tr>`).join('')
-      : '<tr><td colspan="5" style="color:var(--gray-500);">No drops yet.</td></tr>';
+    // Events + drops tables (paginated; page persists across the 5s refresh)
+    PAGERS.events.set(data.events || []);
+    PAGERS.drops.set(data.drops || []);
   }
 
   function fetchActivity() {
@@ -634,22 +695,21 @@
     downloadCSV('participants.csv', toCSV(PART_CSV_COLS, participantsData));
   }
 
+  function partRowHtml(p) {
+    return `<tr>
+      <td>@${esc(p.author_username)}</td>
+      <td>${toneChip(p.tone)}</td>
+      <td><code class="inline-code">${esc(p.author_id)}</code></td>
+      <td style="white-space:nowrap;">${fmtTime(p.enrolled_at_utc)}</td>
+      <td>${esc(p.notes) || '—'}</td>
+    </tr>`;
+  }
+  makePager('part', { tbodyId: 'participants-tbody', colspan: 5, emptyMsg: 'No participants yet.', rowHtml: partRowHtml, unit: 'participants' });
+
   function renderParticipants(rows) {
-    const tbody = document.getElementById('participants-tbody');
-    const count = document.getElementById('part-count');
-    count.textContent = `${rows.length} participant${rows.length === 1 ? '' : 's'}`;
-    if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--gray-500);">No participants yet.</td></tr>';
-      return;
-    }
-    tbody.innerHTML = rows.map(p => `
-      <tr>
-        <td>@${esc(p.author_username)}</td>
-        <td>${toneChip(p.tone)}</td>
-        <td><code class="inline-code">${esc(p.author_id)}</code></td>
-        <td style="white-space:nowrap;">${fmtTime(p.enrolled_at_utc)}</td>
-        <td>${esc(p.notes) || '—'}</td>
-      </tr>`).join('');
+    document.getElementById('part-count').textContent =
+      `${rows.length} participant${rows.length === 1 ? '' : 's'}`;
+    PAGERS.part.set(rows);
   }
 
   function fetchParticipants() {
@@ -720,17 +780,20 @@
 
   function onBotSearch(val) {
     botSearchQuery = val.trim().toLowerCase().replace(/^@/, '');
+    botPage = 0;
     renderBotReplies();
   }
 
   function onBotDate(val) {
     botDateFilter = val || '';
+    botPage = 0;
     renderBotReplies();
   }
 
   function clearBotDate() {
     botDateFilter = '';
     document.getElementById('bot-date').value = '';
+    botPage = 0;
     renderBotReplies();
   }
 
@@ -825,6 +888,9 @@
     }
   }
 
+  let botPage = 0;
+  let botPageSize = 25;
+
   function renderBotReplies() {
     const tbody = document.getElementById('bot-replies-tbody');
     const count = document.getElementById('bot-count');
@@ -838,12 +904,21 @@
 
     if (!total) {
       tbody.innerHTML = '<tr><td colspan="7" style="color:var(--gray-500);">No bot replies yet.</td></tr>';
+      drawPagerControls('bot', 0, 1, 0, 0, 0, botPageSize, 'replies');
       return;
     }
     if (!sorted.length) {
       tbody.innerHTML = '<tr><td colspan="7" style="color:var(--gray-500);">No replies match the current filters.</td></tr>';
+      drawPagerControls('bot', 0, 1, 0, 0, 0, botPageSize, 'replies');
       return;
     }
+
+    // Paginate the filtered + sorted rows.
+    const pages = Math.max(1, Math.ceil(sorted.length / botPageSize));
+    if (botPage >= pages) botPage = pages - 1;
+    if (botPage < 0) botPage = 0;
+    const pStart = botPage * botPageSize;
+    const slice = sorted.slice(pStart, pStart + botPageSize);
 
     function rowHtml(r) {
       const user = r.author_username ? `@${esc(r.author_username)}` : esc(r.author_id || '—');
@@ -877,32 +952,49 @@
 
     let html = '';
     if (!botSort.col || botSort.col === 'time') {
-      const byDay = new Map();
+      // Full-day groups (over the entire filtered set) so each day's count and
+      // "copy list" stay complete even when the day is split across pages.
+      const byDayFull = new Map();
       for (const r of sorted) {
         const d = fmtDay(r.received_at_utc);
-        if (!byDay.has(d)) byDay.set(d, []);
-        byDay.get(d).push(r);
+        if (!byDayFull.has(d)) byDayFull.set(d, []);
+        byDayFull.get(d).push(r);
       }
-      for (const [day, items] of byDay) {
-        const count = items.length;
-        html += `<tr class="day-header">
-          <td colspan="7">${esc(day)}<span class="day-count">${count} ${count === 1 ? 'reply' : 'replies'}</span>
-          <button class="copy-btn" data-copy="${esc(dayListText(items))}" data-label="copy list">copy list</button></td>
-        </tr>`;
-        for (const r of items) html += rowHtml(r);
+      // Emit a day header whenever the day changes within this page's slice.
+      let lastDay = null;
+      for (const r of slice) {
+        const day = fmtDay(r.received_at_utc);
+        if (day !== lastDay) {
+          const items = byDayFull.get(day) || [];
+          const c = items.length;
+          html += `<tr class="day-header">
+            <td colspan="7">${esc(day)}<span class="day-count">${c} ${c === 1 ? 'reply' : 'replies'}</span>
+            <button class="copy-btn" data-copy="${esc(dayListText(items))}" data-label="copy list">copy list</button></td>
+          </tr>`;
+          lastDay = day;
+        }
+        html += rowHtml(r);
       }
     } else {
-      for (const r of sorted) html += rowHtml(r);
+      for (const r of slice) html += rowHtml(r);
     }
 
     tbody.innerHTML = html;
+    drawPagerControls('bot', botPage, pages, sorted.length, pStart, slice.length, botPageSize, 'replies');
   }
+
+  PAGERS.bot = {
+    prev() { if (botPage > 0) { botPage--; renderBotReplies(); } },
+    next() { botPage++; renderBotReplies(); },  // renderBotReplies clamps to last page
+    setSize(s) { botPageSize = +s; botPage = 0; renderBotReplies(); },
+  };
 
   document.querySelectorAll('#bot-replies-table th.sortable').forEach(th => {
     th.addEventListener('click', () => {
       const col = th.dataset.col;
       botSort.dir = (botSort.col === col && botSort.dir === 'asc') ? 'desc' : 'asc';
       botSort.col = col;
+      botPage = 0;
       updateBotSortHeaders();
       renderBotReplies();
     });
