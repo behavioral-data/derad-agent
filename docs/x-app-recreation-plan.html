@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Contingency · Recreate the X App</title>
+  <link rel="stylesheet" href="assets/html-design-system.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="eyebrow">derad-agent</div>
+      <h3>Contingency</h3>
+      <nav>
+        <a href="#trigger">When to run this</a>
+        <a href="#map">What we're touching</a>
+        <a href="#preflight">Phase 0 · Pre-flight</a>
+        <a href="#snapshot">Phase 1 · Snapshot state</a>
+        <a href="#newapp">Phase 2 · New App</a>
+        <a href="#oauth">Phase 3 · OAuth re-auth</a>
+        <a href="#test">Phase 4 · Local test</a>
+        <a href="#kv">Phase 5 · Update Key Vault</a>
+        <a href="#deploy">Phase 6 · Cutover</a>
+        <a href="#verify">Phase 7 · Verify</a>
+        <a href="#cleanup">Phase 8 · Cleanup</a>
+        <a href="#rollback">Rollback</a>
+        <a href="#risks">Risks</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="page-head">
+        <p class="eyebrow">contingency plan · use only if needed</p>
+        <h1>Recreate the X App</h1>
+        <p>The procedure for force-releasing a stuck filtered-stream slot by replacing the X App entirely. ~30–45 min hands-on time. Run this only after waiting ≥ 2 hours has not freed the slot.</p>
+      </header>
+
+      <!-- ───────────────── TRIGGER ───────────────── -->
+      <section id="trigger">
+        <div class="section-head">
+          <p class="eyebrow">when</p>
+          <h2>When to run this</h2>
+        </div>
+
+        <div class="callout warning">
+          <strong>Don't run this prematurely.</strong> Recreating the X App is the documented force-clear for <code class="inline-code">TooManyConnections</code>, but it has a one-way cost: the App ID changes, all OAuth tokens issued by the old App become invalid, and any external materials pinned to the old Consumer Key need updating. Wait ≥ 2 hours of zero-retry quiet first.
+        </div>
+
+        <div class="grid-2 mt-24">
+          <div class="panel">
+            <div class="panel-head"><h3>Run this when</h3></div>
+            <ul class="task-list">
+              <li><span class="chip chip-done">yes</span> Streamer has been stuck on <code class="inline-code">TooManyConnections</code> for 2+ hours with the app stopped (zero retries hitting X).</li>
+              <li><span class="chip chip-done">yes</span> The 30-min-backoff retries after that still 429 with <code class="inline-code">connection_issue: TooManyConnections</code> in the body.</li>
+              <li><span class="chip chip-done">yes</span> You have @eddiexbot account access (login + any 2FA codes) to re-authorize.</li>
+            </ul>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head"><h3>Don't run this when</h3></div>
+            <ul class="task-list">
+              <li><span class="chip chip-blocked">no</span> The 429 body says anything OTHER than <code class="inline-code">TooManyConnections</code> — a standard rate-limit 429 fixes itself on its own.</li>
+              <li><span class="chip chip-blocked">no</span> Less than 2 hours since the last retry.</li>
+              <li><span class="chip chip-blocked">no</span> @eddiexbot 2FA / recovery codes are not handy.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ───────────────── MAP ───────────────── -->
+      <section id="map">
+        <div class="section-head">
+          <p class="eyebrow">scope</p>
+          <h2>What we're touching</h2>
+        </div>
+
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Asset</th><th>Where</th><th>Changes?</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Consumer Key</td>
+                <td>KV secret <code class="inline-code">x-api-key</code></td>
+                <td><span class="chip chip-warning">new value</span></td>
+              </tr>
+              <tr>
+                <td>Consumer Secret</td>
+                <td>KV secret <code class="inline-code">x-api-secret</code></td>
+                <td><span class="chip chip-warning">new value</span></td>
+              </tr>
+              <tr>
+                <td>Bearer Token (app-only auth, used by streamer)</td>
+                <td>KV secret <code class="inline-code">x-bearer-token</code></td>
+                <td><span class="chip chip-warning">new value</span></td>
+              </tr>
+              <tr>
+                <td>Access Token (OAuth1, used to post as @eddiexbot)</td>
+                <td>KV secret <code class="inline-code">x-access-token</code></td>
+                <td><span class="chip chip-warning">new value via OAuth flow</span></td>
+              </tr>
+              <tr>
+                <td>Access Token Secret</td>
+                <td>KV secret <code class="inline-code">x-access-token-secret</code></td>
+                <td><span class="chip chip-warning">new value via OAuth flow</span></td>
+              </tr>
+              <tr>
+                <td>Bot user ID (X numeric ID of @eddiexbot)</td>
+                <td>KV secret <code class="inline-code">bot-user-id</code></td>
+                <td><span class="chip chip-done">unchanged</span></td>
+              </tr>
+              <tr>
+                <td>Bot handle (<code class="inline-code">eddiexbot</code>)</td>
+                <td>App Service env <code class="inline-code">BOT_HANDLE</code></td>
+                <td><span class="chip chip-done">unchanged</span></td>
+              </tr>
+              <tr>
+                <td>X Project</td>
+                <td>developer.x.com portal</td>
+                <td><span class="chip chip-done">unchanged — new App lives in the same Project</span></td>
+              </tr>
+              <tr>
+                <td>X App</td>
+                <td>developer.x.com portal</td>
+                <td><span class="chip chip-critical">deleted + recreated</span></td>
+              </tr>
+              <tr>
+                <td>Code</td>
+                <td>repo</td>
+                <td><span class="chip chip-done">no changes</span></td>
+              </tr>
+              <tr>
+                <td>Tweet history / MentionEvents / study data</td>
+                <td>Azure Tables</td>
+                <td><span class="chip chip-done">unchanged — keyed by X user ID, not App ID</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout info mt-24">
+          <strong>What's clean about this:</strong> grep over <code class="inline-code">agent/ docs/ infra/</code> returns zero references to the App's Consumer Key in code or docs. The cutover is purely an infra-credential rotation — no code changes needed, no tweet IDs invalidated.
+        </div>
+      </section>
+
+      <!-- ───────────────── PHASE 0 ───────────────── -->
+      <section id="preflight">
+        <div class="section-head">
+          <p class="eyebrow">phase 0</p>
+          <h2>Pre-flight checks</h2>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h3>Have ready before starting</h3></div>
+          <ul class="task-list">
+            <li><span class="chip">credentials</span> @eddiexbot login + recovery codes / 2FA device</li>
+            <li><span class="chip">portal access</span> developer.x.com login for the project owner</li>
+            <li><span class="chip">CLI</span> <code class="inline-code">az login</code> session active for subscription <code class="inline-code">faac48db-165b-4928-a952-7d769267fe0b</code></li>
+            <li><span class="chip">role</span> Key Vault Secrets Officer on <code class="inline-code">azkvspzdzrbtv3v4o</code> (set via <code class="inline-code">scripts/grant-access.sh</code> earlier)</li>
+            <li><span class="chip">tool</span> Python or curl for the OAuth flow (no library install needed)</li>
+            <li><span class="chip">browser</span> for the OAuth authorize URL — needs to be the one logged in as @eddiexbot</li>
+          </ul>
+        </div>
+
+        <div class="callout mt-24">
+          <strong>Stop the App Service before starting.</strong> If it's running with the old credentials and we're mid-rotation, the streamer will keep retrying with stale creds — burning into the new App's 50/15min budget once we update KV. Stop, rotate, then start.
+        </div>
+
+        <div class="diff-block mt-12">
+          <div class="diff-header">stop the app (if not already stopped)</div>
+          <pre><code>az webapp stop --name azappspzdzrbtv3v4o --resource-group rg-derad-agent</code></pre>
+        </div>
+      </section>
+
+      <!-- ───────────────── PHASE 1 ───────────────── -->
+      <section id="snapshot">
+        <div class="section-head">
+          <p class="eyebrow">phase 1</p>
+          <h2>Snapshot current state for rollback</h2>
+        </div>
+
+        <p class="meta">If anything goes sideways, we want to be able to restore the old secret values exactly. Snapshot to a local file (not git-tracked) before any mutations.</p>
+
+        <div class="diff-block mt-12">
+          <div class="diff-header">scripts/x-rollback-snapshot.sh (one-shot — outputs to a local file)</div>
+          <pre><code>OUT=/tmp/x-app-rollback-$(date -u +%Y%m%dT%H%M%S).env
+KV=azkvspzdzrbtv3v4o
+{
+  for name in x-api-key x-api-secret x-bearer-token x-access-token x-access-token-secret bot-user-id; do
+    val=$(az keyvault secret show --vault-name "$KV" --name "$name" --query value -o tsv)
+    echo "${name}=${val}"
+  done
+} > "$OUT"
+chmod 600 "$OUT"
+echo "Snapshot written to $OUT — keep it until cutover is verified."</code></pre>
+        </div>
+
+        <div class="callout warning mt-12">
+          <strong>The snapshot contains live secrets.</strong> Keep it on the dev machine only; delete it after Phase 7 verification succeeds. Do NOT commit it.
+        </div>
+
+        <p class="mt-24">Also capture the OLD X App's settings from the portal (in case you need to mirror them on the new App):</p>
+        <ul class="task-list">
+          <li><span class="chip">note</span> App name + description text</li>
+          <li><span class="chip">note</span> OAuth 1.0a callback URL (likely <code class="inline-code">oob</code>)</li>
+          <li><span class="chip">note</span> Permissions (Read / Write / DM)</li>
+          <li><span class="chip">note</span> OAuth 2.0 client type (if any) + redirect URLs</li>
+          <li><span class="chip">note</span> Project ID the App is attached to</li>
+        </ul>
+      </section>
+
+      <!-- ───────────────── PHASE 2 ───────────────── -->
+      <section id="newapp">
+        <div class="section-head">
+          <p class="eyebrow">phase 2</p>
+          <h2>Create the new X App</h2>
+        </div>
+
+        <ol>
+          <li>Go to <a href="https://developer.x.com/en/portal/projects-and-apps" target="_blank">developer.x.com/portal/projects-and-apps</a>.</li>
+          <li>Open the existing <strong>Project</strong> that the old App lives in. <em>Don't create a new Project</em> — the Project owns the access tier (Basic) and the new App must inherit it.</li>
+          <li>Click <strong>Add App</strong>. Name it something distinct (e.g. <code class="inline-code">derad-agent-v2</code>) — easy to tell apart from the soon-to-be-deleted old App.</li>
+          <li>Once created, copy the new <strong>Consumer Key</strong> and <strong>Consumer Secret</strong> shown on the success screen (they're shown ONCE; if you miss them, regenerate from the Keys & Tokens tab).</li>
+          <li>Go to the new App's <strong>Settings</strong>:
+            <ul class="task-list">
+              <li><span class="chip">permissions</span> Set to <strong>Read and Write</strong>. (DM not needed — survey delivery is via tweet replies.)</li>
+              <li><span class="chip">app type</span> <strong>Confidential client</strong> (web app).</li>
+              <li><span class="chip">callback</span> Set OAuth 1.0a callback to <code class="inline-code">oob</code> (out-of-band PIN flow).</li>
+              <li><span class="chip">website</span> Any plausible URL (e.g. <code class="inline-code">https://uw.edu</code>) — not validated.</li>
+            </ul>
+          </li>
+          <li>Back to <strong>Keys and Tokens</strong> → <strong>Bearer Token</strong> → Generate. Copy it.</li>
+        </ol>
+
+        <div class="callout info mt-24">
+          <strong>Keep the OLD App alive for now.</strong> Don't delete it until Phase 8 — we want it as fallback during the rotation in case something on the new App is misconfigured.
+        </div>
+      </section>
+
+      <!-- ───────────────── PHASE 3 ───────────────── -->
+      <section id="oauth">
+        <div class="section-head">
+          <p class="eyebrow">phase 3</p>
+          <h2>OAuth 1.0a 3-legged flow — re-authorize @eddiexbot</h2>
+        </div>
+
+        <p>The new App needs the bot's user-context tokens to post replies. Run this script as the @eddiexbot user — it prints an authorize URL, you open it logged-in-as-@eddiexbot, click <strong>Authorize app</strong>, paste the PIN back.</p>
+
+        <div class="diff-block mt-12">
+          <div class="diff-header">scripts/x-oauth-pin.py (one-shot)</div>
+          <pre><code>"""3-legged OAuth 1.0a PIN flow for X. Prints authorize URL, accepts PIN,
+prints the resulting access_token + access_token_secret pair.
+
+Usage:
+    CONSUMER_KEY=... CONSUMER_SECRET=... python scripts/x-oauth-pin.py
+"""
+import os, sys, urllib.parse
+import requests
+from requests_oauthlib import OAuth1Session
+
+CK = os.environ["CONSUMER_KEY"]
+CS = os.environ["CONSUMER_SECRET"]
+
+# Step 1 — request token
+oauth = OAuth1Session(CK, client_secret=CS, callback_uri="oob")
+r = oauth.fetch_request_token("https://api.x.com/oauth/request_token")
+rt = r["oauth_token"]; rts = r["oauth_token_secret"]
+
+# Step 2 — authorize
+print(f"Open this URL while logged in as @eddiexbot:")
+print(f"  https://api.x.com/oauth/authorize?oauth_token={rt}")
+pin = input("PIN: ").strip()
+
+# Step 3 — access token
+oauth = OAuth1Session(CK, client_secret=CS, resource_owner_key=rt,
+                     resource_owner_secret=rts, verifier=pin)
+tok = oauth.fetch_access_token("https://api.x.com/oauth/access_token")
+print()
+print(f"X_ACCESS_TOKEN={tok['oauth_token']}")
+print(f"X_ACCESS_TOKEN_SECRET={tok['oauth_token_secret']}")
+print(f"BOT_USER_ID={tok.get('user_id')}")
+print(f"BOT_HANDLE={tok.get('screen_name')}")</code></pre>
+        </div>
+
+        <div class="diff-block mt-12">
+          <div class="diff-header">run it</div>
+          <pre><code>pip install requests-oauthlib  # if not already installed
+CONSUMER_KEY="&lt;from-phase-2&gt;" CONSUMER_SECRET="&lt;from-phase-2&gt;" python scripts/x-oauth-pin.py</code></pre>
+        </div>
+
+        <ul class="task-list mt-24">
+          <li><span class="chip chip-done">verify</span> The printed <code class="inline-code">BOT_USER_ID</code> matches the existing one in KV. If different, you authorized the wrong account — abort and redo.</li>
+          <li><span class="chip chip-done">verify</span> <code class="inline-code">BOT_HANDLE</code> is <code class="inline-code">eddiexbot</code>.</li>
+          <li><span class="chip">note</span> If the PIN flow errors with "callback_uri mismatch", go back to Phase 2 and confirm OAuth callback is <code class="inline-code">oob</code>.</li>
+        </ul>
+      </section>
+
+      <!-- ───────────────── PHASE 4 ───────────────── -->
+      <section id="test">
+        <div class="section-head">
+          <p class="eyebrow">phase 4</p>
+          <h2>Test new credentials locally before touching KV</h2>
+        </div>
+
+        <p>Three quick tests to confirm the new App works before we commit by updating Key Vault.</p>
+
+        <div class="diff-block mt-12">
+          <div class="diff-header">test 1 — bearer token can connect to filtered stream</div>
+          <pre><code>BEARER="&lt;new-bearer-from-phase-2&gt;"
+curl -sS -m 5 -D /tmp/hdrs.txt -o /tmp/body.txt -w 'HTTP %{http_code}\n' \
+  -H "Authorization: Bearer $BEARER" \
+  'https://api.x.com/2/tweets/search/stream?tweet.fields=author_id'
+# Expected: HTTP 200 (curl will hold the stream for 5s then disconnect — fine)
+# A 429 here means the new App somehow inherited the old slot — extremely unlikely</code></pre>
+        </div>
+
+        <div class="diff-block mt-12">
+          <div class="diff-header">test 2 — OAuth1 user-context can post (DRY: just lookup, don't post)</div>
+          <pre><code>CK="..." CS="..." AT="&lt;new-access-token&gt;" ATS="&lt;new-access-token-secret&gt;" python - &lt;&lt;'PY'
+import os
+from requests_oauthlib import OAuth1Session
+s = OAuth1Session(os.environ["CK"], client_secret=os.environ["CS"],
+                  resource_owner_key=os.environ["AT"], resource_owner_secret=os.environ["ATS"])
+r = s.get("https://api.x.com/2/users/me")
+print(r.status_code, r.json())
+# Expected: 200 with the @eddiexbot user data
+PY</code></pre>
+        </div>
+
+        <div class="diff-block mt-12">
+          <div class="diff-header">test 3 — bearer-token rate-limit budget is fresh (50/15min remaining)</div>
+          <pre><code>BEARER="..."
+curl -sS -D - -o /dev/null -m 5 \
+  -H "Authorization: Bearer $BEARER" \
+  'https://api.x.com/2/tweets/search/stream/rules' | grep -i 'x-rate-limit'
+# Expected: x-rate-limit-remaining: 449 or 450 (fresh budget for the rules endpoint)</code></pre>
+        </div>
+
+        <div class="callout mt-24">
+          <strong>If any test fails:</strong> stop here. Don't update KV. Re-check Phase 2 + 3, regenerate the bearer token if needed, redo the OAuth flow. The new App's slot is still pristine — no harm done.
+        </div>
+      </section>
+
+      <!-- ───────────────── PHASE 5 ───────────────── -->
+      <section id="kv">
+        <div class="section-head">
+          <p class="eyebrow">phase 5</p>
+          <h2>Update Azure Key Vault</h2>
+        </div>
+
+        <p>Set new values for the 5 X-credential secrets. <code class="inline-code">bot-user-id</code> stays unchanged.</p>
+
+        <div class="diff-block mt-12">
+          <div class="diff-header">update all 5 secrets</div>
+          <pre><code>KV=azkvspzdzrbtv3v4o
+az keyvault secret set --vault-name $KV --name x-api-key             --value "&lt;NEW_CONSUMER_KEY&gt;"             --output none
+az keyvault secret set --vault-name $KV --name x-api-secret          --value "&lt;NEW_CONSUMER_SECRET&gt;"          --output none
+az keyvault secret set --vault-name $KV --name x-bearer-token        --value "&lt;NEW_BEARER_TOKEN&gt;"            --output none
+az keyvault secret set --vault-name $KV --name x-access-token        --value "&lt;NEW_ACCESS_TOKEN&gt;"            --output none
+az keyvault secret set --vault-name $KV --name x-access-token-secret --value "&lt;NEW_ACCESS_TOKEN_SECRET&gt;"     --output none
+echo "All 5 X secrets updated"</code></pre>
+        </div>
+
+        <p class="meta mt-12">App Service env vars reference KV via <code class="inline-code">@Microsoft.KeyVault(SecretUri=...)</code> — the URI doesn't pin a version, so the latest secret value is resolved on next refresh (≤ 30 s on app restart). Container Apps job env vars use <code class="inline-code">secretRef</code>, resolved on next job invocation.</p>
+      </section>
+
+      <!-- ───────────────── PHASE 6 ───────────────── -->
+      <section id="deploy">
+        <div class="section-head">
+          <p class="eyebrow">phase 6</p>
+          <h2>Restart App Service with new credentials</h2>
+        </div>
+
+        <div class="diff-block mt-12">
+          <div class="diff-header">start the app — it pulls new KV values on container start</div>
+          <pre><code>az webapp start --name azappspzdzrbtv3v4o --resource-group rg-derad-agent</code></pre>
+        </div>
+
+        <p class="meta mt-12">The new container picks up:</p>
+        <ul class="task-list">
+          <li>New <code class="inline-code">X_BEARER_TOKEN</code> → streamer connects to filtered stream with new App identity → fresh slot from X's edge perspective.</li>
+          <li>New <code class="inline-code">X_API_KEY / X_API_SECRET / X_ACCESS_TOKEN / X_ACCESS_TOKEN_SECRET</code> → <code class="inline-code">get_x_client()</code> builds the OAuth1 client with the new identity.</li>
+          <li>Existing 300 s streamer pre-connect delay still applies (defense in depth — but the slot is already fresh, so first connect should succeed at the 300 s mark).</li>
+        </ul>
+      </section>
+
+      <!-- ───────────────── PHASE 7 ───────────────── -->
+      <section id="verify">
+        <div class="section-head">
+          <p class="eyebrow">phase 7</p>
+          <h2>Verify the cutover</h2>
+        </div>
+
+        <div class="grid-2">
+          <div class="panel">
+            <div class="panel-head"><h3>Health + stream state</h3></div>
+            <ul class="task-list">
+              <li><span class="chip">curl</span> <code class="inline-code">https://azappspzdzrbtv3v4o.azurewebsites.net/healthz</code> → 200</li>
+              <li><span class="chip">curl</span> <code class="inline-code">/api/activity</code> → <code class="inline-code">metrics.stream_connected: true</code> after the 300 s pre-delay</li>
+              <li><span class="chip">logs</span> Look for "Filtered stream connected" in App Service logs</li>
+            </ul>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head"><h3>End-to-end mention test</h3></div>
+            <ul class="task-list">
+              <li><span class="chip">manual</span> From a test account: tweet <code class="inline-code">@eddiexbot what's the context here?</code> on any factual claim</li>
+              <li><span class="chip">verify</span> Bot replies within ~60 s</li>
+              <li><span class="chip">verify</span> Reply tweet ends with the <code class="inline-code">/info/...</code> short link</li>
+              <li><span class="chip">verify</span> Click the link → new info page renders with action pill + outcome + sources</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="callout info mt-24">
+          <strong>Halt criterion:</strong> if <code class="inline-code">stream_connected</code> is still false 10 minutes after the 300 s pre-delay (so ~15 min after start), check logs. If you see a <code class="inline-code">TooManyConnections</code> 429 from the NEW bearer token, abort and proceed to rollback — something's wrong with the new App config or X is having a degradation unrelated to the slot issue.
+        </div>
+      </section>
+
+      <!-- ───────────────── PHASE 8 ───────────────── -->
+      <section id="cleanup">
+        <div class="section-head">
+          <p class="eyebrow">phase 8</p>
+          <h2>Cleanup</h2>
+        </div>
+
+        <ul class="task-list">
+          <li><span class="chip chip-done">delete</span> The OLD X App in the developer portal. This is the final force-release step on X's side. (We waited for the new App to be verified working before deleting — old App's slot, even if still held, no longer matters.)</li>
+          <li><span class="chip chip-done">delete</span> The local rollback snapshot file (<code class="inline-code">/tmp/x-app-rollback-*.env</code>) — it contains stale but still-sensitive secrets.</li>
+          <li><span class="chip chip-done">delete</span> Any test tweets the bot posted during Phase 7.</li>
+          <li><span class="chip">update</span> <code class="inline-code">agent/llm/.env</code> locally with new values (gitignored — manual edit).</li>
+          <li><span class="chip">note</span> No code commit needed — secrets are infra-level only.</li>
+        </ul>
+      </section>
+
+      <!-- ───────────────── ROLLBACK ───────────────── -->
+      <section id="rollback">
+        <div class="section-head">
+          <p class="eyebrow">if anything breaks</p>
+          <h2>Rollback (Phases 5–6 only)</h2>
+        </div>
+
+        <div class="callout warning">
+          <strong>Rollback only works if the OLD App hasn't been deleted.</strong> Phase 8 is intentionally last so this window stays open. If you've already deleted the old App, rollback isn't possible — you have to fix-forward on the new App.
+        </div>
+
+        <div class="diff-block mt-12">
+          <div class="diff-header">restore old KV secrets from the Phase 1 snapshot</div>
+          <pre><code>SNAP=/tmp/x-app-rollback-&lt;timestamp&gt;.env  # from Phase 1
+KV=azkvspzdzrbtv3v4o
+while IFS='=' read -r name value; do
+  [ -z "$name" ] && continue
+  # only restore the X-* secrets; bot-user-id we left alone anyway
+  case "$name" in
+    x-*) az keyvault secret set --vault-name $KV --name "$name" --value "$value" --output none ;;
+  esac
+done &lt; "$SNAP"
+az webapp restart --name azappspzdzrbtv3v4o --resource-group rg-derad-agent
+echo "Rolled back to OLD App credentials."</code></pre>
+        </div>
+      </section>
+
+      <!-- ───────────────── RISKS ───────────────── -->
+      <section id="risks">
+        <div class="section-head">
+          <p class="eyebrow">risks</p>
+          <h2>Known risks &amp; mitigations</h2>
+        </div>
+
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Risk</th><th>Mitigation</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>App deletion is irreversible from X's side.</td>
+                <td>Phase 8 is LAST. Verify new App works in Phase 7 first. Keep old App alive for the rotation; delete only after the new one is proven.</td>
+              </tr>
+              <tr>
+                <td>OAuth re-auth invalidates existing user tokens.</td>
+                <td>The old App's tokens still work until we update KV in Phase 5. Phase 4 tests the new tokens BEFORE updating KV, so KV is only updated when we know new tokens work.</td>
+              </tr>
+              <tr>
+                <td>Lose the rollback snapshot before verification.</td>
+                <td>Phase 1 outputs to <code class="inline-code">/tmp/x-app-rollback-&lt;ts&gt;.env</code> with mode 0600. Phase 8 deletes it only after verification.</td>
+              </tr>
+              <tr>
+                <td>New App's Project might not inherit the Basic plan tier.</td>
+                <td>Phase 2 step 2 explicitly says "create in the existing Project" — the Project owns the tier. Don't create a new Project.</td>
+              </tr>
+              <tr>
+                <td>Tests in Phase 7 succeed but the bot replies look wrong (no sources / wrong action).</td>
+                <td>This is a code issue, not a rotation issue. Roll back the X creds is irrelevant; investigate the pipeline / freeze records. Rotation itself doesn't change any code paths.</td>
+              </tr>
+              <tr>
+                <td>Per-user-day cap (<code class="inline-code">DERAD_USER_DAILY_CAP=20</code>) or pipeline semaphore (<code class="inline-code">DERAD_PIPELINE_MAX_CONCURRENT=5</code>) doesn't reset on App switch — Tables state persists.</td>
+                <td>Expected. The bot's "memory" lives in Tables, not in the X App. If a participant has already hit their daily cap, the cap stays in effect.</td>
+              </tr>
+              <tr>
+                <td>Container Apps engagement-poll cron job picks up new creds on next invocation.</td>
+                <td>Next cron tick is typically &lt; 60 min. If a manual sooner run is needed: <code class="inline-code">az containerapp job start --name azcjob-engspzdzrbtv3v4o --resource-group rg-derad-agent</code>.</td>
+              </tr>
+              <tr>
+                <td>Existing <code class="inline-code">/info/&lt;token&gt;</code> tokens still resolve.</td>
+                <td>Yes — info tokens live in Azure Tables, not in X. They reference parent tweet IDs (which keep working) and reply tweet IDs (which keep working). No action needed.</td>
+              </tr>
+              <tr>
+                <td>Participants need to re-onboard / re-mention the bot.</td>
+                <td>No — they mention by handle (<code class="inline-code">@eddiexbot</code>), and the handle is unchanged. Stream rules get re-synced automatically on first connect by <code class="inline-code">_sync_rules</code>.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer class="meta mt-24">
+        derad-agent · contingency · last reviewed 2026-05-25
+      </footer>
+    </main>
+  </div>
+
+  <script src="assets/html-design-system.js"></script>
+  <script>initScrollSpy();</script>
+</body>
+</html>
