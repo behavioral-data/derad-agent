@@ -31,6 +31,15 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
+# Quiet trafilatura's own logger. When a fetched page isn't real article
+# HTML — Cloudflare "Just a moment…" challenge pages, PDFs, near-empty
+# bodies — trafilatura logs ERROR/WARNING noise ("empty HTML tree",
+# "parsed tree length: 1, wrong data type or not valid HTML", "discarding
+# data: None"). We already treat failed extraction as an empty body
+# (_fetch_clean_page returns body_markdown=""), so these are benign; keep
+# them out of our logs.
+logging.getLogger("trafilatura").setLevel(logging.CRITICAL)
+
 
 @dataclass(frozen=True)
 class SearchHit:
