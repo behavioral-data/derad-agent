@@ -38,15 +38,25 @@ logger = logging.getLogger(__name__)
 
 _RECONCILE_SNIPPET_CAP = 240
 _RECONCILE_RATIONALE_CAP = 120
+# Per-source article body cap fed to the reconcile LLM. Each Evidence row
+# can carry up to 3 KB of trafilatura-extracted markdown. With 5-9 sources
+# typical per claim, that's 15-27 KB of grounded content for reasoning.
+_RECONCILE_BODY_CAP = 3000
 
 
 def _compact_evidence(e: Evidence) -> dict:
-    """Trim per-evidence snippet to keep the reconcile prompt under control."""
+    """Trim per-evidence fields to keep the reconcile prompt under control.
+
+    Includes ``body_markdown`` (trafilatura-extracted article content) so
+    the LLM reasons over the actual reporting, not just the search-result
+    ``snippet`` (which is the ~150-char cited quote)."""
     snippet = (e.snippet or "")[:_RECONCILE_SNIPPET_CAP]
+    body = (e.body_markdown or "")[:_RECONCILE_BODY_CAP]
     return {
         "question": e.question,
         "source_url": e.source_url,
         "snippet": snippet,
+        "body_markdown": body,
         "stance": e.stance,
     }
 
@@ -71,7 +81,9 @@ class ReconciliationOutput(BaseModel):
 
 _SYSTEM_PROMPT = """You are the Evidence Reconciliation stage of a fact-checking bot. You operate in one of FOUR modes determined by the input `action` field: verify, provide_context, challenge_opinion, surface_perspectives. Read the action-specific section below; the shared rules apply to every action.
 
-You receive (a) `central_claim` text, (b) `action` ∈ {verify, provide_context, challenge_opinion, surface_perspectives}, (c) `tweet_context` — metadata about the parent tweet, (d) ordered text evidence snippets each tagged with source URL, (e) the source-quality table classifying every URL by tier, and (f) when the claim is image-bearing, per-image evidence (OCR + description + optional `canonical_image_match` + web-search provenance hits).
+You receive (a) `central_claim` text, (b) `action` ∈ {verify, provide_context, challenge_opinion, surface_perspectives}, (c) `tweet_context` — metadata about the parent tweet, (d) ordered text evidence — each row carries `source_url`, a short `snippet` (the search-result cited quote, ~150 chars), and `body_markdown` (the full article body extracted from the page, up to ~3 KB), (e) the source-quality table classifying every URL by tier, and (f) when the claim is image-bearing, per-image evidence (OCR + description + optional `canonical_image_match` + web-search provenance hits).
+
+**Use `body_markdown` as the primary basis for your reasoning.** It's the actual article content — what the publisher reported, in their words. The `snippet` is just the small piece the search system surfaced. Read the body to assess what the source actually claims, how confidently it claims it, and whether the citation supports the central_claim. If `body_markdown` is empty for a row (paywall, JS-only page, extraction failure), fall back to the `snippet`. Quotes you place in `load_bearing_evidence_snippet` should come from the body when available.
 
 ═══════════════════════════════════════════════════════════════
 TWEET_CONTEXT — used by every action

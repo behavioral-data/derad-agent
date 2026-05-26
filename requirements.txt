@@ -11,3 +11,4 @@ gunicorn>=21.2.0
 azure-data-tables>=12.5
 azure-identity>=1.18
 azure-monitor-opentelemetry>=1.6
+trafilatura>=2.0

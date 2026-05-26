@@ -268,6 +268,7 @@ def iterative_verify(
                     source_url=hit.url,
                     snippet=hit.snippet,
                     stance="neutral",
+                    body_markdown=hit.body_markdown,
                 )
             )
     return evidence

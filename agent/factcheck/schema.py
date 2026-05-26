@@ -121,6 +121,10 @@ class Evidence(_Frozen):
     source_url: str
     snippet: str
     stance: Stance
+    # Clean article body extracted from the source URL (trafilatura → markdown),
+    # capped at a few KB. Lets reconcile reason over the actual reporting, not
+    # just the cited_text snippet. Empty when fetch/extract failed.
+    body_markdown: str = ""
 
 
 class Claim(_Frozen):

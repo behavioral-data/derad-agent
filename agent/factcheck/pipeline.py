@@ -367,6 +367,7 @@ def run_pipeline(
                 source_url=e.source_url,
                 snippet=e.snippet,
                 stance=stance,
+                body_markdown=e.body_markdown,
             )
             for e, stance in zip(text_evidence, recon.evidence_stances)
         ]

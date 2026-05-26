@@ -42,6 +42,11 @@ class SearchHit:
     # transcribed it as inline markdown (still possibly correct, but
     # subject to model-typed-URL risk and needs content validation).
     is_annotation: bool = False
+    # Clean article body, extracted from the URL by trafilatura and capped
+    # at a few KB. Lets reconcile reason over the underlying reporting
+    # rather than just the search-result snippet. Empty when fetch/extract
+    # failed (paywall, JS-only page, 404, timeout, etc.).
+    body_markdown: str = ""
 
 
 # Override to 1 to force HEAD+title validation on every URL even when it's
@@ -298,11 +303,31 @@ _USER_AGENT = "Mozilla/5.0 (compatible; derad-agent-validator/3.0)"
 
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
+# Read up to 512 KB of HTML per page — enough for the body of nearly any
+# article without runaway memory on the occasional huge page.
+_PAGE_MAX_BYTES = 512 * 1024
 
-def _fetch_title(url: str, *, timeout_s: float = 6.0) -> tuple[Optional[int], Optional[str], Optional[str]]:
-    """Fetch a URL following redirects, return (status, final_url, page_title).
-    Any element is None on failure."""
+# Cap the extracted markdown we keep per source. Reconcile passes evidence
+# to the LLM, so this directly drives prompt size; 3000 chars ≈ 750 tokens.
+_CONTENT_CAP = 3000
+
+
+def _fetch_clean_page(
+    url: str, *, timeout_s: float = 8.0
+) -> tuple[Optional[int], Optional[str], Optional[str], str]:
+    """Fetch a URL and extract a clean markdown body via trafilatura.
+
+    Returns ``(status_code, final_url, page_title, body_markdown)``.
+    Any of status/final_url/page_title is ``None`` on transport failure;
+    ``body_markdown`` is ``""`` when extraction was unsuccessful (paywall,
+    JS-rendered, non-article page, etc.) but the page itself loaded.
+
+    Single network round-trip per URL — used by ``_classify_hit`` to both
+    validate the hit (via title-match for model-typed URLs) and enrich it
+    with the actual article body (for reconcile reasoning).
+    """
     import requests
+    import trafilatura
 
     try:
         resp = requests.get(
@@ -312,31 +337,69 @@ def _fetch_title(url: str, *, timeout_s: float = 6.0) -> tuple[Optional[int], Op
             headers={"User-Agent": _USER_AGENT, "Accept": "text/html,*/*"},
             stream=True,
         )
-        # Read at most 32KB — page <title> is in the <head> well before that.
+    except Exception:
+        return None, None, None, ""
+
+    try:
         chunks: list[bytes] = []
         total = 0
-        for chunk in resp.iter_content(chunk_size=4096):
+        for chunk in resp.iter_content(chunk_size=8192):
             if not chunk:
                 break
             chunks.append(chunk)
             total += len(chunk)
-            if total >= 32 * 1024:
+            if total >= _PAGE_MAX_BYTES:
                 break
-        resp.close()
-        body = b"".join(chunks)
-        # Best-effort decode; ignore decode errors.
+    except Exception:
         try:
-            text = body.decode(resp.encoding or "utf-8", errors="replace")
-        except (LookupError, TypeError):
-            text = body.decode("utf-8", errors="replace")
-        match = _TITLE_RE.search(text)
-        title = None
+            resp.close()
+        except Exception:
+            pass
+        return resp.status_code, str(resp.url), None, ""
+    finally:
+        try:
+            resp.close()
+        except Exception:
+            pass
+
+    body = b"".join(chunks)
+    try:
+        html_text = body.decode(resp.encoding or "utf-8", errors="replace")
+    except (LookupError, TypeError):
+        html_text = body.decode("utf-8", errors="replace")
+
+    # Title — prefer trafilatura's metadata extraction; fall back to regex.
+    title: Optional[str] = None
+    try:
+        meta = trafilatura.extract_metadata(html_text)
+        if meta is not None and meta.title:
+            title = meta.title.strip()
+    except Exception:
+        pass
+    if not title:
+        match = _TITLE_RE.search(html_text)
         if match:
             import html as _html
-            title = _html.unescape(match.group(1)).strip()
-        return resp.status_code, str(resp.url), title
+            title = _html.unescape(match.group(1)).strip() or None
+
+    # Article body in markdown. Trafilatura strips nav/footer/ads/comments
+    # and returns just the main content. None on extraction failure.
+    body_markdown = ""
+    try:
+        extracted = trafilatura.extract(
+            html_text,
+            output_format="markdown",
+            include_links=False,
+            include_comments=False,
+            include_tables=True,
+            favor_recall=False,
+        )
+        if extracted:
+            body_markdown = extracted[:_CONTENT_CAP]
     except Exception:
-        return None, None, None
+        pass
+
+    return resp.status_code, str(resp.url), title, body_markdown
 
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -377,34 +440,50 @@ _VALIDATE_MAX_WORKERS = 8
 
 
 def _classify_hit(h: SearchHit) -> tuple[Optional[SearchHit], Optional[tuple[str, str]]]:
-    """Decide whether one SearchHit is verified, rejected, or passed through.
+    """Fetch the page, validate the hit, and enrich it with body markdown.
 
-    Returns (verified_hit, None) on accept and (None, (url, reason)) on
-    reject. Pure-function so it's safe to call from a ThreadPoolExecutor.
+    Single network round-trip via ``_fetch_clean_page``. For all hits we
+    populate ``body_markdown`` from trafilatura's extraction so reconcile
+    can reason over the actual article. For model-typed URLs (is_annotation
+    is False) we additionally check that the fetched page title matches the
+    claimed title — guards against the model writing a plausible-looking but
+    wrong URL. Annotation-stamped hits skip the title check (server-vouched)
+    but still get their body extracted.
+
+    Returns (verified_hit, None) on accept; (None, (url, reason)) on reject.
+    Pure-function so it's safe to call from a ThreadPoolExecutor.
     """
     if not h.url.startswith(("http://", "https://")):
         return None, (h.url, "non-http")
 
-    # Annotation-stamped URLs are server-vouched by the tool runtime, so by
-    # default we skip the HEAD+title round-trip. Caller can force validation
-    # via DERAD_VALIDATE_ANNOTATIONS=1 for paranoid mode.
-    if h.is_annotation and not _VALIDATE_ANNOTATIONS:
-        return h, None
-
-    status, final_url, page_title = _fetch_title(h.url)
+    status, final_url, page_title, body_markdown = _fetch_clean_page(h.url)
     if status is None:
         return None, (h.url, "fetch_failed")
     if status >= 400:
         return None, (h.url, f"http_{status}")
+
+    enriched = SearchHit(
+        url=h.url,
+        title=h.title or (page_title or ""),
+        snippet=h.snippet,
+        is_annotation=h.is_annotation,
+        body_markdown=body_markdown,
+    )
+
+    # Annotation-stamped URLs are server-vouched — skip title verification.
+    if h.is_annotation and not _VALIDATE_ANNOTATIONS:
+        return enriched, None
+
     if not page_title:
-        # No <title> tag — page exists but we can't verify. Allow.
         logger.info("URL %s returned no <title>; passing through unverified.", h.url)
-        return h, None
+        return enriched, None
     if not h.title:
-        return SearchHit(url=h.url, title=page_title, snippet=h.snippet, is_annotation=h.is_annotation), None
+        # No claimed title to compare against — accept and adopt the page title.
+        return enriched, None
+
     score = _title_match_score(h.title, page_title)
     if score >= _TITLE_MATCH_THRESHOLD:
-        return h, None
+        return enriched, None
     return None, (
         h.url,
         f"title_mismatch score={score:.2f} claimed={h.title[:40]!r} actual={page_title[:40]!r}",
@@ -510,9 +589,10 @@ class ClaudeWebSearchBackend:
             logger.warning("Claude-web-search: 0 cited URLs for query=%r", query[:120])
             return []
 
-        # Server-stamped URLs (web_search_tool_result blocks) are vouched —
-        # _validate_hits short-circuits annotation-stamped hits, so this is
-        # cheap. Still useful to catch 404s.
+        # _validate_hits fetches each URL once to (a) catch 404s/paywalls and
+        # (b) populate body_markdown via trafilatura so reconcile can reason
+        # over the actual article. Annotation-stamped URLs skip the title-
+        # match check (server-vouched) but still get their body extracted.
         verified, rejected = _validate_hits(hits)
         if rejected:
             logger.info(
