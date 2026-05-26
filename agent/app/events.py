@@ -64,8 +64,6 @@ class MentionEvent:
 
     # Pipeline output
     queries: list[str] = field(default_factory=list)
-    cited_note_ids: list[str] = field(default_factory=list)
-    cited_tweet_ids: list[str] = field(default_factory=list)
     reply_text: Optional[str] = None
     reply_id: Optional[str] = None
 
@@ -78,9 +76,19 @@ class MentionEvent:
 
     # Outcome
     outcome: str = "replied"  # 'replied' | 'pipeline_error' | 'x_post_error' | 'parent_fetch_failed' | 'empty_reply'
-    # reply_type distinguishes a grounded factcheck reply ('factcheck') from a
-    # planner/empty-notes fallback ('no_factcheck'). None when no reply was sent.
+    # 'factcheck' when the pipeline produced a structural verdict
+    # (Supported/Refuted/Disputed), 'no_factcheck' when it landed on NEI.
+    # None when no reply was sent. Legacy field — analytics should prefer
+    # `action` + `action_outcome` below.
     reply_type: Optional[str] = None
+    # New action-typed analytics (introduced with the multi-action pipeline).
+    # action ∈ {verify, provide_context, challenge_opinion, surface_perspectives, decline}
+    # action_outcome is the terminal ActionOutcome label.
+    action: Optional[str] = None
+    action_outcome: Optional[str] = None
+    # Raw text the invoker wrote in the mention (after stripping the bot
+    # handle). Empty string when invoker only tagged.
+    invoker_instruction_text: Optional[str] = None
     error_class: Optional[str] = None
     error_detail: Optional[str] = None
 
@@ -231,9 +239,8 @@ class TablesEventsStore:
 
     Long fields (parent_text, reply_text, error_detail) are truncated to 32 kB
     each — the Tables row limit is ~1 MB total and we want headroom for the
-    JSON-encoded lists. ``queries``, ``cited_note_ids``, ``cited_tweet_ids``,
-    and ``extra`` are JSON-encoded as strings since Tables doesn't natively
-    store lists/dicts.
+    JSON-encoded lists. ``queries`` and ``extra`` are JSON-encoded as strings
+    since Tables doesn't natively store lists/dicts.
     """
 
     _FIELD_CAP = 32_000  # bytes; rough char cap is fine for our text
@@ -253,13 +260,27 @@ class TablesEventsStore:
         from azure.identity import DefaultAzureCredential
 
         cred = credential or DefaultAzureCredential()
-        self._service = TableServiceClient(endpoint=endpoint, credential=cred)
+        # Short timeouts on the table service client. The Azure SDK default is
+        # 300s, and the table-create loop below blocks app + streamer
+        # initialization on a SINGLE slow network round-trip.
+        self._service = TableServiceClient(
+            endpoint=endpoint,
+            credential=cred,
+            connection_timeout=10,
+            read_timeout=15,
+        )
         for name in (events_table, drops_table, engagements_table, reply_replies_table):
             try:
                 self._service.create_table(name)
                 logger.info("Created events table %s", name)
             except ResourceExistsError:
                 pass
+            except Exception:
+                # Tables already exist in production; any other failure here
+                # (timeout, transient throttle) shouldn't abort startup. The
+                # per-table client below works against a table whether or not
+                # we just verified existence here.
+                logger.warning("create_table(%s) failed — assuming the table exists.", name, exc_info=True)
         self._events = self._service.get_table_client(events_table)
         self._drops = self._service.get_table_client(drops_table)
         self._engagements = self._service.get_table_client(engagements_table)
@@ -301,8 +322,6 @@ class TablesEventsStore:
             "parent_reply_count": ev.parent_reply_count,
             "parent_quote_count": ev.parent_quote_count,
             "queries_json": json.dumps(ev.queries, ensure_ascii=False),
-            "cited_note_ids_json": json.dumps(ev.cited_note_ids, ensure_ascii=False),
-            "cited_tweet_ids_json": json.dumps(ev.cited_tweet_ids, ensure_ascii=False),
             "reply_text": self._truncate(ev.reply_text),
             "reply_id": ev.reply_id,
             "received_at_utc": ev.received_at_utc,
@@ -311,6 +330,9 @@ class TablesEventsStore:
             "pipeline_ms": ev.pipeline_ms,
             "outcome": ev.outcome,
             "reply_type": ev.reply_type,
+            "action": ev.action,
+            "action_outcome": ev.action_outcome,
+            "invoker_instruction_text": self._truncate(ev.invoker_instruction_text, cap=500),
             "error_class": ev.error_class,
             "error_detail": self._truncate(ev.error_detail, cap=1000),
             "study_code": ev.study_code,
@@ -418,6 +440,7 @@ class TablesEventsStore:
         "RowKey", "mention_id", "author_id", "author_username", "tone", "outcome",
         "received_at_utc", "pipeline_ms", "study_day", "study_code",
         "reply_text", "parent_text", "reply_id", "bot_author_id", "bot_handle",
+        "action", "action_outcome", "invoker_instruction_text",
     ]
     _DROP_SELECT = [
         "RowKey", "mention_id", "author_id", "tone", "drop_reason", "received_at_utc",

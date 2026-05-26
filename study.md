@@ -3,6 +3,27 @@
 1. double tweets. 
 2. check for other tones
 
+- Pagination for dashboard tables
+- make tables that aahan and trisha need a bit more user friendly
+- the asnwer should be to the question of 'is this true?' during invocation etc
+- how are we handling videos?
+- Verdict label still NEI even though the reply makes a confident refutation — Newsweek + The Source aren't in our 23-domain canned source-quality table (which only covers IFCN signatories + a handful of Wikipedia-RSP entries), so they fall through to unknown tier and don't count toward the ≥2-reliable-tier threshold. The reply text is still good because the renderer reads presentation_payload, not verdict_label. Real fix is to expand the source-quality table — defer.-Ask claude to read all or atleast the few best papers on the @grok phenomeena and compare our work and deisgnsand ersearcher and stufy design with these different studies and their findings
+- someone replued to invoked tweet before the fact check came in, and thefact check shows up under the other person's reply not the invoked one
+- Make the bot slightly more general such that it can find evidence to challenge views.
+- is there some way that you can make it easier for the undergrads to find the 10 replies from the previous day for the surveys? Maybe some way to export to CSV?
+
+---
+
+We need to take into cosideration the goal the invoker gave to the bot. it could be factchecking, but it could also be challanging an opinion, getting more cintext, finding different perspectives etc. If the invoker only tags and says nothing, we will decide whats the best thing to do here ourselves: like for a factual claim we will fact check, for an opi ion we will challange, for a claim made out of context, we will provide context etc.
+
+In stage 1.5, we also need to check if the image itself is a well known image or viral image etc. a meta recognition.
+
+Extract + check worthiness needs to be slightly more broader, it can have things about 'adding context', deserves pushback, etc. it should also take into consideration what the invoker said and asked the bot to do.
+
+---
+
+We need to consolidate all the sources, reasonng, thinking etc in the info page. only a link to that in the tweet itself
+
 ## Research Question
 
 How does the tone of an AI fact-check affect (1) engagement with the fact-check and (2) affective polarization in those exposed to the fact-check?

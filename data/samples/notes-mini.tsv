@@ -1,4 +1,0 @@
-noteId	noteAuthorParticipantId	createdAtMillis	tweetId	classification	misleadingFactualError	notMisleadingFactuallyCorrect	summary	isMediaNote	isCollaborativeNote
-n1	a1	1713978050878	t1	MISINFORMED_OR_POTENTIALLY_MISLEADING	1	0	Evidence does not support this claim.	0	1
-n2	a2	1713978050878	t2	NOT_MISLEADING	0	1	Available reporting aligns with the post context.	0	0
-n3	a3	1713978050878	t1	MISINFORMED_OR_POTENTIALLY_MISLEADING	1	0	The quoted statistic omits key denominator details.	0	0

@@ -1,15 +1,5 @@
-"""Shared utilities: validation, text processing, and logging."""
+"""Shared utilities — X-tweet character counting + URL regex."""
 
-from .logging import RuntimeLogger
-from .text import sanitize_query
-from .validation import (
-    validate_agent_inputs,
-    validate_search_queries,
-)
+from .text import URL_RE, X_TCO_LEN, X_TWEET_LIMIT, x_weighted_length
 
-__all__ = [
-    "RuntimeLogger",
-    "sanitize_query",
-    "validate_agent_inputs",
-    "validate_search_queries",
-]
+__all__ = ["URL_RE", "X_TCO_LEN", "X_TWEET_LIMIT", "x_weighted_length"]

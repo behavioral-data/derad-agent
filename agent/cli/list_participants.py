@@ -20,7 +20,7 @@ def _study_day(enrolled_at, now):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="List registered study participants")
-    parser.add_argument("--tone", default=None, choices=["agreeable", "neutral", "satirical"],
+    parser.add_argument("--tone", default=None, choices=["agreeable", "neutral", "agonistic"],
                         help="Filter by assigned tone.")
     parser.add_argument("--format", default="table", choices=["table", "csv"],
                         help="Output format (default: table).")
@@ -56,12 +56,12 @@ def main() -> None:
     sep = "  ".join("-" * w for w in col_w)
     row_fmt = "  ".join(f"{{:<{w}}}" for w in col_w)
 
-    counts = {"agreeable": 0, "neutral": 0, "satirical": 0}
+    counts = {"agreeable": 0, "neutral": 0, "agonistic": 0}
     for p in participants:
         counts[p.tone] = counts.get(p.tone, 0) + 1
 
     print(f"\n{len(participants)} participant(s)  "
-          f"[agreeable={counts['agreeable']}  neutral={counts['neutral']}  satirical={counts['satirical']}]\n")
+          f"[agreeable={counts['agreeable']}  neutral={counts['neutral']}  agonistic={counts['agonistic']}]\n")
     print(row_fmt.format(*header))
     print(sep)
     for p in participants:

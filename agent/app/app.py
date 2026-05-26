@@ -18,15 +18,12 @@ from agent.app import participants as _participants
 from agent.app.participants import VALID_TONES
 from agent.app.utils import (
     fetch_tweet,
-    generate_notes_html,
     generate_reply,
-    index_loaded,
     post_reply,
-    preload_index_async,
-    x_weighted_length,
 )
 from agent.app import streamer as _streamer
 from agent.llm.config import _parse_bool_env, _require_env
+from agent.shared.text import X_TCO_LEN, x_weighted_length
 
 _LOG_FILE = os.getenv("DERAD_LOG_FILE", "/tmp/derad_stream.log")
 _log_fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -43,12 +40,16 @@ except OSError:
     pass  # non-writable filesystem (e.g. read-only container layer) — stdout only
 for _noisy in ("azure.core", "azure.monitor", "azure.identity"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
+# Exporter export errors (e.g. network timeouts) log at ERROR — suppress them too
+logging.getLogger("azure.monitor.opentelemetry.exporter").setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
 
 if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING") and not os.getenv("PYTEST_CURRENT_TEST"):
     try:
         from azure.monitor.opentelemetry import configure_azure_monitor
-        configure_azure_monitor()
+        # Use a short timeout so a blocked network path fails fast instead of
+        # holding an exporter thread for the default 300 s.
+        configure_azure_monitor(connection_timeout=5, read_timeout=10)
         logger.info("Application Insights instrumentation enabled")
     except Exception:
         logger.exception("Application Insights init failed; continuing without telemetry")
@@ -66,12 +67,43 @@ RATE_LIMIT_PER_SEC = int(os.getenv("DERAD_RATE_LIMIT_PER_SEC", "3"))
 USER_DAILY_CAP = int(os.getenv("DERAD_USER_DAILY_CAP", "20"))  # mentions/UTC-day/user; 0 disables
 TWEET_LIMIT = 280
 
-# Participant metadata loaded for study tracking only — no longer gates bot access.
+# Cap concurrent fact-check pipelines so a mention burst can't blow through
+# Foundry/Claude rate limits. Threads beyond the cap block on acquire; if a
+# slot doesn't open in DERAD_PIPELINE_QUEUE_TIMEOUT_S the mention is dropped.
+PIPELINE_MAX_CONCURRENT = int(os.getenv("DERAD_PIPELINE_MAX_CONCURRENT", "5"))
+PIPELINE_QUEUE_TIMEOUT_S = float(os.getenv("DERAD_PIPELINE_QUEUE_TIMEOUT_S", "600"))
+_PIPELINE_SEMAPHORE = threading.BoundedSemaphore(PIPELINE_MAX_CONCURRENT)
+
+# Hard cap on the finalize-persist write so a degraded Tables backend can't
+# hold a pipeline-semaphore slot forever.
+_FINALIZE_TIMEOUT_S = float(os.getenv("DERAD_FINALIZE_TIMEOUT_S", "15"))
+
+# Participant metadata loaded lazily via _lookup_participant's write-through
+# cache (lines below). No eager preload — every gunicorn worker would
+# otherwise repeat the same Tables scan at fork.
 _participants_store = _participants.get_store()
-_PARTICIPANTS_BY_ID: dict[str, _participants.Participant] = {
-    p.author_id: p for p in _participants_store.list_all()
-}
-logger.info("Loaded %d registered participants (metadata only)", len(_PARTICIPANTS_BY_ID))
+_PARTICIPANTS_BY_ID: dict[str, _participants.Participant] = {}
+
+
+def _warm_search_backend() -> None:
+    """Pre-build the search-backend client at startup so the first mention
+    doesn't pay DefaultAzureCredential chain resolution + AIProjectClient
+    init on its critical path.
+    """
+    try:
+        from agent.factcheck.search import build_default_backend
+        backend = build_default_backend()
+        # _ensure_client is the slow part; calling .search would trigger the
+        # web_search tool which we don't want at startup.
+        ensure = getattr(backend, "_ensure_client", None)
+        if callable(ensure):
+            ensure()
+            logger.info("Search backend warmed up: %s", backend.name)
+    except Exception:
+        logger.warning("Search-backend warmup failed; first mention will pay the cost.", exc_info=True)
+
+
+threading.Thread(target=_warm_search_backend, daemon=True, name="warm-search").start()
 
 
 # Info-URL store: token → {tone, reply_text, reasons, parent_id}
@@ -120,17 +152,22 @@ def _get_info_table():
 def _make_info_token(
     tone: str,
     reply_text: str,
-    reasons: list,
+    info_payload: dict,
     *,
     parent_id: str = "",
     parent_author_username: str = "",
     bot_handle: str = "",
 ) -> str:
+    """Create a /info token. `info_payload` is the rich projection of the
+    FrozenVerdict (action + outcome + counterpoints + perspectives +
+    sources + source_quality_table — see utils._info_payload_from_frozen).
+    Persisted as one `payload_json` Tables column for read-back.
+    """
     token = secrets.token_urlsafe(6)
     payload = {
         "tone": tone,
         "reply_text": reply_text,
-        "reasons": reasons,
+        "info_payload": info_payload,
         "parent_id": parent_id,
         "parent_author_username": parent_author_username,
         "bot_handle": bot_handle,
@@ -143,42 +180,34 @@ def _make_info_token(
         table = _get_info_table()
         if table is None:
             return
-        # Azure Tables enforces a 64 KiB cap per string property. Verbose notes
-        # can blow past this and silently lose the persisted token. Stay well
-        # under the limit; truncate the longest field first, then bail out
-        # entirely if it's still too large.
-        reasons_json = json.dumps(reasons, ensure_ascii=False)
+        # Tables enforces 64 KiB per string property. The structured payload
+        # for an active mention is typically 4–10 KiB; trim source-quality
+        # rationales first if we exceed the cap, then drop the source table
+        # entirely as a last resort.
+        payload_json = json.dumps(info_payload, ensure_ascii=False)
         _LIMIT = 60_000
-        if len(reasons_json.encode("utf-8")) > _LIMIT:
+        if len(payload_json.encode("utf-8")) > _LIMIT:
             logger.warning(
-                "reasons_json for token %s exceeds %d bytes; truncating note_text fields",
+                "info_payload for token %s exceeds %d bytes; trimming rationales",
                 token, _LIMIT,
             )
-            truncated = []
-            for r in reasons or []:
-                if isinstance(r, dict):
-                    r2 = dict(r)
-                    nt = r2.get("note_text")
-                    if isinstance(nt, str) and len(nt) > 500:
-                        r2["note_text"] = nt[:500]
-                    truncated.append(r2)
-                else:
-                    truncated.append(r)
-            reasons_json = json.dumps(truncated, ensure_ascii=False)
-            if len(reasons_json.encode("utf-8")) > _LIMIT:
-                logger.error(
-                    "reasons_json for token %s still exceeds %d bytes after truncation; "
-                    "persisting empty reasons list",
-                    token, _LIMIT,
-                )
-                reasons_json = "[]"
+            trimmed = dict(info_payload)
+            sqt = [
+                {**row, "rationale": (row.get("rationale") or "")[:200]}
+                for row in (trimmed.get("source_quality_table") or [])
+            ]
+            trimmed["source_quality_table"] = sqt
+            payload_json = json.dumps(trimmed, ensure_ascii=False)
+            if len(payload_json.encode("utf-8")) > _LIMIT:
+                trimmed["source_quality_table"] = []
+                payload_json = json.dumps(trimmed, ensure_ascii=False)
         try:
             table.upsert_entity({
                 "PartitionKey": "info",
                 "RowKey": token,
                 "tone": tone,
                 "reply_text": reply_text,
-                "reasons_json": reasons_json,
+                "payload_json": payload_json,
                 "parent_id": parent_id,
                 "parent_author_username": parent_author_username,
                 "bot_handle": bot_handle,
@@ -202,10 +231,36 @@ def _get_info_params(token: str) -> dict | None:
         return None
     try:
         entity = table.get_entity("info", token)
+        # New rows carry payload_json; legacy rows carry reasons_json (a
+        # plain list of URL strings). Synthesize a minimal info_payload
+        # from the legacy field so old tokens still render something.
+        if "payload_json" in entity:
+            info_payload = json.loads(entity["payload_json"])
+        else:
+            legacy_urls = json.loads(entity.get("reasons_json", "[]"))
+            # Pre-action-rewrite tokens were all verify-mode. Derive a
+            # plausible action_outcome from the legacy verdict_label if
+            # stored on the row, else fall back to verified_nei.
+            legacy_verdict = entity.get("verdict_label") or ""
+            legacy_outcome = {
+                "Supported": "verified_supported",
+                "Refuted": "verified_refuted",
+                "Conflicting": "verified_conflicting",
+                "NotEnoughEvidence": "verified_nei",
+            }.get(legacy_verdict, "verified_nei")
+            info_payload = {
+                "action": "verify",
+                "action_source": "inferred",
+                "action_outcome": legacy_outcome,
+                "primary_sources": [{"url": u, "display_name": u} for u in (legacy_urls or [])],
+                "source_quality_table": [],
+                "counterpoints": [],
+                "perspectives": [],
+            }
         params = {
             "tone": entity.get("tone", ""),
             "reply_text": entity.get("reply_text", ""),
-            "reasons": json.loads(entity.get("reasons_json", "[]")),
+            "info_payload": info_payload,
             "parent_id": entity.get("parent_id", ""),
             "parent_author_username": entity.get("parent_author_username", ""),
             "bot_handle": entity.get("bot_handle", ""),
@@ -343,12 +398,19 @@ def _lookup_participant(author_id: str) -> "_participants.Participant | None":
     return p
 
 
+_FORCE_TONE = (os.getenv("DERAD_FORCE_TONE") or "").strip().lower()
+
+
 def _resolve_tone(author_id: str) -> str:
     """Pick the reply tone for an incoming mention.
 
-    Registered participants use their assigned tone from the Participants table.
-    Unregistered users get a uniformly random tone per mention.
+    DERAD_FORCE_TONE, when set to one of VALID_TONES, overrides everything —
+    useful for single-arm test rounds before the full pilot. Otherwise:
+    registered participants use their assigned tone; unregistered users get a
+    uniformly random tone per mention.
     """
+    if _FORCE_TONE in VALID_TONES:
+        return _FORCE_TONE
     p = _lookup_participant(author_id)
     if p and p.tone in VALID_TONES:
         return p.tone
@@ -366,21 +428,73 @@ def _build_info_url(tone: str, tweet_ids, note_ids, reply_id: str = "") -> str:
     )
 
 
-# X shortens every URL to 23 chars via t.co regardless of actual length.
-_X_URL_LEN = 23
-
-
 def _append_url(text: str, url: str, limit: int = TWEET_LIMIT) -> str:
     """Append url on its own line, truncating text with ellipsis if needed to stay within limit."""
-    budget = limit - _X_URL_LEN - 1  # -1 for the newline
+    budget = limit - X_TCO_LEN - 1  # -1 for the newline
     if x_weighted_length(text) > budget:
         text = text[:budget - 1] + "…"
     return f"{text}\n{url}"
 
 
+def _clean_invoker_text(text: str, bot_handle: str) -> str:
+    """Strip the bot handle from the mention text and collapse whitespace.
+
+    Returns whatever's left — typically the invoker's instruction (e.g.
+    "fact check this", "what's the context", "push back on this nonsense").
+    Empty when the invoker only tagged the bot and said nothing.
+    """
+    if not text:
+        return ""
+    handle = (bot_handle or "").lstrip("@").strip()
+    if not handle:
+        return " ".join(text.split())
+    # Remove "@bothandle" tokens anywhere in the text, case-insensitive.
+    # Use a regex that requires word boundaries so we don't chew into
+    # legit handles that share a prefix.
+    import re
+    pattern = re.compile(rf"@{re.escape(handle)}\b", re.IGNORECASE)
+    stripped = pattern.sub("", text)
+    return " ".join(stripped.split())
+
+
 def _author_username(tweet: dict) -> str | None:
     user = tweet.get("user") or {}
     return user.get("screen_name") or user.get("username")
+
+
+def _process_mention_throttled(tone: str, tweet: dict, received_at_utc: datetime) -> None:
+    """Cap concurrent pipelines via PIPELINE_MAX_CONCURRENT. Threads beyond
+    the cap wait up to PIPELINE_QUEUE_TIMEOUT_S; over that we drop the
+    mention, log a warning, and write a `pipeline_queue_timeout` drop event."""
+    mention_id = tweet.get("id_str", "?")
+    t_queued = time.monotonic()
+    acquired = _PIPELINE_SEMAPHORE.acquire(timeout=PIPELINE_QUEUE_TIMEOUT_S)
+    if not acquired:
+        wait_s = time.monotonic() - t_queued
+        logger.warning(
+            "Pipeline queue timed out after %.0fs for mention %s (cap=%d) — dropping; consider scaling out",
+            wait_s, mention_id, PIPELINE_MAX_CONCURRENT,
+        )
+        try:
+            log_mention_drop(MentionDrop(
+                received_at_utc=received_at_utc,
+                tweet_id=str(mention_id),
+                reason="pipeline_queue_timeout",
+            ))
+        except Exception:
+            logger.exception("Failed to write drop event for queue-timeout mention %s", mention_id)
+        return
+
+    wait_s = time.monotonic() - t_queued
+    if wait_s > 0.5:
+        logger.info(
+            "Pipeline slot acquired for mention %s after %.1fs wait (cap=%d)",
+            mention_id, wait_s, PIPELINE_MAX_CONCURRENT,
+        )
+    try:
+        process_mention(tone, tweet, received_at_utc)
+    finally:
+        _PIPELINE_SEMAPHORE.release()
 
 
 def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
@@ -411,51 +525,109 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         if exc is not None:
             ev.error_class = type(exc).__name__
             ev.error_detail = str(exc)[:1000]
-        log_mention_event(ev)
+        # If Tables is degraded the write can stall indefinitely and hold the
+        # pipeline-semaphore slot until PIPELINE_QUEUE_TIMEOUT_S (~10 min).
+        # Run the persist on a daemon thread and bail after _FINALIZE_TIMEOUT_S.
+        t = threading.Thread(
+            target=log_mention_event, args=(ev,), daemon=True, name="finalize-persist",
+        )
+        t.start()
+        t.join(timeout=_FINALIZE_TIMEOUT_S)
+        if t.is_alive():
+            logger.warning(
+                "log_mention_event stalled for mention %s; abandoning persist (Tables degraded?)",
+                ev.mention_id,
+            )
         metrics.replies_posted.add(1, {"tone": tone, "outcome": outcome})
         metrics.pipeline_latency_ms.record(ev.pipeline_ms, {"tone": tone, "outcome": outcome})
 
     try:
+        logger.info("process_mention[%s]: fetching parent %s", mention_id, parent_id)
+        snap = fetch_tweet(parent_id)
+        if snap is None or not snap.text:
+            logger.info("Parent tweet %s unreachable; skipping mention %s", parent_id, mention_id)
+            _finalize("parent_fetch_failed")
+            return
+        ev.parent_text = snap.text
+        ev.parent_author_id = snap.author_id
+        ev.parent_author_username = snap.author_username
+        ev.parent_like_count = snap.like_count
+        ev.parent_retweet_count = snap.retweet_count
+        ev.parent_reply_count = snap.reply_count
+        ev.parent_quote_count = snap.quote_count
+        statement = snap.text
         if DRY_RUN:
-            import re as _re
-            raw_text = tweet.get("text", "")
-            statement = _re.sub(r"@\w+\s*", "", raw_text).strip() or raw_text
-            ev.parent_text = f"[dry-run] {statement}"
-            logger.info("DRY_RUN: using mention text as statement: %r", statement)
-        else:
-            snap = fetch_tweet(parent_id)
-            if snap is None or not snap.text:
-                logger.info("Parent tweet %s unreachable; skipping mention %s", parent_id, mention_id)
-                _finalize("parent_fetch_failed")
-                return
-            ev.parent_text = snap.text
-            ev.parent_author_id = snap.author_id
-            ev.parent_author_username = snap.author_username
-            ev.parent_like_count = snap.like_count
-            ev.parent_retweet_count = snap.retweet_count
-            ev.parent_reply_count = snap.reply_count
-            ev.parent_quote_count = snap.quote_count
-            statement = snap.text
+            logger.info("DRY_RUN: parent_text=%r", statement)
 
-        reply = generate_reply(statement=statement, exclude_tweet_id=parent_id, tone=tone)
+        parent_image_urls = list(snap.image_urls or [])
+        # Extract the invoker's instruction from the mention tweet itself
+        # (NOT the parent) — what they wrote alongside @eddiexbot is the
+        # signal the extractor uses to choose the bot's action.
+        invoker_instruction = _clean_invoker_text(tweet.get("text") or "", BOT_HANDLE)
+        ev.invoker_instruction_text = invoker_instruction
+        logger.info(
+            "process_mention[%s]: parent fetched (author=@%s, text_chars=%d, images=%d, invoker=%r) — entering generate_reply",
+            mention_id, snap.author_username or "?", len(statement), len(parent_image_urls),
+            invoker_instruction[:60],
+        )
+        tweet_context = {
+            "author_username": snap.author_username,
+            "author_verified": snap.author_verified,
+            "author_verified_type": snap.author_verified_type,
+            "author_description": snap.author_description,
+            "author_created_at": snap.author_created_at,
+            "author_followers_count": snap.author_followers_count,
+            "posted_at": snap.created_at,
+            "lang": snap.lang,
+            "possibly_sensitive": snap.possibly_sensitive,
+            "expanded_urls": snap.expanded_urls or [],
+            "referenced_tweets": snap.referenced_tweets or [],
+            "public_metrics": {
+                "like_count": snap.like_count,
+                "retweet_count": snap.retweet_count,
+                "reply_count": snap.reply_count,
+                "quote_count": snap.quote_count,
+            },
+        }
+        reply = generate_reply(
+            statement=statement,
+            exclude_tweet_id=parent_id,
+            tone=tone,
+            image_urls=parent_image_urls,
+            tweet_context=tweet_context,
+            invoker_instruction=invoker_instruction,
+        )
+        logger.info(
+            "process_mention[%s]: generate_reply returned (action=%s outcome=%s reply_chars=%d sources=%s)",
+            mention_id, reply.get("action"), reply.get("action_outcome"),
+            len(reply.get("text") or ""), reply.get("sources"),
+        )
         ev.queries = reply.get("queries") or []
-        ev.cited_tweet_ids = reply.get("all_cited_tweet_ids") or []
-        ev.cited_note_ids = reply.get("all_cited_note_ids") or []
+        ev.action = reply.get("action")
+        ev.action_outcome = reply.get("action_outcome")
 
         if not reply.get("text"):
             logger.info("Empty reply text for mention %s; skipping", mention_id)
             _finalize("empty_reply")
             return
 
-        # Distinguish grounded factcheck replies from no-factcheck fallbacks for
-        # downstream research analysis. reasons_detail is populated only when the
-        # reply was grounded in Community Notes.
-        ev.reply_type = "factcheck" if reply.get("reasons_detail") else "no_factcheck"
+        # Legacy reply_type, derived now from action_outcome — kept so older
+        # analytics queries that group on this column keep working.
+        # _unavailable / _insufficient / _nei / declined outcomes ⇒ no_factcheck.
+        ao = (reply.get("action_outcome") or "") or ""
+        no_factcheck_outcomes = {
+            "verified_nei",
+            "context_unavailable",
+            "challenge_unavailable",
+            "perspectives_insufficient",
+            "declined",
+        }
+        ev.reply_type = "no_factcheck" if ao in no_factcheck_outcomes else "factcheck"
 
         token = _make_info_token(
             tone,
             reply["text"],
-            reply.get("reasons_detail") or [],
+            reply.get("info_payload") or {},
             parent_id=parent_id,
             parent_author_username=ev.parent_author_username or "",
             bot_handle=BOT_HANDLE,
@@ -560,7 +732,7 @@ def _dispatch_tweet(tweet: dict, received_at_utc: datetime) -> bool:
     )
     metrics.mentions_accepted.add(1, {"tone": tone})
     threading.Thread(
-        target=process_mention,
+        target=_process_mention_throttled,
         args=(tone, tweet, received_at_utc),
         daemon=False,
     ).start()
@@ -593,11 +765,7 @@ def info():
         )
     else:
         reply_html = ""
-    if index_loaded():
-        notes_html = generate_notes_html(tweet_ids, note_ids, bot_handle=bot_handle)
-    else:
-        notes_html = ""
-    return render_template("info.html", reply=reply_html, notes=notes_html), 200
+    return render_template("info.html", reply=reply_html, notes=""), 200
 
 
 @app.route("/i/<token>", methods=["GET"])
@@ -608,8 +776,8 @@ def info_short(token: str):
     tone = params.get("tone", "")
     return render_template(
         "info.html",
-        headline=params.get("reply_text", ""),
-        reasons=params.get("reasons", []),
+        info=params.get("info_payload") or {},
+        reply_text=params.get("reply_text", ""),
         tone=tone,
         bot_handle=params.get("bot_handle") or BOT_HANDLE,
         parent_id=params.get("parent_id", ""),
@@ -620,7 +788,7 @@ def info_short(token: str):
 
 @app.route("/healthz", methods=["GET"])
 def healthz():
-    return jsonify({"ok": True, "index_loaded": index_loaded()}), 200
+    return jsonify({"ok": True}), 200
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -637,7 +805,9 @@ def api_activity():
     recent_drops = ev_store.list_recent_drops(20)
 
     outcome_counts: dict[str, int] = {}
-    tone_counts: dict[str, int] = {"agreeable": 0, "neutral": 0, "satirical": 0}
+    tone_counts: dict[str, int] = {t: 0 for t in _participants.VALID_TONES}
+    action_counts: dict[str, int] = {}
+    action_outcome_counts: dict[str, int] = {}
     latencies: list[int] = []
     for ev in recent_events:
         outcome = ev.get("outcome") or "unknown"
@@ -645,13 +815,19 @@ def api_activity():
         tone = ev.get("tone") or ""
         if tone in tone_counts:
             tone_counts[tone] += 1
+        action = ev.get("action") or ""
+        if action:
+            action_counts[action] = action_counts.get(action, 0) + 1
+        ao = ev.get("action_outcome") or ""
+        if ao:
+            action_outcome_counts[ao] = action_outcome_counts.get(ao, 0) + 1
         ms = ev.get("pipeline_ms")
         if ms:
             latencies.append(int(ms))
 
     part_store = _participants.get_store()
     all_parts = part_store.list_all()
-    participant_tone_counts = {"agreeable": 0, "neutral": 0, "satirical": 0}
+    participant_tone_counts = {t: 0 for t in _participants.VALID_TONES}
     for p in all_parts:
         if p.tone in participant_tone_counts:
             participant_tone_counts[p.tone] += 1
@@ -663,6 +839,8 @@ def api_activity():
             "total_events": len(recent_events),
             "outcome_counts": outcome_counts,
             "tone_counts": tone_counts,
+            "action_counts": action_counts,
+            "action_outcome_counts": action_outcome_counts,
             "avg_pipeline_ms": int(sum(latencies) / len(latencies)) if latencies else 0,
             "participant_count": len(all_parts),
             "participant_tone_counts": participant_tone_counts,
@@ -821,5 +999,4 @@ def stream_logs():
     return resp
 
 
-preload_index_async()
 _streamer.start_streamer(_dispatch_tweet)

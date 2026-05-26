@@ -41,3 +41,12 @@ pipeline_latency_ms = _meter.create_histogram(
     description="End-to-end pipeline duration in ms; tagged by tone + outcome.",
     unit="ms",
 )
+reconcile_stance_drift = _meter.create_counter(
+    "reconcile_stance_drift",
+    description=(
+        "Reconcile returned a stance-list count that didn't match the "
+        "input evidence count; pipeline pads/truncates but the verdict "
+        "may be misleadingly confident downstream."
+    ),
+    unit="1",
+)

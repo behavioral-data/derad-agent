@@ -1,49 +1,13 @@
 import logging
-import re
-import threading
 from dataclasses import dataclass
 from typing import Optional
 
 import requests
-from markupsafe import escape
 
 from agent.llm.config import get_x_client
-from agent.llm.config import INDEX_ROOT
-from agent.runtime import get_notes_index_dir
-from agent.runtime.notes_index import load_notes_index
+from agent.shared.text import X_TWEET_LIMIT, x_weighted_length
 
 logger = logging.getLogger(__name__)
-
-_INDEX = None
-_INDEX_LOCK = threading.Lock()
-
-
-def get_index():
-    """Return the in-memory notes index, loading it on first access."""
-    global _INDEX
-    if _INDEX is not None:
-        return _INDEX
-    with _INDEX_LOCK:
-        if _INDEX is None:
-            logger.info("Loading notes index from %s", get_notes_index_dir(INDEX_ROOT))
-            _INDEX = load_notes_index(get_notes_index_dir(INDEX_ROOT))
-            logger.info("Notes index loaded: %d tweets", len(_INDEX.tweet_ids))
-    return _INDEX
-
-
-def index_loaded() -> bool:
-    """Return True if the index is in memory. Does not force a load."""
-    return _INDEX is not None
-
-
-def preload_index_async() -> None:
-    """Kick off an index load in a daemon thread so /healthz can answer fast."""
-    def _safe_preload():
-        try:
-            get_index()
-        except Exception:
-            logger.exception("Index preload failed; will retry on first use")
-    threading.Thread(target=_safe_preload, name="index-preload", daemon=True).start()
 
 
 @dataclass
@@ -56,6 +20,21 @@ class TweetSnapshot:
     retweet_count: Optional[int] = None
     reply_count: Optional[int] = None
     quote_count: Optional[int] = None
+    # Image URLs attached to the tweet (photos only; videos/GIFs skipped).
+    # X API populates url for photos and preview_image_url for video/animated_gif.
+    image_urls: list = None  # type: ignore[assignment]
+    # Fact-checking context fields (added in v3.x). All optional; missing
+    # fields fall back to None when the X API doesn't return them.
+    created_at: Optional[str] = None
+    lang: Optional[str] = None
+    possibly_sensitive: Optional[bool] = None
+    expanded_urls: list = None  # type: ignore[assignment]  # list[{display_url, expanded_url, title}]
+    referenced_tweets: list = None  # type: ignore[assignment]  # list[{type, id}]
+    author_verified: Optional[bool] = None
+    author_verified_type: Optional[str] = None
+    author_description: Optional[str] = None
+    author_created_at: Optional[str] = None
+    author_followers_count: Optional[int] = None
 
 
 def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
@@ -70,9 +49,17 @@ def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
     try:
         response = get_x_client().posts.get_by_id(
             id=str(tweet_id),
-            tweet_fields=["text", "author_id", "public_metrics"],
-            expansions=["author_id"],
-            user_fields=["username"],
+            tweet_fields=[
+                "text", "author_id", "public_metrics", "attachments",
+                "created_at", "lang", "possibly_sensitive", "entities",
+                "referenced_tweets",
+            ],
+            expansions=["author_id", "attachments.media_keys"],
+            user_fields=[
+                "username", "verified", "verified_type", "description",
+                "created_at", "public_metrics",
+            ],
+            media_fields=["url", "preview_image_url", "type"],
         )
     except requests.HTTPError as exc:
         status = exc.response.status_code if exc.response is not None else "?"
@@ -90,13 +77,58 @@ def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
     if not isinstance(public_metrics, dict):
         public_metrics = {}
     author_username: Optional[str] = None
+    author_verified: Optional[bool] = None
+    author_verified_type: Optional[str] = None
+    author_description: Optional[str] = None
+    author_created_at: Optional[str] = None
+    author_followers_count: Optional[int] = None
     includes = getattr(response, "includes", None) or {}
     users = includes.get("users") if isinstance(includes, dict) else None
     if users and author_id:
         for user in users:
             if isinstance(user, dict) and str(user.get("id")) == str(author_id):
                 author_username = user.get("username")
+                author_verified = user.get("verified")
+                author_verified_type = user.get("verified_type")
+                author_description = user.get("description")
+                author_created_at = user.get("created_at")
+                user_metrics = user.get("public_metrics") or {}
+                if isinstance(user_metrics, dict):
+                    author_followers_count = user_metrics.get("followers_count")
                 break
+
+    image_urls: list[str] = []
+    media = includes.get("media") if isinstance(includes, dict) else None
+    if media:
+        for m in media:
+            if not isinstance(m, dict):
+                continue
+            # Use `url` for static photos; fall back to `preview_image_url` for
+            # video / animated_gif. The VLM only reads stills either way.
+            mu = m.get("url") or m.get("preview_image_url")
+            if mu:
+                image_urls.append(mu)
+
+    # Expanded URLs from entities.urls — `t.co/xyz` resolves to the real link
+    # plus its page title. Lets the fact-checker see where short links go.
+    expanded_urls: list[dict] = []
+    entities = data.get("entities") if isinstance(data, dict) else None
+    if isinstance(entities, dict):
+        for u in (entities.get("urls") or []):
+            if not isinstance(u, dict):
+                continue
+            entry = {
+                "display_url": u.get("display_url"),
+                "expanded_url": u.get("expanded_url") or u.get("unwound_url"),
+                "title": u.get("title"),
+            }
+            if entry["expanded_url"]:
+                expanded_urls.append(entry)
+
+    referenced_tweets: list[dict] = []
+    for ref in (data.get("referenced_tweets") or []):
+        if isinstance(ref, dict) and ref.get("type") and ref.get("id"):
+            referenced_tweets.append({"type": ref["type"], "id": str(ref["id"])})
 
     return TweetSnapshot(
         text=text,
@@ -106,85 +138,127 @@ def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
         retweet_count=public_metrics.get("retweet_count"),
         reply_count=public_metrics.get("reply_count"),
         quote_count=public_metrics.get("quote_count"),
+        image_urls=image_urls,
+        created_at=data.get("created_at") if isinstance(data, dict) else None,
+        lang=data.get("lang") if isinstance(data, dict) else None,
+        possibly_sensitive=data.get("possibly_sensitive") if isinstance(data, dict) else None,
+        expanded_urls=expanded_urls,
+        referenced_tweets=referenced_tweets,
+        author_verified=author_verified,
+        author_verified_type=author_verified_type,
+        author_description=author_description,
+        author_created_at=author_created_at,
+        author_followers_count=author_followers_count,
     )
 
 
-def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5):
-    from agent.runtime.landscape_api import retrieve_statement_landscape
+_APP_TO_FACTCHECK_TONE = {
+    "agreeable": "agreeable",
+    "neutral": "neutral",
+    "agonistic": "agonistic",
+    "satirical": "agonistic",  # legacy alias — any pre-rename participant
+                                # records still resolve correctly.
+}
 
-    kwargs = {
-        "statement": statement,
-        "style": tone,
+
+def _info_payload_from_frozen(frozen) -> dict:
+    """Project the FrozenVerdict to the JSON-serializable payload the
+    `/info` page renders. All sources + reasoning + per-action structured
+    content live here — none of it appears in the tweet body itself."""
+    pp = frozen.presentation_payload
+    return {
+        "action": frozen.action,
+        "action_outcome": frozen.action_outcome,
+        "action_source": frozen.action_source,
+        "pivoted_from": frozen.pivoted_from,
+        "invoker_instruction_text": frozen.invoker_instruction_text,
+        "headline_finding": pp.headline_finding,
+        "tone_neutral_justification": frozen.tone_neutral_justification,
+        "counter_fact": pp.counter_fact,
+        "context_note": pp.context_note,
+        "load_bearing_evidence_snippet": pp.load_bearing_evidence_snippet,
+        "counterpoints": [
+            {
+                "summary": cp.summary,
+                "weight": cp.weight,
+                "citing_sources": [{"url": s.url, "tier": s.tier} for s in cp.citing_sources],
+            }
+            for cp in pp.counterpoints
+        ],
+        "perspectives": [
+            {
+                "label": p.label,
+                "summary": p.summary,
+                "citing_sources": [{"url": s.url, "tier": s.tier} for s in p.citing_sources],
+            }
+            for p in pp.perspectives
+        ],
+        "primary_sources": [
+            {"url": s.url, "display_name": s.display_name}
+            for s in pp.primary_sources_to_cite
+        ],
+        "source_quality_table": [
+            {"url": s.url, "tier": s.tier, "tier_source": s.tier_source, "rationale": s.rationale}
+            for s in frozen.source_quality_table
+        ],
+        "verdict_label": frozen.verdict_label,
+        "invocation_id": frozen.invocation_id,
     }
-    if exclude_tweet_id is not None:
-        kwargs["exclude_tweet_id"] = str(exclude_tweet_id)
 
-    res = retrieve_statement_landscape(**kwargs)
-    reply = res.get("reply") or {}
-    text = (reply.get("response") or "").strip()
-    queries = list(res.get("queries") or [])
 
-    # "All cited" — every reason the LLM grounded its reply in, used by the
-    # research event log. "In-tweet" — the subset whose evidence URLs survived
-    # dedup/cap, used by /info so the carousel matches what the user saw.
-    all_cited_tweet_ids: list[str] = []
-    all_cited_note_ids: list[str] = []
-    reasons_detail: list[dict] = []
-    tweets: list = []
-    notes: list = []
-    sources: list = []
-    index = get_index()
-    seen = set()
-    for reason in (reply.get("reasons") or []):
-        tid, nid = reason.get("tweet_id"), reason.get("note_id")
-        if tid is not None:
-            all_cited_tweet_ids.append(str(tid))
-        if nid is not None:
-            all_cited_note_ids.append(str(nid))
-        links = [l.strip() for l in (reason.get("evidence_links") or []) if isinstance(l, str) and l.strip()]
-        note_text = None
-        if tid is not None and nid is not None:
-            for n in index.notes_by_tweet.get(str(tid), []):
-                if str(n.get("note_id")) == str(nid):
-                    note_text = (n.get("summary") or "").strip() or None
-                    break
-        reasons_detail.append({
-            "reason": str(reason.get("reason") or ""),
-            "note_id": str(nid) if nid is not None else None,
-            "tweet_id": str(tid) if tid is not None else None,
-            "evidence_links": links,
-            "note_text": note_text,
-        })
-        if len(sources) >= max_sources:
-            continue
-        if links:
-            for link in links:
-                if link not in seen and len(sources) < max_sources:
-                    sources.append(link)
-                    seen.add(link)
-            tweets.append(tid)
-            notes.append(nid)
+def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5,
+                   image_urls=None, tweet_context=None, invoker_instruction=""):
+    """Run the fact-check pipeline and render a reply in the requested tone.
+
+    The rendered text contains NO URLs — sources + reasoning live on the
+    /info page reached via the short link appended downstream. Returns
+    `{text, sources, info_payload, verdict_label, action, action_outcome, queries}`.
+
+    `info_payload` carries everything the /info page renders: action +
+    outcome + counterpoints / perspectives / context_note + every cited
+    source + the source-quality table.
+    """
+    from agent.factcheck.freeze import view_for_renderer
+    from agent.factcheck.pipeline import run_pipeline
+    from agent.factcheck.render import render
+
+    factcheck_tone = _APP_TO_FACTCHECK_TONE.get(tone)
+    if factcheck_tone is None:
+        logger.warning("generate_reply: unknown tone %r — defaulting to neutral", tone)
+        factcheck_tone = "neutral"
+
+    target_tweet_id = str(exclude_tweet_id) if exclude_tweet_id is not None else ""
+
+    # Let pipeline + render exceptions propagate. The streamer's
+    # process_mention wraps the whole flow in try/except and emits
+    # `pipeline_error` — that's the outcome we want for telemetry.
+    frozen = run_pipeline(
+        statement,
+        target_tweet_id=target_tweet_id,
+        image_urls=list(image_urls) if image_urls else None,
+        tweet_context=tweet_context or None,
+        invoker_instruction=invoker_instruction or "",
+    )
+    text = render(view_for_renderer(frozen), factcheck_tone)
+
+    sources = [
+        s.url for s in frozen.presentation_payload.primary_sources_to_cite
+    ][:max_sources] or None
+
+    logger.info(
+        "Fact-check produced action=%s outcome=%s for invocation=%s tone=%s",
+        frozen.action, frozen.action_outcome, frozen.invocation_id, factcheck_tone,
+    )
 
     return {
         "text": text,
-        "sources": sources or None,
-        "tweets": tweets or None,
-        "notes": notes or None,
-        "queries": queries,
-        "all_cited_tweet_ids": all_cited_tweet_ids,
-        "all_cited_note_ids": all_cited_note_ids,
-        "reasons_detail": reasons_detail,
+        "sources": sources,
+        "info_payload": _info_payload_from_frozen(frozen),
+        "verdict_label": frozen.verdict_label,
+        "action": frozen.action,
+        "action_outcome": frozen.action_outcome,
+        "queries": [statement],
     }
-
-
-_TCO_URL_RE = re.compile(r'https?://\S+')
-_X_TCO_LEN = 23
-_X_TWEET_LIMIT = 280
-
-
-def x_weighted_length(text: str) -> int:
-    """Count characters the way X does: every URL is collapsed to 23 chars."""
-    return len(_TCO_URL_RE.sub("x" * _X_TCO_LEN, text))
 
 
 def post_reply(parent_id, reply_text) -> Optional[str]:
@@ -194,10 +268,10 @@ def post_reply(parent_id, reply_text) -> Optional[str]:
     ``posts.create`` raises because the real signature takes a single ``body``.
     """
     weighted = x_weighted_length(reply_text)
-    if weighted > _X_TWEET_LIMIT:
+    if weighted > X_TWEET_LIMIT:
         logger.warning(
             "post_reply refused: text %d weighted chars > %d (parent=%s)",
-            weighted, _X_TWEET_LIMIT, parent_id,
+            weighted, X_TWEET_LIMIT, parent_id,
         )
         return None
 
@@ -226,51 +300,3 @@ def post_reply(parent_id, reply_text) -> Optional[str]:
     reply_id = str(reply_id)
     logger.info("Created reply %s (parent=%s)", reply_id, parent_id)
     return reply_id
-
-
-_URL_RE = re.compile(r'https?://[^\s<>"]+')
-
-
-def _linkify_safe(text: str) -> str:
-    """HTML-escape `text`, then turn http(s) URLs into <a> tags.
-
-    Untrusted note summaries pass through here. Escaping first means stray HTML
-    in the upstream Community Notes feed cannot become live markup; we then
-    re-introduce *only* anchor tags for matched URLs.
-    """
-    parts: list[str] = []
-    last_end = 0
-    for m in _URL_RE.finditer(text):
-        parts.append(str(escape(text[last_end:m.start()])))
-        url_safe = str(escape(m.group(0)))
-        parts.append(f'<a href="{url_safe}">{url_safe}</a>')
-        last_end = m.end()
-    parts.append(str(escape(text[last_end:])))
-    return "".join(parts)
-
-
-def generate_notes_html(tweet_ids, note_ids, bot_handle: str = "i") -> str:
-    """Render the sources carousel for /info. `bot_handle` is used in fallback hrefs."""
-    if not tweet_ids or not note_ids:
-        return ""
-    index = get_index()
-    safe_handle = str(escape(bot_handle))
-    notes_html = ""
-    for i, (tweet_id, note_id) in enumerate(zip(tweet_ids, note_ids)):
-        tweet_notes = index.notes_by_tweet.get(tweet_id, [])
-        note_summaries = {note.get("note_id"): note.get("summary") for note in tweet_notes}
-
-        if note_id in note_summaries:
-            note_text = _linkify_safe(note_summaries.get(note_id) or "")
-            safe_tweet_id = str(escape(tweet_id))
-            notes_html += f"""
-                <li>
-                    <article class="note-body">
-                        <h4>Community Note {i + 1}</h4>
-                        <p>{note_text}</p>
-                        <br>
-                        <p>This community note was added by an X user to correct misinformation on <a href="https://twitter.com/{safe_handle}/status/{safe_tweet_id}">this tweet</a>.</p>
-                    </article>
-                </li>
-            """
-    return notes_html

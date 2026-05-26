@@ -14,7 +14,7 @@ console = Console(theme=Theme({
 
 
 class RichLogger:
-    """Routes RuntimeLogger calls to a Rich Status spinner."""
+    """Routes structured step-logging calls to a Rich Status spinner."""
 
     def __init__(self, status: Status, verbose: bool = False):
         self.status = status

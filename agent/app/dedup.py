@@ -108,14 +108,22 @@ class TablesStore:
 
         self._ResourceExistsError = ResourceExistsError
         cred = credential or DefaultAzureCredential()
-        self._service = TableServiceClient(endpoint=endpoint, credential=cred)
-        # Idempotent create — safe to call on every boot.
+        self._service = TableServiceClient(
+            endpoint=endpoint,
+            credential=cred,
+            connection_timeout=10,
+            read_timeout=15,
+        )
+        # Idempotent create — safe to call on every boot, and we don't let
+        # a single slow round-trip block startup.
         for name in (dedup_table, rate_table):
             try:
                 self._service.create_table(name)
                 logger.info("Created Tables table %s", name)
             except ResourceExistsError:
                 pass
+            except Exception:
+                logger.warning("create_table(%s) failed — assuming it exists.", name, exc_info=True)
         self._dedup = self._service.get_table_client(dedup_table)
         self._rate = self._service.get_table_client(rate_table)
 

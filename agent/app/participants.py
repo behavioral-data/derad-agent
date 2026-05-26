@@ -25,7 +25,10 @@ logger = logging.getLogger(__name__)
 _TABLE_NAME = "Participants"
 _PARTITION = "participants"
 
-VALID_TONES = ("agreeable", "neutral", "satirical")
+VALID_TONES = ("agreeable", "neutral", "agonistic")
+
+# Any legacy rows in Tables still carry tone="satirical"; normalize on read.
+_LEGACY_TONE_ALIASES = {"satirical": "agonistic"}
 
 
 class ParticipantLookupError(Exception):
@@ -37,7 +40,7 @@ class Participant:
     """One registered study participant."""
     author_id: str           # X numeric user ID — primary lookup key
     author_username: str     # @handle (human-readable, for DM composition)
-    tone: str                # assigned bot: agreeable | neutral | satirical
+    tone: str                # assigned bot: agreeable | neutral | agonistic
     enrolled_at_utc: datetime
     notes: str = ""          # optional researcher notes
 
@@ -82,12 +85,19 @@ class TablesParticipantsStore:
         from azure.identity import DefaultAzureCredential
 
         cred = credential or DefaultAzureCredential()
-        svc = TableServiceClient(endpoint=endpoint, credential=cred)
+        svc = TableServiceClient(
+            endpoint=endpoint,
+            credential=cred,
+            connection_timeout=10,
+            read_timeout=15,
+        )
         try:
             svc.create_table(_TABLE_NAME)
             logger.info("Created table %s", _TABLE_NAME)
         except ResourceExistsError:
             pass
+        except Exception:
+            logger.warning("create_table(%s) failed — assuming it exists.", _TABLE_NAME, exc_info=True)
         self._tbl = svc.get_table_client(_TABLE_NAME)
 
     def register(self, p: Participant) -> None:
@@ -132,10 +142,12 @@ def _entity_to_participant(ent: dict) -> Participant:
         enrolled = datetime.fromisoformat(enrolled)
     if enrolled and enrolled.tzinfo is None:
         enrolled = enrolled.replace(tzinfo=timezone.utc)
+    tone = ent.get("tone", "")
+    tone = _LEGACY_TONE_ALIASES.get(tone, tone)
     return Participant(
         author_id=ent["RowKey"],
         author_username=ent.get("author_username", ""),
-        tone=ent.get("tone", ""),
+        tone=tone,
         enrolled_at_utc=enrolled or datetime.now(timezone.utc),
         notes=ent.get("notes", ""),
     )

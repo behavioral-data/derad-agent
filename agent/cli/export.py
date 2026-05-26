@@ -38,7 +38,7 @@ _DROPS_TABLE = "MentionDrops"
 
 # Fields whose stored name ends in _json and contain a JSON-encoded value.
 # On export we strip the suffix and decode the value.
-_EVENTS_JSON_FIELDS = {"queries_json", "cited_note_ids_json", "cited_tweet_ids_json"}
+_EVENTS_JSON_FIELDS = {"queries_json"}
 _DROPS_JSON_FIELDS = {"extra_json"}
 
 # Azure Table internal fields we strip from output.

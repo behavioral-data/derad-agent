@@ -7,7 +7,7 @@ CSV format (header row required):
 
 Columns:
   username   Required. X handle with or without @.
-  tone       Required. agreeable | neutral | satirical | random.
+  tone       Required. agreeable | neutral | agonistic | random.
   enrolled   Optional. YYYY-MM-DD (default: today UTC).
   notes      Optional. Free text.
 
@@ -32,7 +32,7 @@ from agent.llm.config import get_x_client
 
 logger = logging.getLogger(__name__)
 
-VALID_TONES = {"agreeable", "neutral", "satirical"}
+VALID_TONES = {"agreeable", "neutral", "agonistic"}
 
 
 def _pick_balanced_tone(counts: dict[str, int]) -> str:
@@ -59,7 +59,7 @@ def main() -> None:
 
     store = get_store()
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    tone_counts = {"agreeable": 0, "neutral": 0, "satirical": 0}
+    tone_counts = {"agreeable": 0, "neutral": 0, "agonistic": 0}
     for p in store.list_all():
         if p.tone in tone_counts:
             tone_counts[p.tone] += 1
@@ -151,4 +151,4 @@ def main() -> None:
         for p in store.list_all():
             if p.tone in counts:
                 counts[p.tone] += 1
-        print(f"Tone balance: agreeable={counts['agreeable']}  neutral={counts['neutral']}  satirical={counts['satirical']}")
+        print(f"Tone balance: agreeable={counts['agreeable']}  neutral={counts['neutral']}  agonistic={counts['agonistic']}")

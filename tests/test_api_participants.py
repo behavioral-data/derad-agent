@@ -10,9 +10,6 @@ import pytest
 os.environ.setdefault("X_API_KEY", "test_consumer_key")
 os.environ.setdefault("X_API_SECRET", "test_consumer_secret_abc")
 os.environ.setdefault("SERVER_NAME", "test.local")
-os.environ.setdefault("AZURE_OPENAI_API_KEY", "test_key")
-os.environ.setdefault("AZURE_OPENAI_ENDPOINT", "https://test.example/")
-os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT_EMBED", "test-embed")
 os.environ.setdefault("BOT_USER_ID", "999")
 
 from agent.app import app as app_module  # noqa: E402
@@ -125,7 +122,7 @@ class TestApiParticipantsCreate:
     def test_random_tone_picks_least_used_for_balance(self, fresh_store, client, monkeypatch):
         from datetime import datetime, timezone
         now = datetime(2026, 5, 23, tzinfo=timezone.utc)
-        # Skew: 2 agreeable, 2 neutral, 0 satirical → "random" must pick satirical.
+        # Skew: 2 agreeable, 2 neutral, 0 agonistic → "random" must pick agonistic.
         for i, t in enumerate(["agreeable", "agreeable", "neutral", "neutral"]):
             fresh_store.register(participants_module.Participant(
                 author_id=f"seed-{i}", author_username=f"seed{i}",
@@ -134,7 +131,7 @@ class TestApiParticipantsCreate:
         _patch_x_lookup(monkeypatch, user_id="400")
         resp = client.post("/api/participants", json={"username": "grace", "tone": "random"})
         assert resp.status_code == 201
-        assert resp.get_json()["participant"]["tone"] == "satirical"
+        assert resp.get_json()["participant"]["tone"] == "agonistic"
 
     def test_lookup_failure_returns_422(self, fresh_store, client, monkeypatch):
         def _boom(username, **kw):
