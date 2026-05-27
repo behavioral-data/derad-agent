@@ -53,9 +53,9 @@
     .oc-x_post_error { border-color: #e85040; color: #e85040; }
     .oc-empty_reply  { border-color: #e8a040; color: #e8a040; }
 
-    .tone-agonistic { color: #e85040; }
     .tone-agreeable { color: #6fe080; }
     .tone-neutral   { color: #4fc1ff; }
+    .tone-satirical { color: #c586f0; }
     .drop-reason    { font-size: 10px; font-family: var(--mono); color: #e8a040; }
 
     /* ── Sidebar info rows ── */
@@ -158,7 +158,7 @@
     }
     .bot-chip.tone-agreeable { color: #6fe080; border-color: #6fe080; }
     .bot-chip.tone-neutral   { color: #4fc1ff; border-color: #4fc1ff; }
-    .bot-chip.tone-agonistic { color: #e85040; border-color: #e85040; }
+    .bot-chip.tone-satirical { color: #c586f0; border-color: #c586f0; }
     .bot-chip.tone-unknown   { color: var(--gray-500); border-color: var(--gray-500); }
 
     /* ── Copy button ── */
@@ -201,6 +201,15 @@
     /* ── Pager (controls below a table) ── */
     .tbl-pager { margin-top: 12px; margin-bottom: 0; }
     .tbl-pager select.tbl-input { padding: 5px 8px; }
+
+    /* ── Inline chart legend ── */
+    .chart-legend { display: flex; gap: 16px; align-items: center; }
+    .chart-legend .lg { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--gray-500); }
+    .chart-legend .lg i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+    /* ── Metric cell: sparkline + current value ── */
+    .metric-cell { display: flex; align-items: center; gap: 8px; }
+    .metric-cell .metric-val { font-family: var(--mono); font-variant-numeric: tabular-nums; min-width: 2ch; text-align: right; }
   </style>
 </head>
 <body>
@@ -219,6 +228,7 @@
       <a href="#events">Events</a>
       <a href="#drops">Drops</a>
       <a href="#bot-replies">Bot Replies</a>
+      <a href="#engagement">Engagement</a>
       <a href="#participants">Participants</a>
       <a href="#logs">Live Logs</a>
     </nav>
@@ -366,10 +376,121 @@
       <div class="tbl-toolbar tbl-pager" id="bot-pager"></div>
     </section>
 
-    <!-- 05 · Participants -->
+    <!-- 05 · Engagement -->
+    <section id="engagement" style="margin-top:48px;">
+      <div class="section-head">
+        <p class="eyebrow">05 · Engagement</p>
+        <h2>Engagement &amp; Bystander Replies <span id="eng-refresh" class="refresh-note"></span></h2>
+        <p>Downstream measurement from the twice-daily cron. Each bot reply is polled every ~12 h for 10 days (≈20 snapshots), giving a cumulative engagement series; bystander replies are collected at the 3-day mark. Totals below are the latest cumulative value per reply.</p>
+      </div>
+
+      <div class="stat-row" id="eng-stat-row">
+        <div class="stat"><div class="num" id="eng-snaps">—</div><div class="label">Replies tracked</div></div>
+        <div class="stat"><div class="num" id="eng-likes">—</div><div class="label">Total likes</div></div>
+        <div class="stat"><div class="num" id="eng-rts">—</div><div class="label">Total reposts</div></div>
+        <div class="stat"><div class="num" id="eng-replies">—</div><div class="label">Total replies</div></div>
+        <div class="stat"><div class="num" id="eng-quotes">—</div><div class="label">Total quotes</div></div>
+        <div class="stat"><div class="num" id="eng-clicks">—</div><div class="label">Link clicks (human)</div></div>
+        <div class="stat"><div class="num" id="eng-byst">—</div><div class="label">Bystander replies</div></div>
+      </div>
+
+      <div class="panel" style="margin-top:24px;">
+        <div class="panel-head">
+          <span class="meta">Cumulative engagement · last 14 days</span>
+          <span class="spacer"></span>
+          <span class="chart-legend">
+            <span class="lg"><i style="background:var(--clay)"></i>Likes</span>
+            <span class="lg"><i style="background:var(--olive)"></i>Reposts</span>
+            <span class="lg"><i style="background:var(--sky)"></i>Replies</span>
+            <span class="lg"><i style="background:var(--rust)"></i>Quotes</span>
+          </span>
+        </div>
+        <div id="eng-chart" style="margin-top:12px;min-height:180px;"></div>
+      </div>
+
+      <div class="tbl-toolbar" style="margin-top:32px;">
+        <span class="meta">By Condition · avg per reply (sparkline = 14-day trend)</span>
+        <span class="spacer"></span>
+        <span class="tbl-note" id="cond-count">—</span>
+        <button class="tbl-btn export" onclick="exportByCondition()">Export CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="bycond-table">
+          <thead>
+            <tr>
+              <th>Condition</th>
+              <th>Replies</th>
+              <th>Avg likes</th>
+              <th>Avg reposts</th>
+              <th>Avg replies</th>
+              <th>Avg quotes</th>
+              <th>Clicks</th>
+            </tr>
+          </thead>
+          <tbody id="bycond-tbody">
+            <tr><td colspan="7" style="color:var(--gray-500);">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="tbl-toolbar" style="margin-top:32px;">
+        <span class="meta">Engagement by Reply</span>
+        <span class="spacer"></span>
+        <span class="tbl-note" id="byreply-count">—</span>
+        <button class="tbl-btn export" onclick="exportByReply()">Export CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="byreply-table">
+          <thead>
+            <tr>
+              <th>Bot reply</th>
+              <th>Tone</th>
+              <th>Likes</th>
+              <th>Reposts</th>
+              <th>Replies</th>
+              <th>Quotes</th>
+              <th>Clicks</th>
+              <th>Polls</th>
+              <th>Last polled (UTC)</th>
+            </tr>
+          </thead>
+          <tbody id="byreply-tbody">
+            <tr><td colspan="9" style="color:var(--gray-500);">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="tbl-toolbar tbl-pager" id="byreply-pager"></div>
+
+      <div class="tbl-toolbar" style="margin-top:32px;">
+        <span class="meta">Bystander Replies</span>
+        <span class="spacer"></span>
+        <span class="tbl-note" id="byst-count">—</span>
+        <button class="tbl-btn export" onclick="exportBystander()">Export CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="bystander-table">
+          <thead>
+            <tr>
+              <th>Collected (UTC)</th>
+              <th>From user</th>
+              <th>Tone</th>
+              <th>Likes</th>
+              <th>Reply text</th>
+              <th>Link</th>
+            </tr>
+          </thead>
+          <tbody id="bystander-tbody">
+            <tr><td colspan="6" style="color:var(--gray-500);">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="tbl-toolbar tbl-pager" id="bystander-pager"></div>
+    </section>
+
+    <!-- 06 · Participants -->
     <section id="participants" style="margin-top:48px;">
       <div class="section-head">
-        <p class="eyebrow">05 · Participants</p>
+        <p class="eyebrow">06 · Participants</p>
         <h2>Add Participant</h2>
         <p>Enter an X handle (with or without <code class="inline-code">@</code>). The X user ID is looked up automatically. Pick a tone, or use <em>Balanced</em> to assign the least-used condition for cohort balance.</p>
       </div>
@@ -380,7 +501,7 @@
           <option value="random" selected>Balanced (random)</option>
           <option value="agreeable">Agreeable</option>
           <option value="neutral">Neutral</option>
-          <option value="agonistic">Agonistic</option>
+          <option value="satirical">Satirical</option>
         </select>
         <input type="text" id="ap-notes" name="notes" placeholder="notes (optional)">
         <button type="submit" id="ap-submit">Add</button>
@@ -414,7 +535,7 @@
     <!-- 05 · Logs -->
     <section id="logs" style="margin-top:48px;">
       <div class="section-head">
-        <p class="eyebrow">06 · Logs</p>
+        <p class="eyebrow">07 · Logs</p>
         <h2>Live Log Stream</h2>
         <p>Real-time tail of the application log. Color:
           <span style="color:#4fc1ff;">mention accepted</span> ·
@@ -649,7 +770,7 @@
     renderStackedBar('tone-bar', [
       { label: 'agreeable', value: m.tone_counts.agreeable || 0, color: '#6fe080' },
       { label: 'neutral',   value: m.tone_counts.neutral   || 0, color: '#4fc1ff' },
-      { label: 'agonistic', value: m.tone_counts.agonistic || 0, color: '#e85040' },
+      { label: 'satirical', value: m.tone_counts.satirical || 0, color: '#c586f0' },
     ]);
 
     // Outcome bar
@@ -677,7 +798,7 @@
   // ── Participants ───────────────────────────────────────────────────────────
   function toneChip(tone) {
     const t = (tone || '').toLowerCase();
-    const cls = ['agreeable', 'neutral', 'agonistic'].includes(t) ? t : 'unknown';
+    const cls = ['agreeable', 'neutral', 'satirical'].includes(t) ? t : 'unknown';
     return `<span class="bot-chip tone-${cls}">${esc(t) || '—'}</span>`;
   }
 
@@ -923,7 +1044,7 @@
     function rowHtml(r) {
       const user = r.author_username ? `@${esc(r.author_username)}` : esc(r.author_id || '—');
       const tone = (r.tone || 'unknown').toLowerCase();
-      const knownTone = ['agreeable', 'neutral', 'agonistic'].includes(tone) ? tone : 'unknown';
+      const knownTone = ['agreeable', 'neutral', 'satirical'].includes(tone) ? tone : 'unknown';
       const botLabel = r.bot_handle ? `@${esc(r.bot_handle)}` : esc(tone || '?');
       const code = r.study_code ? `<code class="inline-code">${esc(r.study_code)}</code>` : '—';
       const singleLine = r.reply_url && r.study_code
@@ -1018,6 +1139,162 @@
 
   fetchBotReplies();
   setInterval(fetchBotReplies, 10000);
+
+  // ── Engagement & bystander replies ──────────────────────────────────────────
+  let byReplyData = [], bystanderData = [], byConditionData = [], engTimeseries = null;
+
+  // Metric cell: a sparkline of the metric's trajectory + the latest value.
+  function metricCell(series, value, color) {
+    const spark = (series && series.length > 1) ? sparklineSVG(series, color) : '';
+    return `<td><div class="metric-cell">${spark}<span class="metric-val">${esc(value)}</span></div></td>`;
+  }
+  function byReplyRowHtml(s) {
+    const link = s.reply_url
+      ? `<a class="reply-link" href="${esc(s.reply_url)}" target="_blank" rel="noopener noreferrer">→ tweet</a>`
+      : `<code class="inline-code">${esc(s.reply_id)}</code>`;
+    const ser = s.series || {};
+    return `<tr>
+      <td>${link}</td>
+      <td>${toneSpan(s.tone)}</td>
+      ${metricCell(ser.likes,    s.like_count,    'var(--clay)')}
+      ${metricCell(ser.retweets, s.retweet_count, 'var(--olive)')}
+      ${metricCell(ser.replies,  s.reply_count,   'var(--sky)')}
+      ${metricCell(ser.quotes,   s.quote_count,   'var(--rust)')}
+      <td title="${esc(s.click_count ?? 0)} total incl. crawlers/unfurlers">${esc(s.human_click_count ?? 0)}</td>
+      <td>${esc(s.poll_count)}</td>
+      <td style="white-space:nowrap;">${esc(fmtClock(s.last_polled_utc))}</td>
+    </tr>`;
+  }
+  function bystanderRowHtml(r) {
+    const user = r.author_username ? `@${esc(r.author_username)}` : esc(r.author_id);
+    const link = r.reply_url
+      ? `<a class="reply-link" href="${esc(r.reply_url)}" target="_blank" rel="noopener noreferrer">→ tweet</a>`
+      : '<span class="reply-link disabled">—</span>';
+    return `<tr>
+      <td style="white-space:nowrap;">${esc(fmtClock(r.collected_at_utc))}</td>
+      <td>${user}</td>
+      <td>${toneSpan(r.tone)}</td>
+      <td>${esc(r.like_count)}</td>
+      <td class="reply-text-cell" title="${esc(r.text)}">${esc(r.text)}</td>
+      <td>${link}</td>
+    </tr>`;
+  }
+  makePager('byreply', { tbodyId: 'byreply-tbody', colspan: 9, emptyMsg: 'No bot replies tracked yet — each is polled every ~12 h for 10 days.', rowHtml: byReplyRowHtml, unit: 'replies' });
+  makePager('bystander', { tbodyId: 'bystander-tbody', colspan: 6, emptyMsg: 'No bystander replies collected yet.', rowHtml: bystanderRowHtml, unit: 'replies' });
+
+  const BYREPLY_CSV_COLS = [
+    { label: 'Bot reply ID',     get: s => s.reply_id || '' },
+    { label: 'Reply URL',        get: s => s.reply_url || '' },
+    { label: 'Tone',             get: s => s.tone || '' },
+    { label: 'Likes',            get: s => s.like_count ?? 0 },
+    { label: 'Reposts',          get: s => s.retweet_count ?? 0 },
+    { label: 'Replies',          get: s => s.reply_count ?? 0 },
+    { label: 'Quotes',           get: s => s.quote_count ?? 0 },
+    { label: 'Clicks (human)',   get: s => s.human_click_count ?? 0 },
+    { label: 'Clicks (all)',     get: s => s.click_count ?? 0 },
+    { label: 'Polls',            get: s => s.poll_count ?? 0 },
+    { label: 'Last polled (UTC)', get: s => s.last_polled_utc || '' },
+    { label: 'Mention ID',       get: s => s.mention_id || '' },
+  ];
+  function exportByReply() { downloadCSV('engagement_by_reply.csv', toCSV(BYREPLY_CSV_COLS, byReplyData)); }
+
+  // ── By condition (tone) ──────────────────────────────────────────────────
+  function byCondRowHtml(t) {
+    const av = t.avg_series || {};
+    return `<tr>
+      <td>${toneChip(t.tone)}</td>
+      <td>${esc(t.reply_count)}</td>
+      ${metricCell(av.likes,    t.avg_likes,    'var(--clay)')}
+      ${metricCell(av.retweets, t.avg_retweets, 'var(--olive)')}
+      ${metricCell(av.replies,  t.avg_replies,  'var(--sky)')}
+      ${metricCell(av.quotes,   t.avg_quotes,   'var(--rust)')}
+      <td title="${esc(t.total_clicks ?? 0)} total incl. crawlers/unfurlers">${esc(t.total_human_clicks ?? 0)}</td>
+    </tr>`;
+  }
+  function renderByCondition(rows) {
+    const tbody = document.getElementById('bycond-tbody');
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="7" style="color:var(--gray-500);">No conditions yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(byCondRowHtml).join('');
+    const withData = rows.filter(r => r.reply_count > 0).length;
+    document.getElementById('cond-count').textContent =
+      `${withData} condition${withData === 1 ? '' : 's'} with data`;
+  }
+  const COND_CSV_COLS = [
+    { label: 'Condition',    get: t => t.tone || '' },
+    { label: 'Replies',      get: t => t.reply_count ?? 0 },
+    { label: 'Avg likes',    get: t => t.avg_likes ?? 0 },
+    { label: 'Avg reposts',  get: t => t.avg_retweets ?? 0 },
+    { label: 'Avg replies',  get: t => t.avg_replies ?? 0 },
+    { label: 'Avg quotes',   get: t => t.avg_quotes ?? 0 },
+    { label: 'Total likes',  get: t => t.total_likes ?? 0 },
+    { label: 'Total reposts', get: t => t.total_retweets ?? 0 },
+    { label: 'Total replies', get: t => t.total_replies ?? 0 },
+    { label: 'Total quotes', get: t => t.total_quotes ?? 0 },
+    { label: 'Clicks (human)', get: t => t.total_human_clicks ?? 0 },
+    { label: 'Clicks (all)',   get: t => t.total_clicks ?? 0 },
+  ];
+  function exportByCondition() { downloadCSV('engagement_by_condition.csv', toCSV(COND_CSV_COLS, byConditionData)); }
+
+  const BYST_CSV_COLS = [
+    { label: 'Collected (UTC)', get: r => r.collected_at_utc || '' },
+    { label: 'From user',       get: r => r.author_username ? '@' + r.author_username : (r.author_id || '') },
+    { label: 'Tone',            get: r => r.tone || '' },
+    { label: 'Likes',           get: r => r.like_count ?? 0 },
+    { label: 'Reply text',      get: r => r.text || '' },
+    { label: 'Reply URL',       get: r => r.reply_url || '' },
+    { label: 'Bot reply ID',    get: r => r.bot_reply_id || '' },
+  ];
+  function exportBystander() { downloadCSV('bystander_replies.csv', toCSV(BYST_CSV_COLS, bystanderData)); }
+
+  function drawEngChart() {
+    const ts = engTimeseries;
+    if (!ts || !ts.labels || !ts.labels.length) return;
+    const all = [...ts.likes, ...ts.retweets, ...ts.replies, ...ts.quotes];
+    const maxV = Math.max(1, ...all);  // floor at 1 so an all-zero series isn't degenerate
+    renderLineChart('eng-chart', [
+      { values: ts.likes || [],    color: 'var(--clay)' },
+      { values: ts.retweets || [], color: 'var(--olive)' },
+      { values: ts.replies || [],  color: 'var(--sky)' },
+      { values: ts.quotes || [],   color: 'var(--rust)' },
+    ], ts.labels, { yMin: 0, yMax: maxV * 1.1 });
+  }
+
+  function renderEngagement(data) {
+    const t = data.totals || {};
+    document.getElementById('eng-snaps').textContent   = t.reply_count ?? 0;
+    document.getElementById('eng-likes').textContent   = t.total_likes ?? 0;
+    document.getElementById('eng-rts').textContent     = t.total_retweets ?? 0;
+    document.getElementById('eng-replies').textContent = t.total_replies ?? 0;
+    document.getElementById('eng-quotes').textContent  = t.total_quotes ?? 0;
+    document.getElementById('eng-clicks').textContent  = t.total_human_clicks ?? 0;
+    document.getElementById('eng-byst').textContent    = t.bystander_count ?? 0;
+    byReplyData = data.by_reply || [];
+    bystanderData = data.replies || [];
+    byConditionData = data.by_tone || [];
+    engTimeseries = data.timeseries || null;
+    document.getElementById('byreply-count').textContent =
+      `${byReplyData.length} repl${byReplyData.length === 1 ? 'y' : 'ies'} · ${t.snapshot_count ?? 0} snapshots`;
+    document.getElementById('byst-count').textContent =
+      `${bystanderData.length} repl${bystanderData.length === 1 ? 'y' : 'ies'}`;
+    renderByCondition(byConditionData);
+    PAGERS.byreply.set(byReplyData);
+    PAGERS.bystander.set(bystanderData);
+    drawEngChart();
+    document.getElementById('eng-refresh').textContent = '· ' + new Date().toLocaleTimeString();
+  }
+  function fetchEngagement() {
+    fetch('/api/engagement')
+      .then(r => r.json())
+      .then(renderEngagement)
+      .catch(e => console.error('engagement fetch failed', e));
+  }
+  fetchEngagement();
+  setInterval(fetchEngagement, 30000);
+  // Redraw the chart on resize so the SVG re-fits its container width.
+  window.addEventListener('resize', drawEngChart);
 
   // ── Init ───────────────────────────────────────────────────────────────────
   initScrollSpy();

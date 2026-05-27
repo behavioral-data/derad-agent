@@ -192,9 +192,8 @@ def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
 _APP_TO_FACTCHECK_TONE = {
     "agreeable": "agreeable",
     "neutral": "neutral",
-    "agonistic": "agonistic",
-    "satirical": "agonistic",  # legacy alias — any pre-rename participant
-                                # records still resolve correctly.
+    "satirical": "satirical",
+    "agonistic": "satirical",  # legacy alias — pre-rename records still resolve.
 }
 
 

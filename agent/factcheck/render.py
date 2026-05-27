@@ -32,7 +32,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from agent.shared.text import URL_RE, X_TCO_LEN, X_TWEET_LIMIT, x_weighted_length
+from agent.shared.text import URL_RE, X_TWEET_LIMIT, x_weighted_length
 
 from .freeze import RendererView
 from .llm import call_claude_json
@@ -40,13 +40,6 @@ from .schema import Action, Tone
 
 
 logger = logging.getLogger(__name__)
-
-
-# The poster appends a t.co-shortened /info link after the rendered reply:
-# "<reply>\n<info_url>". The /info URL counts as 23 chars + 1 for the
-# newline. Renderer ceiling must leave room for that.
-_X_INFO_APPEND_LEN = X_TCO_LEN + 1  # 23 + newline
-_X_TWEET_LIMIT = X_TWEET_LIMIT - _X_INFO_APPEND_LEN  # = 24976
 
 _REFUSAL_MARKERS = (
     "i can't", "i cannot", "i won't", "i will not", "i am unable",
@@ -185,7 +178,7 @@ OUTPUT:
 It sounds like you're worried about a link between vaccines and autism — a concern many parents share.\\n\\nStudies covering millions of children find no such link; the original Wakefield study was retracted.
 """
 
-_AGONISTIC_REGISTER = """# REGISTER:
+_SATIRICAL_REGISTER = """# REGISTER:
 Write the reply in a satirical tone. Act like a staff writer for a satirical publication like The Onion or a late night TV show like Last Week Tonight with John Oliver.
 
 # STRICT BOUNDARY:
@@ -232,7 +225,7 @@ You're citing the one retracted paper — the 25 years and millions of children 
 _TONE_REGISTERS: dict[Tone, str] = {
     "neutral": _NEUTRAL_REGISTER,
     "agreeable": _AGREEABLE_REGISTER,
-    "agonistic": _AGONISTIC_REGISTER,
+    "satirical": _SATIRICAL_REGISTER,
 }
 
 
@@ -259,7 +252,7 @@ def _hard_constraints_for(
         "- ZERO URLs in your reply body. The runtime appends a separate /info short link that carries all source URLs + structured reasoning. Name sources by their display_name (e.g. \"Snopes\", \"AP News\") in your text — never as a link.",
         "- Facts in your reply come ONLY from presentation_payload + tone_neutral_justification. `reply_target` (the post you're replying to) and `invoker_ask` are provided so your phrasing can be responsive — do NOT quote reply_target verbatim, do NOT treat its claims as evidence, and do NOT introduce names / numbers / dates that appear in it but not in presentation_payload or tone_neutral_justification. This holds even when you restate what the claim asserts: characterize the claim only at the level of detail in presentation_payload / tone_neutral_justification. Do NOT import incidental specifics from reply_target (hospitals, cities, named officials, hashtags, dollar figures) into your restatement — repeating a fabricated specific amplifies it.",
         "- No emojis, no hashtags, no @-mentions.",
-        f"- LENGTH: aim for 1–2 short paragraphs, plus a few extra lines only if the argument genuinely needs them. Hard ceiling is {_X_TWEET_LIMIT} X-weighted chars, but that is a ceiling, NOT a target — do not write to fill it. Be substantive but tight: explain the key mechanism once, name the source, and stop. Don't pad, don't repeat the verdict, don't add throat-clearing.",
+        "- LENGTH: aim for 1–2 short paragraphs, plus a few extra lines only if the argument genuinely needs them. Hard ceiling: under 1000 words — and that is a ceiling, NOT a target, so do not write to fill it. Be substantive but tight: explain the key mechanism once, name the source, and stop. Don't pad, don't repeat the verdict, don't add throat-clearing.",
         '- Output a JSON object with a single "text" field. No preamble, no prose around the JSON.',
     ]
     if pivoted:
@@ -339,7 +332,7 @@ def _enforce_invariance(text: str, view: RendererView, state: _RenderState) -> N
     which is reached via the short link the runtime appends after the
     rendered text. The body talks about sources by their display_name only.
 
-    Always: non-empty, not a refusal, body ≤ _X_TWEET_LIMIT X-weighted chars.
+    Always: non-empty, not a refusal, body ≤ X_TWEET_LIMIT X-weighted chars.
     Pivot disclosure (when applicable) is part of the body — the model owns
     the whole envelope, no mechanical prefix.
     """
@@ -354,9 +347,9 @@ def _enforce_invariance(text: str, view: RendererView, state: _RenderState) -> N
             f"Renderer emitted URL(s) in the body — sources belong on /info, not in the tweet: {sorted(set(urls_in_reply))}"
         )
 
-    if x_weighted_length(text) > _X_TWEET_LIMIT:
+    if x_weighted_length(text) > X_TWEET_LIMIT:
         raise ValueError(
-            f"Rendered reply body is {x_weighted_length(text)} X-weighted chars (body limit {_X_TWEET_LIMIT})."
+            f"Rendered reply body is {x_weighted_length(text)} X-weighted chars (body limit {X_TWEET_LIMIT})."
         )
 
 
@@ -385,10 +378,10 @@ def render(view: RendererView, tone: Tone, *, max_invariance_retries: int = 3) -
             err_msg = str(last_error)
             extra = ""
             if last_text is not None and ("body limit" in err_msg or "X-weighted chars" in err_msg):
-                excess = x_weighted_length(last_text) - _X_TWEET_LIMIT
+                excess = x_weighted_length(last_text) - X_TWEET_LIMIT
                 extra = (
                     f" Your last attempt was {x_weighted_length(last_text)} chars; the cap is "
-                    f"{_X_TWEET_LIMIT}. You must cut at least {excess + 100} chars. Trim redundant "
+                    f"{X_TWEET_LIMIT}. You must cut at least {excess + 100} chars. Trim redundant "
                     f"sentences and repetition — keep the substance.\n\nYour previous attempt was:\n{last_text!r}\n"
                 )
             prompt += (

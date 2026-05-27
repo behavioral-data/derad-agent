@@ -61,7 +61,7 @@ class TestListParticipants:
         assert "@bob" not in out
 
     def test_csv_format(self, fresh_store, capsys):
-        fresh_store.register(_p("42", "charlie", "agonistic", day_offset=3))
+        fresh_store.register(_p("42", "charlie", "satirical", day_offset=3))
         sys.argv = ["derad-list-participants", "--format", "csv"]
         list_main()
         out = capsys.readouterr().out
@@ -70,7 +70,7 @@ class TestListParticipants:
         assert len(rows) == 1
         assert rows[0]["author_id"] == "42"
         assert rows[0]["username"] == "charlie"
-        assert rows[0]["tone"] == "agonistic"
+        assert rows[0]["tone"] == "satirical"
 
     def test_study_day_calculation(self, fresh_store, capsys):
         # enrolled 4 days ago → study_day = 5
@@ -126,7 +126,7 @@ class TestBulkRegister:
         assert len(fresh_store.list_all()) == 0
 
     def test_random_tone_assigns_balanced(self, fresh_store, tmp_path, monkeypatch):
-        # Pre-register 2 agreeable, 2 neutral → random should give agonistic
+        # Pre-register 2 agreeable, 2 neutral → random should give satirical
         for i in range(2):
             fresh_store.register(_p(f"a{i}", f"ua{i}", "agreeable"))
         for i in range(2):
@@ -151,7 +151,7 @@ class TestBulkRegister:
 
         new_participants = [p for p in fresh_store.list_all() if p.author_username == "newuser"]
         assert len(new_participants) == 1
-        assert new_participants[0].tone == "agonistic"
+        assert new_participants[0].tone == "satirical"
 
     def test_api_error_skips_row(self, fresh_store, tmp_path, monkeypatch, capsys):
         csv_file = tmp_path / "p.csv"

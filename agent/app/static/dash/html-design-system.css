@@ -970,6 +970,9 @@ body:has(.layout) { padding: 0; }
 .spark-row-svg   { display: block; }
 .spark-row-current { font-family: var(--mono); font-size: 13px; color: var(--slate); text-align: right; }
 
+/* ── Inline cell sparkline (sparklineSVG) ── */
+svg.spark { display: block; overflow: visible; opacity: 0.85; }
+
 /* ── Utility margins for inter-component spacing ── */
 .mt-12 { margin-top: 12px; }
 .mb-12 { margin-bottom: 12px; }

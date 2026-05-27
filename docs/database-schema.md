@@ -104,12 +104,12 @@ One row per mention that was filtered out at a guard before entering the pipelin
 
 ---
 
-### 4. `EngagementSnapshots` — 3-day reply metrics
+### 4. `EngagementSnapshots` — cumulative reply metrics (12h × 10 days)
 
-One row per bot reply tweet, captured ~3 days after posting by `derad-poll-engagement` (the measurement point used across the study for both engagement and bystander text).
+Multiple rows per bot reply tweet: `derad-poll-engagement` polls each reply every ~12 h for 10 days from posting (≈20 snapshots/reply), and all are retained — a cumulative engagement time series. Public metrics (likes, retweets, etc.) are already cumulative totals at poll time, so the latest snapshot per reply is its current standing.
 
-**PartitionKey**: `YYYY-MM`  
-**RowKey**: `{ISO_timestamp}_{reply_id}`
+**PartitionKey**: `YYYY-MM` (from `polled_at_utc`)  
+**RowKey**: `{ISO_timestamp}_{reply_id}` — distinct per poll, so the ~20 snapshots per reply never collide
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -124,13 +124,13 @@ One row per bot reply tweet, captured ~3 days after posting by `derad-poll-engag
 | `parent_id` | string? | ID of the original post being fact-checked |
 
 **Source:** `agent/app/events.py` — `EngagementSnapshot` dataclass  
-**Managed by:** `derad-poll-engagement` CLI, invoked daily at 12:00 UTC by the `engagementCronJob` Container Apps Job (see `infra/main.bicep`). Each reply gets exactly one snapshot when it ages into the 3-day window.
+**Managed by:** `derad-poll-engagement` CLI, invoked every 12 h (00:00 + 12:00 UTC) by the `engagementCronJob` Container Apps Job (see `infra/main.bicep`). Each run snapshots every reply still inside its 10-day window whose last poll was ≥11 h ago.
 
 ---
 
 ### 5. `BotReplyReplies` — bystander replies to bot posts
 
-Text of replies to bot posts collected for bystander NLP analysis. Written by `derad-collect-replies` at the same ~3-day window as engagement snapshots.
+Text of replies to bot posts collected for bystander NLP analysis. Written once per bot reply by `derad-collect-replies` at the ~3-day mark.
 
 **PartitionKey**: `YYYY-MM` (from `collected_at_utc`)  
 **RowKey**: `{ISO_timestamp}_{reply_tweet_id}`
@@ -148,7 +148,7 @@ Text of replies to bot posts collected for bystander NLP analysis. Written by `d
 | `tone` | string? | Which bot posted the reply that was responded to |
 
 **Source:** `agent/app/events.py` — `BotReplyReply` dataclass  
-**Managed by:** `derad-collect-replies` CLI, run alongside `derad-poll-engagement` in the daily 12:00 UTC `engagementCronJob` Container Apps Job
+**Managed by:** `derad-collect-replies` CLI, run alongside `derad-poll-engagement` in the every-12h `engagementCronJob` Container Apps Job (collects each reply once, at the 3-day mark)
 
 ---
 
@@ -208,9 +208,9 @@ Pipeline (planning → search → reply generation)
 Researcher-run (each day of study):
   derad-daily-summary       → prints per-participant reply list with study codes (for DM composition)
 
-Scheduled (daily 12:00 UTC, Container Apps Job `engagementCronJob`):
-  derad-poll-engagement     → polls X public metrics on 3-day-old bot replies → EngagementSnapshots
-  derad-collect-replies     → fetches bystander replies to 3-day-old bot replies → BotReplyReplies
+Scheduled (every 12h at 00:00 + 12:00 UTC, Container Apps Job `engagementCronJob`):
+  derad-poll-engagement     → polls X public metrics every 12h for 10 days/reply → EngagementSnapshots (~20/reply)
+  derad-collect-replies     → fetches bystander replies once at the 3-day mark → BotReplyReplies
 ```
 
 ---

@@ -219,6 +219,37 @@ body[data-theme="light"] {
   color: #bbb;
 }
 
+.info-about-link {
+  margin: 0 0 14px;
+}
+
+.info-about-link a {
+  font-family: var(--mono, monospace);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: #1a5276;
+  text-decoration: none;
+}
+
+.info-about-link a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ── About / intro page ──────────────────────────────────────────────────── */
+
+.about-handle {
+  font-family: var(--mono, monospace);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: #1a5276;
+  margin: 0 0 14px;
+}
+
+.about-study-id {
+  margin-top: 8px;
+}
+
 /* ── Action header + outcome ─────────────────────────────────────────────── */
 
 .info-task-header {

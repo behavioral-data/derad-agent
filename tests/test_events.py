@@ -182,7 +182,7 @@ class TestEventWiring:
         ev, ts_passed = self._run_process(
             fetch_snap=snap,
             generate_reply_result=gen,
-            post_reply_returns=["REPLY_ID"],
+            post_reply_returns=["REPLY_ID", "LINK_REPLY_ID"],
             monkeypatch=monkeypatch,
             fake_events_store=fake_events_store,
             received_at_utc=ts,
@@ -261,6 +261,69 @@ class TestEventWiring:
         assert "synthetic explosion" in (ev.error_detail or "")
 
 
+# ─── Link self-reply threading ──────────────────────────────────────────────
+
+class TestLinkSelfReplyThreading:
+    """The info link is posted as a separate self-reply so the main fact-check
+    reply carries no URL (links suppress reach on X). Verifies the thread shape:
+    mention → main reply (no link) → link reply (URL, parented to the main reply).
+    """
+
+    def _setup(self, monkeypatch, fake_events_store, post_reply_returns):
+        monkeypatch.setattr(app_module, "DRY_RUN", False)
+        from agent.app.utils import TweetSnapshot
+        from agent.app import utils as utils_module
+        snap = TweetSnapshot(
+            text="Mail-in voting causes fraud.",
+            author_id="999",
+            author_username="parent_user",
+        )
+        monkeypatch.setattr(utils_module, "fetch_tweet", lambda *a, **kw: snap)
+        monkeypatch.setattr(app_module, "fetch_tweet", lambda *a, **kw: snap)
+        monkeypatch.setattr(app_module, "generate_reply", lambda **kw: {
+            "text": "Here are the facts.",
+            "sources": ["https://a.example"],
+            "verdict_label": "Refuted",
+            "action": "verify",
+            "action_outcome": "verified_refuted",
+            "queries": ["q1"],
+        })
+        calls: list[dict] = []
+        def _post(parent_id, reply_text):
+            calls.append({"parent_id": parent_id, "reply_text": reply_text})
+            return post_reply_returns[len(calls) - 1]
+        monkeypatch.setattr(app_module, "post_reply", _post)
+        tweet = {"id_str": "555", "in_reply_to_status_id_str": "444",
+                 "user": {"id_str": "111", "screen_name": "alice"}}
+        app_module.process_mention("neutral", tweet, events_module.utcnow())
+        return calls, fake_events_store.events[-1]
+
+    def test_main_reply_has_no_url_and_link_threads_under_it(self, monkeypatch, fake_events_store):
+        calls, ev = self._setup(monkeypatch, fake_events_store, ["MAIN_ID", "LINK_ID"])
+        assert len(calls) == 2, "expected a main reply and a separate link self-reply"
+        main, link = calls
+        # Main reply: parented to the mention, body only, NO URL.
+        assert main["parent_id"] == "555"
+        assert main["reply_text"] == "Here are the facts."
+        assert "http" not in main["reply_text"]
+        # Link reply: parented to the MAIN reply id (a self-reply), carries /info URL.
+        assert link["parent_id"] == "MAIN_ID"
+        assert "http" in link["reply_text"]
+        assert "/i/" in link["reply_text"]
+        # Engagement tracking + dossier embed point at the main reply, not the link.
+        assert ev.outcome == "replied"
+        assert ev.reply_id == "MAIN_ID"
+        assert ev.reply_text == "Here are the facts."
+
+    def test_link_reply_failure_still_counts_as_replied(self, monkeypatch, fake_events_store):
+        # Main reply posts; link self-reply returns None (X error) — the
+        # fact-check still went out, so the mention is "replied".
+        calls, ev = self._setup(monkeypatch, fake_events_store, ["MAIN_ID", None])
+        assert len(calls) == 2
+        assert ev.outcome == "replied"
+        assert ev.reply_id == "MAIN_ID"
+
+
 # ─── TablesEventsStore schema regression ────────────────────────────────────
 
 class _FakeResourceExistsError(Exception):
@@ -273,11 +336,13 @@ def _patched_tables_store(monkeypatch):
     drops_client = MagicMock()
     engagements_client = MagicMock()
     reply_replies_client = MagicMock()
+    info_views_client = MagicMock()
     service = MagicMock()
     # Use return_value (not side_effect list) to avoid StopIteration in Python 3.12+
     service.create_table = MagicMock(return_value=None)
     service.get_table_client = MagicMock(
-        side_effect=[events_client, drops_client, engagements_client, reply_replies_client]
+        side_effect=[events_client, drops_client, engagements_client,
+                     reply_replies_client, info_views_client]
     )
 
     tables_mod = MagicMock()
@@ -345,3 +410,22 @@ class TestTablesEventsStoreSchema:
         entity = events_client.create_entity.call_args[0][0]
         assert len(entity["parent_text"]) <= 32_000
         assert len(entity["reply_text"]) <= 32_000
+
+    def test_info_view_rows_have_unique_sortable_keys(self, monkeypatch):
+        store, _, _ = _patched_tables_store(monkeypatch)
+        ts = datetime(2026, 5, 18, 12, 0, 0, tzinfo=timezone.utc)
+        view = events_module.InfoView(
+            token="tok", viewed_at_utc=ts, reply_id="r1", mention_id="m1",
+            participant_id="a1", tone="neutral", user_agent="Twitterbot/1.0",
+            is_bot=True,
+        )
+        store.write_info_view(view)
+        store.write_info_view(view)
+        calls = store._info_views.create_entity.call_args_list
+        e0, e1 = calls[0][0][0], calls[1][0][0]
+        assert e0["PartitionKey"] == "2026-05"
+        assert e0["RowKey"].startswith("2026-05-18T12:00:00")
+        assert e0["reply_id"] == "r1"
+        assert e0["is_bot"] is True
+        # Same token viewed twice → distinct RowKeys (per-view nonce).
+        assert e0["RowKey"] != e1["RowKey"]

@@ -47,7 +47,7 @@ class TestRegisterParticipantCLI:
         _run([
             "--author-id", "77",
             "--username", "bob",
-            "--tone", "agonistic",
+            "--tone", "satirical",
             "--enrolled", "2026-04-01",
         ])
         assert fresh_store.get("77").enrolled_at_utc.date() == date(2026, 4, 1)
@@ -88,7 +88,7 @@ class TestPickTone:
         assert _pick_tone("agreeable") == "agreeable"
 
     def test_random_picks_least_used(self, fresh_store):
-        # Register 2 agreeable, 2 neutral, 0 agonistic → random should pick agonistic
+        # Register 2 agreeable, 2 neutral, 0 satirical → random should pick satirical
         for i in range(2):
             fresh_store.register(Participant(
                 author_id=f"a{i}", author_username=f"u{i}",
@@ -99,7 +99,7 @@ class TestPickTone:
                 author_id=f"n{i}", author_username=f"v{i}",
                 tone="neutral", enrolled_at_utc=datetime(2026, 5, 1, tzinfo=timezone.utc),
             ))
-        assert _pick_tone("random") == "agonistic"
+        assert _pick_tone("random") == "satirical"
 
     def test_random_with_empty_store_picks_any_valid_tone(self, fresh_store):
-        assert _pick_tone("random") in {"agreeable", "neutral", "agonistic"}
+        assert _pick_tone("random") in {"agreeable", "neutral", "satirical"}

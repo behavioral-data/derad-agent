@@ -1,5 +1,32 @@
 ## TODO:
 
+May 26 todos:
+
+**To Do:**
+
+- **Send D2 report + link to open-sourced code repo by May 28** (2 days)
+- **Merge web-fact-check branch → main, add README/description, make repo public** — before sending report May 28
+- **Write/update the methods section in Overleaf** for the report
+- **Remove links from main bot posts** and move citations to reply threads
+- **Switch to a human-readable domain** for the info page URL
+- **Create a project info page** with researcher disclosure, IRB exemption status, and a team contact email (no individual names)
+- **Schedule final review meeting** for the week of ~July 13 (week before July 20 deadline)
+
+---
+
+**Inferred:**
+
+- Pull engagement data only via API — avoid opening tweets in browser to prevent inflating view counts
+- Don't share live tweet links in the team channel; snapshot data first
+- Recruit more participants from personal networks and non-contaminated UW labs
+- Monitor the recruitment form and pre-survey form daily for new sign-ups
+- Coordinate a daily data check-in with the team (currently ad hoc — needs a fixed slot)
+- Prepare a Prolific fallback plan for inducing ratings if organic engagement stays too low
+
+---
+
+
+
 1. double tweets. 
 2. check for other tones
 

@@ -2,7 +2,7 @@
 
 Usage:
     python -m agent.factcheck "<claim text>"
-    python -m agent.factcheck --tone agonistic "<claim text>"
+    python -m agent.factcheck --tone satirical "<claim text>"
     python -m agent.factcheck --image <url> "<claim text>"
     python -m agent.factcheck --invoker "what's the context" "<claim text>"
 
@@ -34,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("claim", nargs="?", default=_DEFAULT_EXAMPLE, help="Claim text to fact-check.")
     parser.add_argument(
         "--tone",
-        choices=("neutral", "agreeable", "agonistic"),
+        choices=("neutral", "agreeable", "satirical"),
         default="neutral",
         help="Tone renderer (default: neutral).",
     )
@@ -77,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     view = view_for_renderer(frozen, parent_post_text=args.claim)
-    tones: list[Tone] = ["agreeable", "neutral", "agonistic"] if args.all_tones else [args.tone]
+    tones: list[Tone] = ["agreeable", "neutral", "satirical"] if args.all_tones else [args.tone]
     for tone in tones:
         text = render(view, tone)
         print(f"--- {tone} ---")

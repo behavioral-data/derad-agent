@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import threading
+import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Protocol
@@ -136,6 +137,28 @@ class BotReplyReply:
     tone: Optional[str] = None        # which bot posted the reply
 
 
+@dataclass
+class InfoView:
+    """One row per GET on a /i/<token> dossier link — a click-through.
+
+    The X link-card crawler and chat-app unfurlers hit the URL automatically,
+    so `is_bot` flags those (by user-agent) for analysis-time filtering; the
+    raw hit is still recorded. No IP is stored. `reply_id` is the join key
+    back to MentionEvents (mention_id/participant_id are denormalized here for
+    convenience but are also derivable via that join).
+    """
+    token: str
+    viewed_at_utc: datetime
+    reply_id: Optional[str] = None        # bot reply whose dossier was opened
+    parent_id: Optional[str] = None       # original claim tweet
+    mention_id: Optional[str] = None      # FK back to MentionEvents
+    participant_id: Optional[str] = None  # mention author this dossier belongs to
+    tone: Optional[str] = None
+    user_agent: Optional[str] = None
+    referrer: Optional[str] = None
+    is_bot: bool = False                  # heuristic: UA matches a known crawler/unfurler
+
+
 # ── Store interface ─────────────────────────────────────────────────────────
 
 class EventsStore(Protocol):
@@ -143,9 +166,14 @@ class EventsStore(Protocol):
     def write_drop(self, drop: MentionDrop) -> None: ...
     def write_engagement(self, snap: EngagementSnapshot) -> None: ...
     def write_reply_reply(self, reply: BotReplyReply) -> None: ...
+    def write_info_view(self, view: InfoView) -> None: ...
     def iter_reply_ids(self) -> list[tuple[str, str, datetime | None, str | None, str | None]]: ...
     def snapshotted_reply_ids(self) -> set[str]: ...
+    def latest_snapshot_times(self) -> dict[str, datetime]: ...
     def collected_reply_ids(self) -> set[str]: ...
+    def list_recent_engagements(self, limit: int = 500) -> list[dict]: ...
+    def list_recent_reply_replies(self, limit: int = 500) -> list[dict]: ...
+    def list_recent_info_views(self, limit: int = 500) -> list[dict]: ...
 
 
 # ── In-memory backend (tests + local dev) ───────────────────────────────────
@@ -158,6 +186,7 @@ class InMemoryEventsStore:
         self.drops: list[MentionDrop] = []
         self.engagements: list[EngagementSnapshot] = []
         self.reply_replies: list[BotReplyReply] = []
+        self.info_views: list[InfoView] = []
         self._lock = threading.Lock()
 
     def write_event(self, ev: MentionEvent) -> None:
@@ -176,6 +205,10 @@ class InMemoryEventsStore:
         with self._lock:
             self.reply_replies.append(reply)
 
+    def write_info_view(self, view: InfoView) -> None:
+        with self._lock:
+            self.info_views.append(view)
+
     def iter_reply_ids(self) -> list[tuple[str, str, datetime | None, str | None, str | None]]:
         with self._lock:
             return [
@@ -187,6 +220,15 @@ class InMemoryEventsStore:
     def snapshotted_reply_ids(self) -> set[str]:
         with self._lock:
             return {s.reply_id for s in self.engagements}
+
+    def latest_snapshot_times(self) -> dict[str, datetime]:
+        with self._lock:
+            result: dict[str, datetime] = {}
+            for s in self.engagements:
+                prev = result.get(s.reply_id)
+                if prev is None or s.polled_at_utc > prev:
+                    result[s.reply_id] = s.polled_at_utc
+            return result
 
     def collected_reply_ids(self) -> set[str]:
         with self._lock:
@@ -228,6 +270,61 @@ class InMemoryEventsStore:
             for d in drops
         ]
 
+    def list_recent_engagements(self, limit: int = 500) -> list[dict]:
+        with self._lock:
+            snaps = sorted(self.engagements, key=lambda s: s.polled_at_utc, reverse=True)[:limit]
+        return [
+            {
+                "reply_id": s.reply_id,
+                "tone": s.tone,
+                "polled_at_utc": s.polled_at_utc.isoformat() if s.polled_at_utc else None,
+                "like_count": s.like_count,
+                "retweet_count": s.retweet_count,
+                "reply_count": s.reply_count,
+                "quote_count": s.quote_count,
+                "mention_id": s.mention_id,
+                "parent_id": s.parent_id,
+            }
+            for s in snaps
+        ]
+
+    def list_recent_reply_replies(self, limit: int = 500) -> list[dict]:
+        with self._lock:
+            replies = sorted(self.reply_replies, key=lambda r: r.collected_at_utc, reverse=True)[:limit]
+        return [
+            {
+                "bot_reply_id": r.bot_reply_id,
+                "reply_tweet_id": r.reply_tweet_id,
+                "author_id": r.author_id,
+                "author_username": r.author_username,
+                "text": (r.text or "")[:280],
+                "like_count": r.like_count,
+                "collected_at_utc": r.collected_at_utc.isoformat() if r.collected_at_utc else None,
+                "mention_id": r.mention_id,
+                "tone": r.tone,
+            }
+            for r in replies
+        ]
+
+    def list_recent_info_views(self, limit: int = 500) -> list[dict]:
+        with self._lock:
+            views = sorted(self.info_views, key=lambda v: v.viewed_at_utc, reverse=True)[:limit]
+        return [
+            {
+                "token": v.token,
+                "viewed_at_utc": v.viewed_at_utc.isoformat() if v.viewed_at_utc else None,
+                "reply_id": v.reply_id,
+                "parent_id": v.parent_id,
+                "mention_id": v.mention_id,
+                "participant_id": v.participant_id,
+                "tone": v.tone,
+                "user_agent": v.user_agent,
+                "referrer": v.referrer,
+                "is_bot": v.is_bot,
+            }
+            for v in views
+        ]
+
 
 # ── Azure Tables backend ────────────────────────────────────────────────────
 
@@ -253,6 +350,7 @@ class TablesEventsStore:
         drops_table: str = "MentionDrops",
         engagements_table: str = "EngagementSnapshots",
         reply_replies_table: str = "BotReplyReplies",
+        info_views_table: str = "InfoViews",
         credential=None,
     ) -> None:
         from azure.core.exceptions import ResourceExistsError
@@ -269,7 +367,7 @@ class TablesEventsStore:
             connection_timeout=10,
             read_timeout=15,
         )
-        for name in (events_table, drops_table, engagements_table, reply_replies_table):
+        for name in (events_table, drops_table, engagements_table, reply_replies_table, info_views_table):
             try:
                 self._service.create_table(name)
                 logger.info("Created events table %s", name)
@@ -285,6 +383,7 @@ class TablesEventsStore:
         self._drops = self._service.get_table_client(drops_table)
         self._engagements = self._service.get_table_client(engagements_table)
         self._reply_replies = self._service.get_table_client(reply_replies_table)
+        self._info_views = self._service.get_table_client(info_views_table)
 
     def write_event(self, ev: MentionEvent) -> None:
         entity = self._event_entity(ev)
@@ -397,6 +496,28 @@ class TablesEventsStore:
                 "write_reply_reply failed for reply_tweet_id=%s; continuing", reply.reply_tweet_id
             )
 
+    def write_info_view(self, view: InfoView) -> None:
+        # Same token can be viewed many times → RowKey needs a per-view nonce
+        # on top of the timestamp so concurrent hits don't collide.
+        entity = {
+            "PartitionKey": view.viewed_at_utc.strftime("%Y-%m"),
+            "RowKey": f"{view.viewed_at_utc.isoformat()}_{view.token}_{uuid.uuid4().hex[:8]}",
+            "token": view.token,
+            "viewed_at_utc": view.viewed_at_utc,
+            "reply_id": view.reply_id,
+            "parent_id": view.parent_id,
+            "mention_id": view.mention_id,
+            "participant_id": view.participant_id,
+            "tone": view.tone,
+            "user_agent": self._truncate(view.user_agent, 1024),
+            "referrer": self._truncate(view.referrer, 1024),
+            "is_bot": view.is_bot,
+        }
+        try:
+            self._info_views.create_entity(entity)
+        except Exception:
+            logger.exception("write_info_view failed for token %s; continuing", view.token)
+
     def iter_reply_ids(self) -> list[tuple[str, str, datetime | None, str | None, str | None]]:
         result = []
         try:
@@ -425,6 +546,29 @@ class TablesEventsStore:
             logger.exception("snapshotted_reply_ids failed")
         return result
 
+    def latest_snapshot_times(self) -> dict[str, datetime]:
+        """Most recent poll time per bot reply — drives the 12h poll gap."""
+        result: dict[str, datetime] = {}
+        try:
+            for entity in self._engagements.list_entities(select=["reply_id", "polled_at_utc"]):
+                rid = entity.get("reply_id")
+                ts = entity.get("polled_at_utc")
+                if not rid or ts is None:
+                    continue
+                if isinstance(ts, str):
+                    try:
+                        ts = datetime.fromisoformat(ts)
+                    except ValueError:
+                        continue
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                prev = result.get(rid)
+                if prev is None or ts > prev:
+                    result[rid] = ts
+        except Exception:
+            logger.exception("latest_snapshot_times failed")
+        return result
+
     def collected_reply_ids(self) -> set[str]:
         result: set[str] = set()
         try:
@@ -444,6 +588,18 @@ class TablesEventsStore:
     ]
     _DROP_SELECT = [
         "RowKey", "mention_id", "author_id", "tone", "drop_reason", "received_at_utc",
+    ]
+    _ENGAGEMENT_SELECT = [
+        "RowKey", "reply_id", "tone", "polled_at_utc", "like_count",
+        "retweet_count", "reply_count", "quote_count", "mention_id", "parent_id",
+    ]
+    _REPLY_REPLY_SELECT = [
+        "RowKey", "bot_reply_id", "reply_tweet_id", "author_id", "author_username",
+        "text", "like_count", "collected_at_utc", "mention_id", "tone",
+    ]
+    _INFO_VIEW_SELECT = [
+        "RowKey", "token", "viewed_at_utc", "reply_id", "parent_id", "mention_id",
+        "participant_id", "tone", "user_agent", "referrer", "is_bot",
     ]
 
     @staticmethod
@@ -485,6 +641,42 @@ class TablesEventsStore:
                 result.append(self._normalize(dict(entity)))
         except Exception:
             logger.exception("list_recent_drops failed")
+        result.sort(key=lambda e: e.get("RowKey", ""), reverse=True)
+        return result[:limit]
+
+    def list_recent_engagements(self, limit: int = 500) -> list[dict]:
+        # One snapshot per bot reply for the lifetime of the study — low volume,
+        # so a full scan (no month partition filter) keeps the dashboard correct
+        # across month boundaries. RowKey is polled_at-prefixed → newest first.
+        result = []
+        try:
+            for entity in self._engagements.list_entities(select=self._ENGAGEMENT_SELECT):
+                result.append(self._normalize(dict(entity)))
+        except Exception:
+            logger.exception("list_recent_engagements failed")
+        result.sort(key=lambda e: e.get("RowKey", ""), reverse=True)
+        return result[:limit]
+
+    def list_recent_reply_replies(self, limit: int = 500) -> list[dict]:
+        result = []
+        try:
+            for entity in self._reply_replies.list_entities(select=self._REPLY_REPLY_SELECT):
+                d = self._normalize(dict(entity))
+                if d.get("text"):
+                    d["text"] = d["text"][:280]
+                result.append(d)
+        except Exception:
+            logger.exception("list_recent_reply_replies failed")
+        result.sort(key=lambda e: e.get("RowKey", ""), reverse=True)
+        return result[:limit]
+
+    def list_recent_info_views(self, limit: int = 500) -> list[dict]:
+        result = []
+        try:
+            for entity in self._info_views.list_entities(select=self._INFO_VIEW_SELECT):
+                result.append(self._normalize(dict(entity)))
+        except Exception:
+            logger.exception("list_recent_info_views failed")
         result.sort(key=lambda e: e.get("RowKey", ""), reverse=True)
         return result[:limit]
 
@@ -569,6 +761,14 @@ def log_reply_reply(reply: BotReplyReply) -> None:
         logger.exception(
             "log_reply_reply swallowed exception for reply_tweet_id=%s", reply.reply_tweet_id
         )
+
+
+def log_info_view(view: InfoView) -> None:
+    """Best-effort write. Never raises; never blocks the page render."""
+    try:
+        get_store().write_info_view(view)
+    except Exception:
+        logger.exception("log_info_view swallowed exception for token %s", view.token)
 
 
 def utcnow() -> datetime:

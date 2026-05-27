@@ -127,11 +127,11 @@ class TestUserDailyCap:
         f"author:{tone}". Verifies the cap survives random-tone selection."""
         # Manually set up dispatch_env without pinning _resolve_tone, so tones
         # really do vary per mention. Drive resolve_tone to flip between
-        # "agreeable" and "agonistic" so we can assert the bucket is shared.
+        # "agreeable" and "satirical" so we can assert the bucket is shared.
         from agent.app import dedup as dedup_mod
         monkeypatch.setattr(dedup_mod, "_default_store", dedup_mod.InMemoryStore())
 
-        tones = iter(["agreeable", "agonistic", "neutral"])
+        tones = iter(["agreeable", "satirical", "neutral"])
         monkeypatch.setattr(app_module, "_resolve_tone", lambda _aid: next(tones))
 
         class _FakeThread:
