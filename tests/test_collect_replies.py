@@ -95,6 +95,49 @@ class TestCollectOne:
         count = _collect_one("bot99", "neutral", mention_id=None, parent_id="p1")
         assert count == 0
 
+    def test_bot_self_reply_excluded_by_author(self, monkeypatch):
+        """A reply authored by the bot itself is not logged as a bystander reply."""
+        tweets = [
+            {"id": "link1", "author_id": "bot_uid", "text": "dossier: ...",
+             "referenced_tweets": _replied_to("bot99"), "public_metrics": {}},
+            {"id": "rr1", "author_id": "user42", "text": "real reply",
+             "referenced_tweets": _replied_to("bot99"), "public_metrics": {}},
+        ]
+        fake_client = MagicMock()
+        fake_client.posts.search_recent.return_value = _make_pages(
+            tweets, [{"id": "user42", "username": "alice"}]
+        )
+        monkeypatch.setattr("agent.cli.collect_replies.get_x_client", lambda: fake_client)
+        written: list[BotReplyReply] = []
+        monkeypatch.setattr("agent.cli.collect_replies.log_reply_reply", written.append)
+
+        count = _collect_one("bot99", "neutral", mention_id="m1", parent_id="p1",
+                             bot_user_id="bot_uid")
+        assert count == 1
+        assert [w.reply_tweet_id for w in written] == ["rr1"]
+
+    def test_link_self_reply_excluded_by_id_when_bot_id_unset(self, monkeypatch):
+        """Backstop: even with no BOT_USER_ID, the known link_reply_id is dropped."""
+        tweets = [
+            {"id": "link1", "author_id": "bot_uid", "text": "dossier: ...",
+             "referenced_tweets": _replied_to("bot99"), "public_metrics": {}},
+            {"id": "rr1", "author_id": "user42", "text": "real reply",
+             "referenced_tweets": _replied_to("bot99"), "public_metrics": {}},
+        ]
+        fake_client = MagicMock()
+        fake_client.posts.search_recent.return_value = _make_pages(
+            tweets, [{"id": "user42", "username": "alice"}]
+        )
+        monkeypatch.setattr("agent.cli.collect_replies.get_x_client", lambda: fake_client)
+        monkeypatch.delenv("BOT_USER_ID", raising=False)
+        written: list[BotReplyReply] = []
+        monkeypatch.setattr("agent.cli.collect_replies.log_reply_reply", written.append)
+
+        count = _collect_one("bot99", "neutral", mention_id="m1", parent_id="p1",
+                             link_reply_id="link1", bot_user_id=None)
+        assert count == 1
+        assert [w.reply_tweet_id for w in written] == ["rr1"]
+
     def test_api_exception_returns_zero(self, monkeypatch):
         """Network error returns 0 without raising."""
         fake_client = MagicMock()

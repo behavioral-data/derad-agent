@@ -165,10 +165,14 @@ class EngagementSnapshot:
     polled_at_utc: datetime
     like_count: int = 0
     retweet_count: int = 0
-    reply_count: int = 0
+    reply_count: int = 0          # raw X public_metrics, as reported
     quote_count: int = 0
     mention_id: Optional[str] = None  # FK back to MentionEvents
     parent_id: Optional[str] = None   # original post being fact-checked
+    # reply_count minus the bot's own link self-reply (which X counts as a
+    # reply to this tweet). Equals reply_count when no link reply was posted.
+    # Use THIS for analysis; reply_count is kept raw for faithfulness.
+    adjusted_reply_count: int = 0
 
 
 @dataclass
@@ -218,7 +222,7 @@ class EventsStore(Protocol):
     def write_engagement(self, snap: EngagementSnapshot) -> None: ...
     def write_reply_reply(self, reply: BotReplyReply) -> None: ...
     def write_info_view(self, view: InfoView) -> None: ...
-    def iter_reply_ids(self) -> list[tuple[str, str, datetime | None, str | None, str | None]]: ...
+    def iter_reply_ids(self) -> list[tuple[str, str, datetime | None, str | None, str | None, str | None]]: ...
     def snapshotted_reply_ids(self) -> set[str]: ...
     def latest_snapshot_times(self) -> dict[str, datetime]: ...
     def collected_reply_ids(self) -> set[str]: ...
@@ -262,10 +266,10 @@ class InMemoryEventsStore:
         with self._lock:
             self.info_views.append(view)
 
-    def iter_reply_ids(self) -> list[tuple[str, str, datetime | None, str | None, str | None]]:
+    def iter_reply_ids(self) -> list[tuple[str, str, datetime | None, str | None, str | None, str | None]]:
         with self._lock:
             return [
-                (ev.reply_id, ev.tone, ev.reply_posted_utc, ev.mention_id, ev.parent_id)
+                (ev.reply_id, ev.tone, ev.reply_posted_utc, ev.mention_id, ev.parent_id, ev.link_reply_id)
                 for ev in self.events
                 if ev.reply_id
             ]
@@ -334,6 +338,7 @@ class InMemoryEventsStore:
                 "like_count": s.like_count,
                 "retweet_count": s.retweet_count,
                 "reply_count": s.reply_count,
+                "adjusted_reply_count": s.adjusted_reply_count,
                 "quote_count": s.quote_count,
                 "mention_id": s.mention_id,
                 "parent_id": s.parent_id,
@@ -529,6 +534,7 @@ class TablesEventsStore:
             "quote_count": snap.quote_count,
             "mention_id": snap.mention_id,
             "parent_id": snap.parent_id,
+            "adjusted_reply_count": snap.adjusted_reply_count,
         }
         try:
             self._engagements.upsert_entity(entity)
@@ -580,19 +586,20 @@ class TablesEventsStore:
         except Exception:
             logger.exception("write_info_view failed for token %s; continuing", view.token)
 
-    def iter_reply_ids(self) -> list[tuple[str, str, datetime | None, str | None, str | None]]:
+    def iter_reply_ids(self) -> list[tuple[str, str, datetime | None, str | None, str | None, str | None]]:
         result = []
         try:
             for entity in self._events.list_entities(
-                select=["reply_id", "tone", "reply_posted_utc", "mention_id", "parent_id"]
+                select=["reply_id", "tone", "reply_posted_utc", "mention_id", "parent_id", "link_reply_id"]
             ):
                 rid = entity.get("reply_id")
                 tone = entity.get("tone", "")
                 posted_at = entity.get("reply_posted_utc")
                 mention_id = entity.get("mention_id")
                 parent_id = entity.get("parent_id")
+                link_reply_id = entity.get("link_reply_id")
                 if rid:
-                    result.append((rid, tone, posted_at, mention_id, parent_id))
+                    result.append((rid, tone, posted_at, mention_id, parent_id, link_reply_id))
         except Exception:
             logger.exception("iter_reply_ids failed")
         return result
@@ -654,6 +661,7 @@ class TablesEventsStore:
     _ENGAGEMENT_SELECT = [
         "RowKey", "reply_id", "tone", "polled_at_utc", "like_count",
         "retweet_count", "reply_count", "quote_count", "mention_id", "parent_id",
+        "adjusted_reply_count",
     ]
     _REPLY_REPLY_SELECT = [
         "RowKey", "bot_reply_id", "reply_tweet_id", "author_id", "author_username",

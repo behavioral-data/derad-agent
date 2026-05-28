@@ -27,7 +27,8 @@ MIN_POLL_GAP = timedelta(hours=11)
 
 
 def _poll_one(
-    reply_id: str, tone: str, mention_id: str | None = None, parent_id: str | None = None
+    reply_id: str, tone: str, mention_id: str | None = None, parent_id: str | None = None,
+    link_reply_id: str | None = None,
 ) -> None:
     try:
         response = get_x_client().posts.get_by_id(
@@ -46,16 +47,22 @@ def _poll_one(
         return
 
     m = data.get("public_metrics") or {}
+    reply_count = int(m.get("reply_count") or 0)
+    # The bot posts the dossier link as a self-reply to this tweet, which X
+    # counts in reply_count. Subtract it so the adjusted count reflects only
+    # genuine (non-bot) replies. No link reply posted → no adjustment.
+    adjusted_reply_count = max(0, reply_count - 1) if link_reply_id else reply_count
     snap = EngagementSnapshot(
         reply_id=reply_id,
         tone=tone,
         polled_at_utc=datetime.now(timezone.utc),
         like_count=int(m.get("like_count") or 0),
         retweet_count=int(m.get("retweet_count") or 0),
-        reply_count=int(m.get("reply_count") or 0),
+        reply_count=reply_count,
         quote_count=int(m.get("quote_count") or 0),
         mention_id=mention_id,
         parent_id=parent_id,
+        adjusted_reply_count=adjusted_reply_count,
     )
     log_engagement_snapshot(snap)
     logger.info(
@@ -71,7 +78,7 @@ def main() -> None:
     last_polled = store.latest_snapshot_times()
 
     candidates = []
-    for reply_id, tone, posted_at, mention_id, parent_id in store.iter_reply_ids():
+    for reply_id, tone, posted_at, mention_id, parent_id, link_reply_id in store.iter_reply_ids():
         if posted_at is None:
             continue
         posted = posted_at if posted_at.tzinfo else posted_at.replace(tzinfo=timezone.utc)
@@ -82,12 +89,12 @@ def main() -> None:
             last = last if last.tzinfo else last.replace(tzinfo=timezone.utc)
             if now - last < MIN_POLL_GAP:
                 continue  # polled within the last ~12 h — wait for the next slot
-        candidates.append((reply_id, tone, mention_id, parent_id))
+        candidates.append((reply_id, tone, mention_id, parent_id, link_reply_id))
 
     if not candidates:
         logger.info("No bot replies due for an engagement poll (window=10d, gap=12h)")
         return
     logger.info("Polling engagement for %d replies", len(candidates))
-    for reply_id, tone, mention_id, parent_id in candidates:
-        _poll_one(reply_id, tone, mention_id=mention_id, parent_id=parent_id)
+    for reply_id, tone, mention_id, parent_id, link_reply_id in candidates:
+        _poll_one(reply_id, tone, mention_id=mention_id, parent_id=parent_id, link_reply_id=link_reply_id)
     logger.info("Done")

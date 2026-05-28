@@ -1092,6 +1092,13 @@ def api_engagement():
             "like_count": int(latest.get("like_count") or 0),
             "retweet_count": int(latest.get("retweet_count") or 0),
             "reply_count": int(latest.get("reply_count") or 0),
+            # genuine (non-bot) replies — excludes the bot's link self-reply.
+            # Falls back to raw reply_count for snapshots predating the backfill.
+            "adjusted_reply_count": int(
+                (latest.get("adjusted_reply_count")
+                 if latest.get("adjusted_reply_count") is not None
+                 else latest.get("reply_count")) or 0
+            ),
             "quote_count": int(latest.get("quote_count") or 0),
             "click_count": clicks_all.get(rid, 0),
             "human_click_count": clicks_human.get(rid, 0),
@@ -1115,7 +1122,8 @@ def api_engagement():
             "reply_id": rid,
             "reply_url": _bot_tweet_url(rid),
             "tone": view_tone.get(rid),
-            "like_count": 0, "retweet_count": 0, "reply_count": 0, "quote_count": 0,
+            "like_count": 0, "retweet_count": 0, "reply_count": 0,
+            "adjusted_reply_count": 0, "quote_count": 0,
             "click_count": clicks_all[rid],
             "human_click_count": clicks_human.get(rid, 0),
             "poll_count": 0,
@@ -1135,6 +1143,7 @@ def api_engagement():
         "total_likes": sum(r["like_count"] for r in by_reply),
         "total_retweets": sum(r["retweet_count"] for r in by_reply),
         "total_replies": sum(r["reply_count"] for r in by_reply),
+        "total_adjusted_replies": sum(r["adjusted_reply_count"] for r in by_reply),
         "total_quotes": sum(r["quote_count"] for r in by_reply),
         "total_clicks": sum(clicks_all.values()),
         "total_human_clicks": sum(clicks_human.values()),
