@@ -1137,6 +1137,21 @@
       .catch(e => console.error('bot replies fetch failed', e));
   }
 
+  document.querySelectorAll('#bot-replies-table th.sortable').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.col;
+      botSort.dir = (botSort.col === col && botSort.dir === 'asc') ? 'desc' : 'asc';
+      botSort.col = col;
+      updateBotSortHeaders();
+      renderBotReplies(botRepliesData);
+    });
+  });
+
+  document.getElementById('bot-replies-tbody').addEventListener('click', e => {
+    const btn = e.target.closest('.copy-btn');
+    if (btn && btn.dataset.copy !== undefined) copyText(btn.dataset.copy, btn);
+  });
+
   fetchBotReplies();
   setInterval(fetchBotReplies, 10000);
 
