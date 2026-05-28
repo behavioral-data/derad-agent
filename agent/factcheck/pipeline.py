@@ -49,7 +49,7 @@ from .schema import (
     Verdict,
 )
 from .search import SearchBackend, build_default_backend
-from .sources import build_quality_table
+from .sources import build_quality_table, is_non_evidence_domain, source_lists_version
 from .verdict import derive_action_outcome, derive_verdict
 
 
@@ -268,7 +268,11 @@ def _short_circuit_decline(
             vlm_model="claude-via-azure-ai-services" if image_evidence else "",
             search_provider=backend_name,
             pipeline_commit=_git_sha(),
-            source_reliability_lists_version={"curated_lists": _PIPELINE_VERSION, "model_prior": "claude-sonnet"},
+            source_reliability_lists_version={
+                "curated_lists": _PIPELINE_VERSION,
+                "model_prior": "claude-sonnet",
+                **source_lists_version(),
+            },
         ),
         attached_images=tuple(_attached_image_records(image_evidence)),
         claims=claim_objs,
@@ -366,6 +370,15 @@ def run_pipeline(
     central_text = central.text
     logger.info("run_pipeline[%s]: Stage 4 — iterative verification (Papelo-style)", invocation_id)
     text_evidence = iterative_verify(central_text, ctx, backend=backend, action=extraction.action)
+    # Drop non-evidentiary sources (stock-image / shopping / UGC farms) before
+    # they reach reconcile — they are not sources of factual claims and only add
+    # noise. The quality-table build drops them too; doing it here also keeps
+    # them out of the reasoning input. Image-provenance hits are filtered when
+    # all_urls is assembled below (build_quality_table drops them as well).
+    _pre = len(text_evidence)
+    text_evidence = [e for e in text_evidence if not is_non_evidence_domain(e.source_url)]
+    if len(text_evidence) != _pre:
+        logger.info("run_pipeline[%s]: dropped %d non-evidence record(s)", invocation_id, _pre - len(text_evidence))
     logger.info("run_pipeline[%s]: Stage 4 done (%d evidence records)", invocation_id, len(text_evidence))
 
     # Roll image-provenance hits into the source-quality table too — Claude is
@@ -505,7 +518,11 @@ def run_pipeline(
             vlm_model="claude-via-azure-ai-services" if image_evidence else "",
             search_provider=backend.name,
             pipeline_commit=_git_sha(),
-            source_reliability_lists_version={"curated_lists": _PIPELINE_VERSION, "model_prior": "claude-sonnet"},
+            source_reliability_lists_version={
+                "curated_lists": _PIPELINE_VERSION,
+                "model_prior": "claude-sonnet",
+                **source_lists_version(),
+            },
         ),
         attached_images=tuple(_attached_image_records(image_evidence)),
         claims=tuple(claim_objs),

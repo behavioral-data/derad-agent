@@ -26,7 +26,9 @@ SourceTier = Literal[
     "satirical",
     "unknown",
 ]
-TierSource = Literal["ifcn", "wikipedia-rsp", "mbfc", "model-prior", "meta-search"]
+TierSource = Literal[
+    "ifcn", "wikipedia-rsp", "mbfc", "editorial-curated", "model-prior", "meta-search"
+]
 Verdict = Literal["Supported", "Refuted", "NotEnoughEvidence", "Conflicting"]
 OverallState = Literal["checked", "no_checkable_claim"]
 Tone = Literal["agreeable", "neutral", "satirical"]
