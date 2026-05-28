@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from typing import Optional, Protocol
 from urllib.parse import urlparse
 
+from agent.shared.http import BROWSER_USER_AGENT
+
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +223,40 @@ def _ann_get(ann, key: str):
     return val
 
 
-_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)")
+_MARKDOWN_LINK_START_RE = re.compile(r"\[([^\]]+)\]\((https?://)")
+
+
+def _iter_markdown_links(text: str):
+    """Yield (title, url, link_start, link_end) for each `[title](https?://...)`
+    link in *text*.
+
+    Walks the URL with balanced-paren handling so links whose URL contains
+    `()` (e.g. Wikipedia disambiguation pages) are captured whole. The URL
+    terminates on whitespace or on an unmatched `)` (the link's closing
+    paren). `link_start` is the offset of the opening `[`; `link_end` is the
+    offset just past the closing `)` of the markdown link (or end-of-string
+    if unterminated).
+    """
+    for match in _MARKDOWN_LINK_START_RE.finditer(text):
+        title = match.group(1).strip()
+        scheme = match.group(2)
+        i = match.end()
+        depth = 0
+        n = len(text)
+        while i < n:
+            ch = text[i]
+            if ch.isspace():
+                break
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                if depth == 0:
+                    break
+                depth -= 1
+            i += 1
+        url = scheme + text[match.end():i]
+        link_end = i + 1 if i < n and text[i] == ")" else i
+        yield title, url, match.start(), link_end
 
 
 def _extract_search_hits(response) -> list[SearchHit]:
@@ -275,13 +310,13 @@ def _extract_search_hits(response) -> list[SearchHit]:
     # Fallback: parse inline markdown links. Pair each link's surrounding
     # bullet/sentence as the snippet. These are model-typed URLs, so
     # is_annotation stays False and they get full HEAD+title validation.
-    for match in _MARKDOWN_LINK_RE.finditer(full_text):
-        title, url = match.group(1).strip(), match.group(2).strip().rstrip(".,;:)")
+    for title, url, link_start, link_end in _iter_markdown_links(full_text):
+        url = url.rstrip(".,;:")
         if url in seen:
             continue
         seen.add(url)
-        s = full_text.rfind("\n", 0, match.start()) + 1
-        e = full_text.find("\n", match.end())
+        s = full_text.rfind("\n", 0, link_start) + 1
+        e = full_text.find("\n", link_end)
         if e == -1:
             e = len(full_text)
         snippet = full_text[s:e].strip().lstrip("- *")
@@ -308,21 +343,12 @@ def _extract_response_text(response) -> str:
     return ""
 
 
-# A realistic, current desktop-Chrome UA. The old bot-identifying UA
-# ("derad-agent-validator/...") tripped WAFs (Cloudflare/Akamai) on news,
-# reference, and gov sites, which returned 403 and caused the hit to be
-# dropped entirely. A normal browser UA + the browser-like headers below
-# clears the "lazy" bot blocks; hard JS-challenge / paywalled sites still
-# won't yield (those need a headless browser or are paywalled regardless).
-_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-)
-
 # Browser-like request headers sent with every page fetch. Many WAFs key
-# off the absence of Accept-Language / Sec-Fetch-* as a bot signal.
+# off the absence of Accept-Language / Sec-Fetch-* as a bot signal. The UA
+# itself lives in agent.shared.http so multimodal image fetches use the
+# same string — bot-identifying UAs trip WAFs on shared CDNs.
 _BROWSER_HEADERS = {
-    "User-Agent": _USER_AGENT,
+    "User-Agent": BROWSER_USER_AGENT,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
     "Sec-Fetch-Dest": "document",
@@ -490,6 +516,12 @@ def _classify_hit(h: SearchHit) -> tuple[Optional[SearchHit], Optional[tuple[str
     if status is None:
         return None, (h.url, "fetch_failed")
     if status >= 400:
+        # WAF/anti-bot blocks (403/429/451) are worth tracking by domain so we
+        # can later decide whether a fallback fetch path (archive snapshot /
+        # reader proxy) is worth adding for the worst offenders. Tagged so the
+        # log line is greppable: `waf_block domain=…`.
+        if status in (403, 429, 451):
+            logger.info("waf_block domain=%s status=%d url=%s", urlparse(h.url).netloc, status, h.url)
         return None, (h.url, f"http_{status}")
 
     enriched = SearchHit(

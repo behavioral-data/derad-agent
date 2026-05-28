@@ -23,6 +23,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from agent.shared.text import canonicalize_url
+
 from .context import PipelineContext
 from .llm import call_claude_json, pruned_context
 from .schema import Action, Evidence
@@ -260,8 +262,13 @@ def iterative_verify(
     )
 
     evidence: list[Evidence] = []
+    seen: set[str] = set()
     for step in history:
         for hit in step.hits:
+            key = canonicalize_url(hit.url)
+            if key in seen:
+                continue
+            seen.add(key)
             evidence.append(
                 Evidence(
                     question=step.question,

@@ -21,6 +21,7 @@ from agent.app.events import (
     log_info_view,
     log_mention_drop,
     log_mention_event,
+    parse_iso_utc,
 )
 from agent.app import participants as _participants
 from agent.app.participants import VALID_TONES
@@ -211,6 +212,30 @@ def _make_info_token(
             if len(payload_json.encode("utf-8")) > _LIMIT:
                 trimmed["source_quality_table"] = []
                 payload_json = json.dumps(trimmed, ensure_ascii=False)
+            # Final guard: Tables enforces ~64 KiB per string property. If
+            # counterpoints/perspectives alone still blow the cap, collapse
+            # to a minimal-but-renderable shape so the row still persists.
+            if len(payload_json.encode("utf-8")) > _LIMIT:
+                logger.warning(
+                    "info_token payload still oversized after truncation, "
+                    "falling back to minimal shape (token=%s)", token,
+                )
+                minimal = {
+                    "action": info_payload.get("action", ""),
+                    "action_outcome": info_payload.get("action_outcome", ""),
+                    "verdict_label": info_payload.get("verdict_label", ""),
+                    "headline_finding": (info_payload.get("headline_finding") or "")[:1000],
+                    "counterpoints": [],
+                    "perspectives": [],
+                    "source_quality_table": [],
+                }
+                payload_json = json.dumps(minimal, ensure_ascii=False)
+                if len(payload_json.encode("utf-8")) > _LIMIT:
+                    logger.error(
+                        "info_token minimal-shape payload still over limit; "
+                        "writing empty payload (token=%s)", token,
+                    )
+                    payload_json = "{}"
         try:
             table.upsert_entity({
                 "PartitionKey": "info",
@@ -640,6 +665,8 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             mention_id=mention_id,
             participant_id=author_id,
         )
+        # Forward-join key to InfoTokens — captured before _finalize writes the row.
+        ev.info_token = token
 
         with app.app_context():
             info_url = url_for("info_short", token=token, _external=True)
@@ -663,13 +690,23 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         ev.reply_posted_utc = events.utcnow()
 
         # Post the info link as a separate self-reply so the main fact-check
-        # reply carries no URL — links suppress reach on X.
+        # reply carries no URL — links suppress reach on X. Best-effort: one
+        # quick retry on transient failure, then we give up and surface the
+        # gap via the 'replied_no_link' outcome so analytics can see it.
         link_reply_id = post_reply(parent_id=reply_id, reply_text=link_reply_text)
         if link_reply_id is None:
             logger.warning(
-                "Link self-reply failed for mention %s (main reply %s already posted)",
+                "Link self-reply failed for mention %s (main reply %s already posted); retrying once",
                 mention_id, reply_id,
             )
+            time.sleep(1.0)
+            link_reply_id = post_reply(parent_id=reply_id, reply_text=link_reply_text)
+            if link_reply_id is None:
+                logger.warning(
+                    "Link self-reply retry also failed for mention %s; recording replied_no_link",
+                    mention_id,
+                )
+        ev.link_reply_id = link_reply_id
 
         ev.study_code = _make_study_code(reply_id)
         participant = _lookup_participant(author_id)
@@ -679,7 +716,7 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
                 received_at_utc.date() - participant.enrolled_at_utc.date()
             ).days + 1)
 
-        _finalize("replied")
+        _finalize("replied" if link_reply_id is not None else "replied_no_link")
 
     except Exception as exc:
         logger.exception("Pipeline failed for mention %s (tone=%s)", mention_id, tone)
@@ -1014,7 +1051,8 @@ def api_engagement():
         if v.get("mention_id"):
             view_mention.setdefault(rid, v.get("mention_id"))
         ts = v.get("viewed_at_utc") or ""
-        if ts > view_last.get(rid, ""):
+        # Parse before compare: backends mix `Z` vs `+00:00` suffixes so lex order ≠ chron order.
+        if parse_iso_utc(ts) > parse_iso_utc(view_last.get(rid, "")):
             view_last[rid] = ts
 
     for r in replies:
@@ -1087,7 +1125,7 @@ def api_engagement():
         })
 
     by_reply.sort(
-        key=lambda r: r.get("last_polled_utc") or view_last.get(r["reply_id"], ""),
+        key=lambda r: parse_iso_utc(r.get("last_polled_utc") or view_last.get(r["reply_id"], "")),
         reverse=True,
     )
 

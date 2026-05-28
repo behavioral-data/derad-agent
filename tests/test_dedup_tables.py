@@ -127,7 +127,13 @@ def test_tables_claim_duplicate_returns_false(monkeypatch):
 def test_tables_hit_and_count_inserts_and_queries(monkeypatch):
     store, fakes = _make_tables_store(monkeypatch)
     fakes["rate_client"].create_entity = MagicMock()
-    fakes["rate_client"].query_entities = MagicMock(return_value=iter([{"foo": 1}, {"foo": 2}]))
+
+    def fake_query(query_filter, **kwargs):
+        if "AtUtc ge datetime'" in query_filter:
+            return iter([{"foo": 1}, {"foo": 2}])
+        return iter([])  # prune query — nothing to delete
+
+    fakes["rate_client"].query_entities = MagicMock(side_effect=fake_query)
 
     n = store.hit_and_count("author:42", window_seconds=1)
     assert n == 2
@@ -139,10 +145,72 @@ def test_tables_hit_and_count_inserts_and_queries(monkeypatch):
     assert isinstance(entity["AtUtc"], datetime)
     assert entity["AtUtc"].tzinfo is not None
 
-    fakes["rate_client"].query_entities.assert_called_once()
-    filter_q = fakes["rate_client"].query_entities.call_args.kwargs["query_filter"]
+    rolling_calls = [
+        c for c in fakes["rate_client"].query_entities.call_args_list
+        if "AtUtc ge datetime'" in c.kwargs["query_filter"]
+    ]
+    assert len(rolling_calls) == 1
+    filter_q = rolling_calls[0].kwargs["query_filter"]
     assert "PartitionKey eq 'author:42'" in filter_q
-    assert "AtUtc ge datetime'" in filter_q
+
+
+def test_tables_hit_and_count_prunes_out_of_window_rows(monkeypatch):
+    """Pruning deletes only this author's out-of-window rows; in-window survive."""
+    store, fakes = _make_tables_store(monkeypatch)
+
+    now = datetime.now(timezone.utc)
+    in_window = [
+        {"PartitionKey": "author:42", "RowKey": "rk-new-1", "AtUtc": now},
+        {"PartitionKey": "author:42", "RowKey": "rk-new-2", "AtUtc": now},
+    ]
+    out_of_window = [
+        {"PartitionKey": "author:42", "RowKey": f"rk-old-{i}", "AtUtc": now}
+        for i in range(3)
+    ]
+
+    def fake_query(query_filter, **kwargs):
+        # Two query shapes: rolling-window (ge) and prune (lt).
+        if "AtUtc ge datetime'" in query_filter:
+            return iter(in_window)
+        if "AtUtc lt datetime'" in query_filter:
+            return iter(out_of_window)
+        return iter([])
+
+    fakes["rate_client"].create_entity = MagicMock()
+    fakes["rate_client"].query_entities = MagicMock(side_effect=fake_query)
+    fakes["rate_client"].delete_entity = MagicMock()
+
+    n = store.hit_and_count("author:42", window_seconds=60)
+    assert n == len(in_window)
+
+    deleted_keys = {
+        call.kwargs.get("row_key", call.args[1] if len(call.args) > 1 else None)
+        for call in fakes["rate_client"].delete_entity.call_args_list
+    }
+    assert deleted_keys == {row["RowKey"] for row in out_of_window}
+    # In-window rows are NOT deleted.
+    for row in in_window:
+        assert row["RowKey"] not in deleted_keys
+
+
+def test_tables_hit_and_count_prune_failure_does_not_break_rate_check(monkeypatch):
+    """Delete failures during pruning are swallowed; the count is still returned."""
+    store, fakes = _make_tables_store(monkeypatch)
+    now = datetime.now(timezone.utc)
+    in_window = [{"PartitionKey": "a", "RowKey": "rk-new", "AtUtc": now}]
+    out_of_window = [{"PartitionKey": "a", "RowKey": "rk-old", "AtUtc": now}]
+
+    def fake_query(query_filter, **kwargs):
+        if "AtUtc ge datetime'" in query_filter:
+            return iter(in_window)
+        return iter(out_of_window)
+
+    fakes["rate_client"].create_entity = MagicMock()
+    fakes["rate_client"].query_entities = MagicMock(side_effect=fake_query)
+    fakes["rate_client"].delete_entity = MagicMock(side_effect=RuntimeError("transient"))
+
+    n = store.hit_and_count("a", window_seconds=60)
+    assert n == 1
 
 
 def test_tables_store_creates_tables_idempotently(monkeypatch):

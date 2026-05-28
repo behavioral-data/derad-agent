@@ -36,6 +36,19 @@ from .schema import (
 logger = logging.getLogger(__name__)
 
 
+# Import the stance-drift counter at module load. We only swallow
+# ModuleNotFoundError — that's the legitimate test-isolation case (the
+# reconcile stage exercised without the Flask app's metrics module on
+# the path). Any other ImportError (e.g. a broken OpenTelemetry exporter
+# import inside agent.app.metrics) should fail loudly here rather than
+# silently disappear at the per-call site.
+try:
+    from agent.app import metrics as _app_metrics
+    _reconcile_stance_drift = _app_metrics.reconcile_stance_drift
+except ModuleNotFoundError:
+    _reconcile_stance_drift = None
+
+
 _RECONCILE_SNIPPET_CAP = 240
 _RECONCILE_RATIONALE_CAP = 120
 # Per-source article body cap fed to the reconcile LLM. Each Evidence row
@@ -256,11 +269,8 @@ def reconcile(
             "reconcile: returned %d stances for %d evidence entries — repairing (delta=%d).",
             len(output.evidence_stances), len(evidence), delta,
         )
-        try:
-            from agent.app import metrics as _metrics
-            _metrics.reconcile_stance_drift.add(1, {"delta": str(delta)})
-        except ImportError:
-            pass  # tests / isolated runs without the metrics module
+        if _reconcile_stance_drift is not None:
+            _reconcile_stance_drift.add(1, {"delta": str(delta)})
         stances = list(output.evidence_stances)[: len(evidence)]
         while len(stances) < len(evidence):
             stances.append("neutral")

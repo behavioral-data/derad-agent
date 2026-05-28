@@ -38,6 +38,49 @@ from typing import Any, Optional, Protocol
 logger = logging.getLogger(__name__)
 
 
+def _ensure_utc(dt: datetime) -> datetime:
+    """Normalize a datetime to tz-aware UTC at the storage boundary.
+
+    Field names promise ``_utc``, but the dataclasses don't enforce tz-awareness.
+    A naive datetime fed to ``.strftime("%Y-%m")`` / ``.timestamp()`` would
+    silently use the host's local timezone, scrambling month-partition placement
+    and RowKey sort order. We treat naive as UTC (most conservative given the
+    naming convention) and convert any other tz-aware value to UTC.
+    """
+    if dt.tzinfo is None:
+        logger.debug("Normalizing naive datetime to UTC at storage boundary")
+        return dt.replace(tzinfo=timezone.utc)
+    if dt.utcoffset() != timedelta(0):
+        return dt.astimezone(timezone.utc)
+    return dt
+
+
+def parse_iso_utc(value) -> datetime:
+    """Parse an ISO-8601 timestamp (or datetime) to a tz-aware UTC datetime.
+
+    Backends emit timestamps in subtly different forms — ``InMemoryEventsStore``
+    via ``datetime.isoformat()`` (``...+00:00``) and ``TablesEventsStore`` via
+    the Azure SDK's datetime isoformat (which may render as ``...Z``). Mixed
+    suffixes break the ``lex == chron`` assumption when comparing strings, so
+    callers that order timestamps from both backends must parse before compare.
+
+    Missing / unparseable values sort last (``datetime.min`` in UTC).
+    """
+    _MIN = datetime.min.replace(tzinfo=timezone.utc)
+    if value is None or value == "":
+        return _MIN
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        s = value[:-1] + "+00:00" if value.endswith("Z") else value
+        try:
+            dt = datetime.fromisoformat(s)
+        except ValueError:
+            return _MIN
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return _MIN
+
+
 # ── Event types ─────────────────────────────────────────────────────────────
 
 @dataclass
@@ -67,6 +110,9 @@ class MentionEvent:
     queries: list[str] = field(default_factory=list)
     reply_text: Optional[str] = None
     reply_id: Optional[str] = None
+    # Tweet id of the dossier-link self-reply posted under reply_id. None when
+    # the link self-reply failed (in which case outcome == 'replied_no_link').
+    link_reply_id: Optional[str] = None
 
     # Study tracking
     study_code: Optional[str] = None      # 4-letter code used in daily DM surveys
@@ -75,8 +121,13 @@ class MentionEvent:
     bot_author_id: Optional[str] = None   # X user ID of the bot that replied
     bot_handle: Optional[str] = None      # @handle of the bot that replied
 
+    # Join key to the InfoTokens table; pairs with the dossier link in the reply.
+    # New schema: per-citation source lists live on InfoTokens.payload_json, keyed
+    # by this token. Older rows pre-dating the schema split have this unset.
+    info_token: Optional[str] = None
+
     # Outcome
-    outcome: str = "replied"  # 'replied' | 'pipeline_error' | 'x_post_error' | 'parent_fetch_failed' | 'empty_reply'
+    outcome: str = "replied"  # 'replied' | 'replied_no_link' | 'pipeline_error' | 'x_post_error' | 'parent_fetch_failed' | 'empty_reply'
     # 'factcheck' when the pipeline produced a structural verdict
     # (Supported/Refuted/Disputed), 'no_factcheck' when it landed on NEI.
     # None when no reply was sent. Legacy field — analytics should prefer
@@ -171,6 +222,8 @@ class EventsStore(Protocol):
     def snapshotted_reply_ids(self) -> set[str]: ...
     def latest_snapshot_times(self) -> dict[str, datetime]: ...
     def collected_reply_ids(self) -> set[str]: ...
+    def list_recent(self, limit: int = 50) -> list[dict]: ...
+    def list_recent_drops(self, limit: int = 20) -> list[dict]: ...
     def list_recent_engagements(self, limit: int = 500) -> list[dict]: ...
     def list_recent_reply_replies(self, limit: int = 500) -> list[dict]: ...
     def list_recent_info_views(self, limit: int = 500) -> list[dict]: ...
@@ -405,9 +458,12 @@ class TablesEventsStore:
             )
 
     def _event_entity(self, ev: MentionEvent) -> dict[str, Any]:
+        received_at = _ensure_utc(ev.received_at_utc)
+        pipeline_start = _ensure_utc(ev.pipeline_start_utc) if ev.pipeline_start_utc else None
+        reply_posted = _ensure_utc(ev.reply_posted_utc) if ev.reply_posted_utc else None
         return {
-            "PartitionKey": ev.received_at_utc.strftime("%Y-%m"),
-            "RowKey": f"{ev.received_at_utc.isoformat()}_{ev.mention_id}",
+            "PartitionKey": received_at.strftime("%Y-%m"),
+            "RowKey": f"{received_at.isoformat()}_{ev.mention_id}",
             "mention_id": ev.mention_id,
             "parent_id": ev.parent_id,
             "author_id": ev.author_id,
@@ -423,9 +479,11 @@ class TablesEventsStore:
             "queries_json": json.dumps(ev.queries, ensure_ascii=False),
             "reply_text": self._truncate(ev.reply_text),
             "reply_id": ev.reply_id,
-            "received_at_utc": ev.received_at_utc,
-            "pipeline_start_utc": ev.pipeline_start_utc,
-            "reply_posted_utc": ev.reply_posted_utc,
+            "link_reply_id": ev.link_reply_id,
+            "info_token": ev.info_token,
+            "received_at_utc": received_at,
+            "pipeline_start_utc": pipeline_start,
+            "reply_posted_utc": reply_posted,
             "pipeline_ms": ev.pipeline_ms,
             "outcome": ev.outcome,
             "reply_type": ev.reply_type,
@@ -444,25 +502,27 @@ class TablesEventsStore:
     def _drop_entity(self, drop: MentionDrop) -> dict[str, Any]:
         # PartitionKey by month; RowKey must be unique even when mention_id is
         # missing on an invalid_payload — fingerprint with the timestamp.
-        rk_id = drop.mention_id or f"nomid_{drop.received_at_utc.timestamp():.6f}"
+        received_at = _ensure_utc(drop.received_at_utc)
+        rk_id = drop.mention_id or f"nomid_{received_at.timestamp():.6f}"
         return {
-            "PartitionKey": drop.received_at_utc.strftime("%Y-%m"),
-            "RowKey": f"{drop.received_at_utc.isoformat()}_{rk_id}",
+            "PartitionKey": received_at.strftime("%Y-%m"),
+            "RowKey": f"{received_at.isoformat()}_{rk_id}",
             "mention_id": drop.mention_id,
             "author_id": drop.author_id,
             "tone": drop.tone,
             "drop_reason": drop.drop_reason,
-            "received_at_utc": drop.received_at_utc,
+            "received_at_utc": received_at,
             "extra_json": json.dumps(drop.extra, ensure_ascii=False, default=str),
         }
 
     def write_engagement(self, snap: EngagementSnapshot) -> None:
+        polled_at = _ensure_utc(snap.polled_at_utc)
         entity = {
-            "PartitionKey": snap.polled_at_utc.strftime("%Y-%m"),
-            "RowKey": f"{snap.polled_at_utc.isoformat()}_{snap.reply_id}",
+            "PartitionKey": polled_at.strftime("%Y-%m"),
+            "RowKey": f"{polled_at.isoformat()}_{snap.reply_id}",
             "reply_id": snap.reply_id,
             "tone": snap.tone,
-            "polled_at_utc": snap.polled_at_utc,
+            "polled_at_utc": polled_at,
             "like_count": snap.like_count,
             "retweet_count": snap.retweet_count,
             "reply_count": snap.reply_count,
@@ -476,16 +536,17 @@ class TablesEventsStore:
             logger.exception("write_engagement failed for reply %s; continuing", snap.reply_id)
 
     def write_reply_reply(self, reply: BotReplyReply) -> None:
+        collected_at = _ensure_utc(reply.collected_at_utc)
         entity = {
-            "PartitionKey": reply.collected_at_utc.strftime("%Y-%m"),
-            "RowKey": f"{reply.collected_at_utc.isoformat()}_{reply.reply_tweet_id}",
+            "PartitionKey": collected_at.strftime("%Y-%m"),
+            "RowKey": f"{collected_at.isoformat()}_{reply.reply_tweet_id}",
             "bot_reply_id": reply.bot_reply_id,
             "reply_tweet_id": reply.reply_tweet_id,
             "author_id": reply.author_id,
             "author_username": reply.author_username,
             "text": self._truncate(reply.text),
             "like_count": reply.like_count,
-            "collected_at_utc": reply.collected_at_utc,
+            "collected_at_utc": collected_at,
             "mention_id": reply.mention_id,
             "tone": reply.tone,
         }
@@ -499,11 +560,12 @@ class TablesEventsStore:
     def write_info_view(self, view: InfoView) -> None:
         # Same token can be viewed many times → RowKey needs a per-view nonce
         # on top of the timestamp so concurrent hits don't collide.
+        viewed_at = _ensure_utc(view.viewed_at_utc)
         entity = {
-            "PartitionKey": view.viewed_at_utc.strftime("%Y-%m"),
-            "RowKey": f"{view.viewed_at_utc.isoformat()}_{view.token}_{uuid.uuid4().hex[:8]}",
+            "PartitionKey": viewed_at.strftime("%Y-%m"),
+            "RowKey": f"{viewed_at.isoformat()}_{view.token}_{uuid.uuid4().hex[:8]}",
             "token": view.token,
-            "viewed_at_utc": view.viewed_at_utc,
+            "viewed_at_utc": viewed_at,
             "reply_id": view.reply_id,
             "parent_id": view.parent_id,
             "mention_id": view.mention_id,
@@ -583,8 +645,8 @@ class TablesEventsStore:
     _EVENT_SELECT = [
         "RowKey", "mention_id", "author_id", "author_username", "tone", "outcome",
         "received_at_utc", "pipeline_ms", "study_day", "study_code",
-        "reply_text", "parent_text", "reply_id", "bot_author_id", "bot_handle",
-        "action", "action_outcome", "invoker_instruction_text",
+        "reply_text", "parent_text", "reply_id", "link_reply_id", "bot_author_id", "bot_handle",
+        "action", "action_outcome", "invoker_instruction_text", "info_token",
     ]
     _DROP_SELECT = [
         "RowKey", "mention_id", "author_id", "tone", "drop_reason", "received_at_utc",

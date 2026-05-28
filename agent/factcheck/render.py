@@ -262,7 +262,7 @@ def _hard_constraints_for(
 
     # Action-specific reinforcements
     if action == "verify" and state == "actionable":
-        base.append("- Lead with headline_finding (the verdict). Then explain: what is the claim asserting, what does the evidence specifically show about that assertion, and what should the reader update? Quoting load_bearing_evidence_snippet inside quotes is encouraged when it makes the argument concrete.")
+        base.append("- Lead with headline_finding (the verdict). When `invoker_ask` poses a yes/no question (e.g. \"is this true?\"), open with a one-word verdict — Yes / No / Partly / Unclear — before the explanation. Then explain: what is the claim asserting, what does the evidence specifically show about that assertion, and what should the reader update? Quoting load_bearing_evidence_snippet inside quotes is encouraged when it makes the argument concrete.")
     if action == "provide_context" and state == "actionable":
         base.append("- Lead with headline_finding. Then explain: what does the claim's framing imply, what does context_note reveal about that implication, and why does the missing context change how a reader should interpret the claim?")
     if action == "challenge_opinion" and state == "actionable":

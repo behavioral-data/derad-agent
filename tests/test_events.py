@@ -198,6 +198,8 @@ class TestEventWiring:
         assert ev.reply_type == "factcheck"
         assert ev.reply_text.startswith("Here are the facts.")
         assert ev.pipeline_ms is not None and ev.pipeline_ms >= 0
+        # Forward-join key to InfoTokens — must be set before the event is written.
+        assert isinstance(ev.info_token, str) and ev.info_token
 
     def test_parent_fetch_failed_outcome(self, monkeypatch, fake_events_store):
         ev = self._run_process(
@@ -315,13 +317,16 @@ class TestLinkSelfReplyThreading:
         assert ev.reply_id == "MAIN_ID"
         assert ev.reply_text == "Here are the facts."
 
-    def test_link_reply_failure_still_counts_as_replied(self, monkeypatch, fake_events_store):
-        # Main reply posts; link self-reply returns None (X error) — the
-        # fact-check still went out, so the mention is "replied".
-        calls, ev = self._setup(monkeypatch, fake_events_store, ["MAIN_ID", None])
-        assert len(calls) == 2
-        assert ev.outcome == "replied"
+    def test_link_reply_failure_marks_replied_no_link(self, monkeypatch, fake_events_store):
+        # Main reply posts; link self-reply returns None on both attempt and
+        # retry — the fact-check went out, but with NO sources link. We surface
+        # that gap with outcome='replied_no_link' so analytics can see it.
+        monkeypatch.setattr(app_module.time, "sleep", lambda *_a, **_kw: None)
+        calls, ev = self._setup(monkeypatch, fake_events_store, ["MAIN_ID", None, None])
+        assert len(calls) == 3  # main reply + initial link attempt + 1 retry
+        assert ev.outcome == "replied_no_link"
         assert ev.reply_id == "MAIN_ID"
+        assert ev.link_reply_id is None
 
 
 # ─── TablesEventsStore schema regression ────────────────────────────────────
@@ -410,6 +415,49 @@ class TestTablesEventsStoreSchema:
         entity = events_client.create_entity.call_args[0][0]
         assert len(entity["parent_text"]) <= 32_000
         assert len(entity["reply_text"]) <= 32_000
+
+    def test_drop_with_naive_datetime_normalizes_to_utc_month(self, monkeypatch):
+        """A naive datetime must be treated as UTC at the storage boundary —
+        otherwise ``.strftime("%Y-%m")`` and ``.timestamp()`` would silently use
+        the host's local tz and could land the row in the wrong month partition.
+
+        Construct a naive datetime at an instant that, in UTC, is firmly in May
+        2026; the entity's PartitionKey must be "2026-05" regardless of the
+        host's local tz.
+        """
+        store, _, drops_client = _patched_tables_store(monkeypatch)
+        # Naive datetime — no tzinfo. In UTC this is mid-May 2026.
+        naive = datetime(2026, 5, 18, 12, 0, 0)
+        drop = events_module.MentionDrop(
+            drop_reason="invalid_payload",
+            received_at_utc=naive,
+            tone="neutral",
+        )
+        store.write_drop(drop)
+        entity = drops_client.create_entity.call_args[0][0]
+        assert entity["PartitionKey"] == "2026-05"
+        # RowKey is built from the same normalized timestamp.
+        assert entity["RowKey"].startswith("2026-05-18T12:00:00")
+        # The nomid_ fingerprint uses the UTC timestamp, not local time.
+        expected_ts = naive.replace(tzinfo=timezone.utc).timestamp()
+        assert f"nomid_{expected_ts:.6f}" in entity["RowKey"]
+
+    def test_ensure_utc_helper_normalizes_naive_and_non_utc_tz(self):
+        from datetime import timedelta as _td
+        # Naive: treated as UTC.
+        naive = datetime(2026, 5, 18, 12, 0, 0)
+        out = events_module._ensure_utc(naive)
+        assert out.tzinfo == timezone.utc
+        assert out.replace(tzinfo=None) == naive
+        # Tz-aware UTC: passes through unchanged.
+        utc = datetime(2026, 5, 18, 12, 0, 0, tzinfo=timezone.utc)
+        assert events_module._ensure_utc(utc) == utc
+        # Tz-aware non-UTC: converted to UTC.
+        pacific = timezone(_td(hours=-8))
+        non_utc = datetime(2026, 5, 18, 4, 0, 0, tzinfo=pacific)
+        out = events_module._ensure_utc(non_utc)
+        assert out.utcoffset() == _td(0)
+        assert out.hour == 12  # 04:00 -08:00 == 12:00 UTC
 
     def test_info_view_rows_have_unique_sortable_keys(self, monkeypatch):
         store, _, _ = _patched_tables_store(monkeypatch)

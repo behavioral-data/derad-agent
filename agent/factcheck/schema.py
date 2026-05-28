@@ -132,7 +132,6 @@ class Claim(_Frozen):
     text: str
     type: ClaimType
     modality: Modality = "text"
-    check_worthy: bool = True
     is_central: bool = False
     evidence: tuple[Evidence, ...] = Field(default_factory=tuple)
 

@@ -19,6 +19,8 @@ import threading
 from typing import Optional
 from urllib.parse import urlparse
 
+from agent.shared.text import canonicalize_url
+
 from .schema import SourceQualityEntry, SourceTier, TierSource
 
 
@@ -211,7 +213,6 @@ _MODEL_PRIOR_LOCK = threading.Lock()
 # silently fall back to in-memory-only.
 _PERSISTENT_TABLE_NAME = "SourceTierCache"
 _PERSISTENT_PARTITION = "domains"
-_persistent_table_client = None
 _persistent_table_uninit = object()
 _persistent_table_lock = threading.Lock()
 
@@ -419,24 +420,25 @@ def _lookup_curated(host: str) -> tuple[SourceTier, TierSource, str] | None:
 def classify_url(url: str) -> SourceQualityEntry:
     """Classify a single URL. Equivalent to build_quality_table([url])[0] but
     skips the batch optimization — prefer the batch entrypoint for multiple URLs."""
-    host = _registered_domain(_normalize_domain(url))
+    canonical = canonicalize_url(url)
+    host = _registered_domain(_normalize_domain(canonical))
     if not host:
         return SourceQualityEntry(
-            url=url, tier="unknown", tier_source="model-prior",
+            url=canonical, tier="unknown", tier_source="model-prior",
             rationale="URL has no parseable host.",
         )
     hit = _lookup_curated(host)
     if hit:
         tier, tier_source, rationale = hit
-        return SourceQualityEntry(url=url, tier=tier, tier_source=tier_source, rationale=rationale)
+        return SourceQualityEntry(url=canonical, tier=tier, tier_source=tier_source, rationale=rationale)
     classified = _classify_via_model_batch([host])
     if host in classified:
         tier, rationale = classified[host]
         return SourceQualityEntry(
-            url=url, tier=tier, tier_source="model-prior", rationale=rationale,
+            url=canonical, tier=tier, tier_source="model-prior", rationale=rationale,
         )
     return SourceQualityEntry(
-        url=url, tier="unknown", tier_source="model-prior",
+        url=canonical, tier="unknown", tier_source="model-prior",
         rationale=f"No entry for {host!r}; model fallback also returned unknown.",
     )
 
@@ -447,9 +449,10 @@ def build_quality_table(urls: list[str]) -> list[SourceQualityEntry]:
     seen: set[str] = set()
     ordered_urls: list[str] = []
     for url in urls:
-        if url not in seen:
-            seen.add(url)
-            ordered_urls.append(url)
+        canonical = canonicalize_url(url)
+        if canonical not in seen:
+            seen.add(canonical)
+            ordered_urls.append(canonical)
 
     # First pass — curated lookup. Collect unknowns for batched model call.
     cached: dict[str, SourceQualityEntry] = {}
