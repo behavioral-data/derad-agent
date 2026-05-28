@@ -51,7 +51,7 @@ def _drive_pipeline(monkeypatch, fake_events_store, post_reply_returns):
     from agent.app import utils as utils_module
     snap = TweetSnapshot(
         text="Mail-in voting causes fraud.",
-        author_id="999",
+        author_id="12345",  # third-party parent; must differ from BOT_USER_ID
         author_username="parent_user",
     )
     monkeypatch.setattr(utils_module, "fetch_tweet", lambda *a, **kw: snap)

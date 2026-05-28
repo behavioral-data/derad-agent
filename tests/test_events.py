@@ -167,7 +167,7 @@ class TestEventWiring:
         from agent.app.utils import TweetSnapshot
         snap = TweetSnapshot(
             text="Mail-in voting causes fraud.",
-            author_id="999",
+            author_id="12345",
             author_username="parent_user",
         )
         gen = {
@@ -191,7 +191,7 @@ class TestEventWiring:
         assert ev.received_at_utc == ts_passed
         assert ev.reply_id == "REPLY_ID"
         assert ev.parent_text == "Mail-in voting causes fraud."
-        assert ev.parent_author_id == "999"
+        assert ev.parent_author_id == "12345"
         assert ev.parent_author_username == "parent_user"
         assert ev.author_username == "alice"
         assert ev.queries == ["query1", "query2"]
@@ -214,7 +214,7 @@ class TestEventWiring:
 
     def test_empty_reply_outcome(self, monkeypatch, fake_events_store):
         from agent.app.utils import TweetSnapshot
-        snap = TweetSnapshot(text="claim", author_id="999", author_username="u")
+        snap = TweetSnapshot(text="claim", author_id="12345", author_username="u")
         ev = self._run_process(
             fetch_snap=snap,
             generate_reply_result={"text": "", "sources": None, "verdict_label": "NotEnoughEvidence",
@@ -229,7 +229,7 @@ class TestEventWiring:
 
     def test_x_post_error_outcome(self, monkeypatch, fake_events_store):
         from agent.app.utils import TweetSnapshot
-        snap = TweetSnapshot(text="claim", author_id="999", author_username="u")
+        snap = TweetSnapshot(text="claim", author_id="12345", author_username="u")
         gen = {
             "text": "the response", "sources": None, "verdict_label": "Supported",
             "action": "verify", "action_outcome": "verified_supported",
@@ -277,7 +277,7 @@ class TestLinkSelfReplyThreading:
         from agent.app import utils as utils_module
         snap = TweetSnapshot(
             text="Mail-in voting causes fraud.",
-            author_id="999",
+            author_id="12345",
             author_username="parent_user",
         )
         monkeypatch.setattr(utils_module, "fetch_tweet", lambda *a, **kw: snap)

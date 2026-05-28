@@ -410,6 +410,27 @@ def _is_self_reply(tweet: dict) -> tuple[bool, str]:
     return False, "self_reply"
 
 
+def _is_bot_thread_continuation(parent_author_id: str | None, parent_text: str) -> bool:
+    """True when the post we'd fact-check is itself part of an existing bot
+    thread, so this mention is a continuation rather than a fresh invocation
+    on a third-party post.
+
+    Two cases, both arising because X auto-prepends @-mentions of thread
+    participants — so a reply inside a bot thread silently mentions the bot
+    and arrives as a "mention" we'd otherwise act on:
+      • parent authored by the bot — someone replied to the bot's own tweet;
+      • parent text mentions the bot — someone replied to an invocation (which
+        itself tags the bot) before we posted our reply.
+    A genuine invocation replies to a third-party post that neither is the
+    bot's nor mentions it, so this stays False for real invocations.
+    """
+    if BOT_USER_ID and parent_author_id == BOT_USER_ID:
+        return True
+    if f"@{BOT_HANDLE}".lower() in (parent_text or "").lower():
+        return True
+    return False
+
+
 # Startup warning for missing BOT_USER_ID — surfaces misconfiguration
 # before the first mention silently fails closed.
 if not BOT_USER_ID:
@@ -586,6 +607,20 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         ev.parent_retweet_count = snap.retweet_count
         ev.parent_reply_count = snap.reply_count
         ev.parent_quote_count = snap.quote_count
+
+        # Don't act on continuations of an existing bot thread. If the post we'd
+        # fact-check is the bot's own tweet (a reply TO the bot) or itself
+        # mentions the bot (a reply to an invocation, auto-tagged into the
+        # thread), this is not a fresh invocation — replying would target the
+        # replier / the reply instead of the original invocation.
+        if _is_bot_thread_continuation(snap.author_id, snap.text):
+            logger.info(
+                "Skipping mention %s — parent %s is a bot-thread continuation, not a fresh invocation",
+                mention_id, parent_id,
+            )
+            _finalize("bot_thread_continuation")
+            return
+
         statement = snap.text
         if DRY_RUN:
             logger.info("DRY_RUN: parent_text=%r", statement)
