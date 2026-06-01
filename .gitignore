@@ -1,3 +1,6 @@
+# Participant data
+data_analysis/input
+
 # Python cache files
 __pycache__/
 *.py[cod]

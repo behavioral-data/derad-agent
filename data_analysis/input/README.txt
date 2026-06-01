@@ -1,0 +1,1 @@
+Add CSV files from surveys here. This folder is .gitignored to protect participant anonymity.
