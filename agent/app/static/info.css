@@ -28,7 +28,7 @@ body[data-theme="light"] {
   justify-content: space-between;
   padding: 14px 0 13px;
   border-bottom: 2px solid #1a1a1a;
-  margin-bottom: 32px;
+  margin-bottom: 24px;
   animation: fade-down 0.4s ease both;
 }
 
@@ -51,8 +51,8 @@ body[data-theme="light"] {
 /* ── Sections ────────────────────────────────────────────────────────────── */
 
 .info-section {
-  margin-top: 36px;
-  padding-top: 20px;
+  margin-top: 24px;
+  padding-top: 16px;
   border-top: 1px solid #e4e0d8;
   animation: fade-up 0.5s ease both;
 }
@@ -68,7 +68,7 @@ body[data-theme="light"] {
 }
 
 .info-section-hd {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .info-section-label {
@@ -102,15 +102,6 @@ body[data-theme="light"] {
   padding: 18px 20px 18px 24px;
   border-left: 3px solid #1a1a1a;
   background: #f9f7f3;
-}
-
-.info-reply-lead {
-  margin: 0 0 10px;
-  font-family: var(--serif, "IBM Plex Serif", Georgia, serif);
-  font-size: 1.05rem;
-  line-height: 1.5;
-  font-weight: 600;
-  color: #1a1a1a;
 }
 
 .info-reply-body {
@@ -163,40 +154,7 @@ body[data-theme="light"] {
   overflow-wrap: break-word;
 }
 
-/* ── Community Note block ────────────────────────────────────────────────── */
-
-.info-note-block {
-  margin: 0 0 12px;
-  padding: 12px 14px;
-  background: #fffbf2;
-  border-left: 3px solid #c8a84b;
-  position: relative;
-}
-
-.info-note-label {
-  display: block;
-  margin-bottom: 6px;
-  font-family: var(--mono, monospace);
-  font-size: 0.6rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: #c8a84b;
-}
-
-.info-note-text {
-  margin: 0;
-  font-family: var(--serif, "IBM Plex Serif", Georgia, serif);
-  font-size: 0.82rem;
-  line-height: 1.65;
-  color: #3a3020;
-  overflow-wrap: break-word;
-}
-
 /* ── Source links ────────────────────────────────────────────────────────── */
-
-.info-reason-links {
-  margin-top: 4px;
-}
 
 .info-sources {
   list-style: none;
@@ -222,18 +180,7 @@ body[data-theme="light"] {
   text-underline-offset: 2px;
 }
 
-.info-tweet-link {
-  display: inline-block;
-  margin-top: 2px;
-}
-
 /* ── Empty state ─────────────────────────────────────────────────────────── */
-
-.info-empty {
-  margin-top: 24px;
-  font-size: 0.85rem;
-  color: #aaa;
-}
 
 .info-not-found {
   margin-top: 36px;
@@ -247,7 +194,7 @@ body[data-theme="light"] {
 /* ── Footer + disclaimer ─────────────────────────────────────────────────── */
 
 .info-footer {
-  margin-top: 48px;
+  margin-top: 36px;
   padding-top: 20px;
   border-top: 1px solid #e4e0d8;
 }
@@ -270,6 +217,37 @@ body[data-theme="light"] {
   font-size: 0.65rem;
   letter-spacing: 0.04em;
   color: #bbb;
+}
+
+.info-about-link {
+  margin: 0 0 14px;
+}
+
+.info-about-link a {
+  font-family: var(--mono, monospace);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: #1a5276;
+  text-decoration: none;
+}
+
+.info-about-link a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ── About / intro page ──────────────────────────────────────────────────── */
+
+.about-handle {
+  font-family: var(--mono, monospace);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: #1a5276;
+  margin: 0 0 14px;
+}
+
+.about-study-id {
+  margin-top: 8px;
 }
 
 /* ── Action header + outcome ─────────────────────────────────────────────── */
@@ -363,7 +341,7 @@ body[data-theme="light"] {
 /* ── Per-action content cards ────────────────────────────────────────────── */
 
 .info-card {
-  margin: 12px 0;
+  margin: 10px 0;
   padding: 14px 16px;
   background: #faf8f4;
   border: 1px solid #ede9e1;
@@ -383,13 +361,6 @@ body[data-theme="light"] {
   line-height: 1.6;
   color: #222;
   margin: 0 0 8px;
-}
-
-.info-card-meta {
-  font-family: var(--mono, monospace);
-  font-size: 0.65rem;
-  color: #888;
-  letter-spacing: 0.04em;
 }
 
 /* ── Source-quality table ────────────────────────────────────────────────── */
@@ -447,62 +418,3 @@ body[data-theme="light"] {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-
-/* ── Community Notes carousel (legacy /info long-URL route) ──────────────── */
-
-.sources { margin-top: 20px; }
-
-.sources ul {
-  margin: 100px auto;
-  height: 300px;
-  padding: 20px;
-  display: flex;
-  gap: 4vw;
-  overflow-x: scroll;
-  scroll-snap-type: x mandatory;
-  anchor-name: --my-carousel;
-}
-
-.sources li {
-  min-width: 250px;
-  max-width: 550px;
-  border: 1px solid #e4e0d8;
-  border-radius: 0;
-  overflow: hidden;
-  list-style-type: none;
-  flex: 0 0 100%;
-  scroll-snap-align: center;
-  scroll-marker-group: after;
-}
-
-.note-body {
-  outline-style: none;
-  padding: 12px 16px 4px;
-  background-color: #fff;
-  overflow-wrap: break-word;
-}
-
-.sources ul::scroll-button(*) {
-  margin-top: 100px; border: 0; font-size: 2rem;
-  background: none; color: #1a1a1a; opacity: 0.7; cursor: pointer;
-}
-.sources ul::scroll-button(*):hover,
-.sources ul::scroll-button(*):focus  { opacity: 1; }
-.sources ul::scroll-button(*):active { translate: 1px 1px; }
-.sources ul::scroll-button(*):disabled { opacity: 0.2; cursor: unset; }
-.sources ul::scroll-button(left)  { content: "◄" / "Previous"; }
-.sources ul::scroll-button(right) { content: "►" / "Next"; }
-.sources ul::scroll-button(*) { position: absolute; position-anchor: --my-carousel; }
-.sources ul::scroll-button(left)  { right: calc(anchor(left) - 70px); bottom: calc(anchor(top) + 13px); }
-.sources ul::scroll-button(right) { left: calc(anchor(right) - 70px); bottom: calc(anchor(top) + 13px); }
-.sources ul::scroll-marker-group {
-  position: absolute; position-anchor: --my-carousel;
-  top: calc(anchor(bottom) - 70px); justify-self: anchor-center;
-  display: flex; justify-content: center; gap: 20px;
-}
-.sources li::scroll-marker {
-  content: attr(data-accName); width: 16px; height: 16px;
-  background-color: transparent; border: 2px solid #1a1a1a;
-  border-radius: 50%; overflow: hidden; text-indent: 16px;
-}
-.sources li::scroll-marker:target-current { background-color: #1a1a1a; }

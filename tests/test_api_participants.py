@@ -122,7 +122,7 @@ class TestApiParticipantsCreate:
     def test_random_tone_picks_least_used_for_balance(self, fresh_store, client, monkeypatch):
         from datetime import datetime, timezone
         now = datetime(2026, 5, 23, tzinfo=timezone.utc)
-        # Skew: 2 agreeable, 2 neutral, 0 agonistic → "random" must pick agonistic.
+        # Skew: 2 agreeable, 2 neutral, 0 satirical → "random" must pick satirical.
         for i, t in enumerate(["agreeable", "agreeable", "neutral", "neutral"]):
             fresh_store.register(participants_module.Participant(
                 author_id=f"seed-{i}", author_username=f"seed{i}",
@@ -131,7 +131,7 @@ class TestApiParticipantsCreate:
         _patch_x_lookup(monkeypatch, user_id="400")
         resp = client.post("/api/participants", json={"username": "grace", "tone": "random"})
         assert resp.status_code == 201
-        assert resp.get_json()["participant"]["tone"] == "agonistic"
+        assert resp.get_json()["participant"]["tone"] == "satirical"
 
     def test_lookup_failure_returns_422(self, fresh_store, client, monkeypatch):
         def _boom(username, **kw):

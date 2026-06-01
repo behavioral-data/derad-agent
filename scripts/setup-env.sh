@@ -56,7 +56,7 @@ BOT_USER_ID=$BOT_ID
 BOT_HANDLE=eddiexbot
 
 # Storage
-DERAD_TABLES_ENDPOINT=https://azsalikxqqfjcgk72.table.core.windows.net
+DERAD_TABLES_ENDPOINT=https://azsaspzdzrbtv3v4o.table.core.windows.net
 DERAD_EVENTS_BACKEND=tables
 DERAD_PARTICIPANTS_BACKEND=tables
 

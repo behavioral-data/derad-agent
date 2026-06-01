@@ -11,6 +11,8 @@ been migrated to ActionOutcome can still call it transitionally.
 """
 from __future__ import annotations
 
+from agent.shared.text import canonicalize_url
+
 from .schema import (
     Action,
     ActionOutcome,
@@ -26,11 +28,12 @@ _RELIABLE_THRESHOLD = 2
 
 
 def _tier_lookup(table: list[SourceQualityEntry]) -> dict[str, SourceTier]:
-    return {entry.url: entry.tier for entry in table}
+    return {canonicalize_url(entry.url): entry.tier for entry in table}
 
 
 def _count_reliable(urls: list[str], tier_by_url: dict[str, SourceTier]) -> int:
-    return sum(1 for u in urls if tier_by_url.get(u, "unknown") in _RELIABLE_TIERS)
+    distinct = {canonicalize_url(u) for u in urls}
+    return sum(1 for u in distinct if tier_by_url.get(u, "unknown") in _RELIABLE_TIERS)
 
 
 def _verify_outcome(

@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grant Presentation — Slide Plan · @eddie_bot study</title>
+<link rel="stylesheet" href="assets/html-design-system.css">
+</head>
+<body data-theme="light">
+<div class="layout">
+  <aside class="sidebar">
+    <div class="page-head">
+      <p class="eyebrow">Slide plan</p>
+      <h1 style="font-size:1.25rem">Grant deck</h1>
+      <p class="meta">@eddie_bot · tone &amp; AI fact-checks</p>
+    </div>
+    <nav class="task-list" id="toc">
+      <a href="#guidance">How to use this</a>
+      <a href="#s1">1 · Title</a>
+      <a href="#s2">2 · The problem</a>
+      <a href="#s3">3 · Question &amp; hypothesis</a>
+      <a href="#s4">4 · The core idea</a>
+      <a href="#s5">5 · How it works</a>
+      <a href="#s6">6 · More than true/false</a>
+      <a href="#s7">7 · Why it's trustworthy</a>
+      <a href="#s8">8 · The three tones</a>
+      <a href="#s9">9 · Study design</a>
+      <a href="#s10">10 · What we measure</a>
+      <a href="#s11">11 · Ethics &amp; safety</a>
+      <a href="#s12">12 · Status &amp; the ask</a>
+      <a href="#s13">13 · Contribution</a>
+      <a href="#backup">Backup slide</a>
+    </nav>
+    <div class="theme-toggle" onclick="toggleTheme()">
+      <span class="theme-toggle-label">Theme</span>
+      <span class="theme-toggle-track"></span>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <section id="guidance">
+      <div class="section-head">
+        <p class="eyebrow">00 · Orientation</p>
+        <h2>Slide-by-slide plan for the grant presentation</h2>
+        <p>Audience is funders / program officers, not engineers. Lead with significance and rigor; keep technical depth to what earns credibility. Each slide below lists what to <strong>show</strong>, what to <strong>say</strong>, the right <strong>detail level</strong>, and what to <strong>leave out</strong>.</p>
+      </div>
+
+      <div class="stat-row">
+        <div class="stat"><div class="stat-label">Slides</div><div class="stat-value">13 + 1 backup</div></div>
+        <div class="stat"><div class="stat-label">Target length</div><div class="stat-value">~15 min</div></div>
+        <div class="stat"><div class="stat-label">Spend most time on</div><div class="stat-value">3 · 4 · 8 · 11</div></div>
+        <div class="stat"><div class="stat-label">Technical depth</div><div class="stat-value">Low</div></div>
+      </div>
+
+      <div class="callout info">
+        <strong>The one idea to land:</strong> the bot fact-checks <em>identically</em> in every condition — the only thing that changes is the <em>tone</em> of the reply. That control is what makes this a clean experiment, and it's your strongest methodological selling point. Slides 4 and 8 carry it.
+      </div>
+
+      <div class="callout warning">
+        <strong>Naming consistency:</strong> call the three tones <strong>Agreeable ☺️ / Neutral 🧐 / Satirical (Edgy) 😎</strong> throughout. Use <strong>"agonism vs. antagonism"</strong> only as the <em>theoretical framing</em> for your outcome measures (slide 3) — don't use "agonistic" as a tone label on stage, it will confuse a lay audience.
+      </div>
+    </section>
+
+    <section id="s1">
+      <div class="section-head"><p class="eyebrow">Slide 01</p><h2>Title</h2></div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><span class="tag">Show on slide</span><span class="chip chip-info">No technical detail</span></div>
+          <ul class="task-list">
+            <li>Project title — e.g. <em>"Does the tone of an AI fact-check matter?"</em></li>
+            <li>One-line subtitle: a field experiment with agreeable, neutral, and satirical AI fact-checks on X.</li>
+            <li>Your name, collaborators, UW affiliation, date.</li>
+          </ul>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="tag">Say</span></div>
+          <p>One sentence framing: corrections to online misinformation often fail or backfire — this study asks whether the <em>style</em> of the correction is the missing variable.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="s2">
+      <div class="section-head"><p class="eyebrow">Slide 02</p><h2>The problem &amp; why it matters now</h2></div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><span class="tag">Show on slide</span><span class="chip chip-info">Conceptual</span></div>
+          <ul class="task-list">
+            <li>Polarizing misinformation spreads fast on social media.</li>
+            <li>Fact-checks frequently don't land — and can <em>backfire</em>, hardening views and raising hostility.</li>
+            <li>Platforms are already deploying AI / crowd corrections (Community Notes, the @grok "fact-check me" phenomenon) — at scale, with little evidence on what works.</li>
+            <li><strong>The gap:</strong> we study what corrections <em>say</em>; we know almost nothing about how their <em>tone</em> shapes acceptance and hostility.</li>
+          </ul>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="tag">Say</span></div>
+          <p>Frame the timeliness: AI fact-checking is being rolled out to millions <em>right now</em> without an evidence base for design choices. This study supplies one.</p>
+          <div class="callout"><span class="meta">Leave out</span><br>No tooling, no models, no pipeline. This is a "why should you care" slide.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="s3">
+      <div class="section-head"><p class="eyebrow">Slide 03</p><h2>Research question &amp; hypothesis</h2><p>The intellectual core. Spend time here.</p></div>
+      <div class="panel">
+        <div class="panel-head"><span class="tag">Show on slide</span><span class="chip chip-active">Conceptual — key definitions</span></div>
+        <ul class="task-list">
+          <li><strong>RQ:</strong> How does the tone of an AI fact-check affect (1) engagement with the fact-check and (2) affective polarization among those exposed to it?</li>
+          <li><strong>One crucial distinction</strong> (put it on the slide as two short definitions):
+            <div class="grid-2 mt-12">
+              <div class="callout warning"><strong>Antagonistic</strong> polarization — treating the other side as an enemy to defeat (support for hostility, exclusion, even violence). <em>The harmful kind.</em></div>
+              <div class="callout sky"><strong>Agonistic</strong> polarization — vigorous disagreement that still treats opponents as legitimate. <em>The healthy kind.</em></div>
+            </div>
+          </li>
+          <li><strong>Hypothesis:</strong> satirical fact-checks will <em>decrease antagonistic</em> polarization <em>and</em> earn <em>higher engagement</em> than agreeable or neutral ones; their effect on <em>agonistic</em> polarization is an open question.</li>
+        </ul>
+      </div>
+      <div class="callout info"><strong>Say:</strong> the bet is counterintuitive — "edgy/satirical" sounds like it should inflame, but the theory (Mouffe's agonism) predicts satire can defuse the <em>enemy-making</em> kind of polarization while keeping people engaged. That tension is what makes the study interesting. Cite Mouffe (2000), Stray et al. (2026) in one line; don't belabor the literature.</div>
+    </section>
+
+    <section id="s4">
+      <div class="section-head"><p class="eyebrow">Slide 04</p><h2>The core idea: hold the facts constant, vary only the tone</h2><p>Your methodological selling point.</p></div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><span class="tag">Show on slide</span><span class="chip chip-active">Conceptual</span></div>
+          <ul class="task-list">
+            <li>One bot. Every claim is verified through the <em>same</em> evidence pipeline.</li>
+            <li>The <strong>only</strong> thing that differs between conditions is the <em>tone</em> of the final reply.</li>
+            <li>Three tones: Agreeable ☺️ · Neutral 🧐 · Satirical (Edgy) 😎.</li>
+            <li>So any difference in outcomes is attributable to <em>tone</em> — not to different facts, sources, or accuracy.</li>
+          </ul>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="tag">Suggested visual</span></div>
+          <p>A simple fork: <code class="inline-code">one post → [ verify against evidence ] → 3 reply bubbles</code>, each a different tone but showing the <em>same</em> facts &amp; sources. Label the shared trunk "identical for everyone" and the fork "the only thing we change."</p>
+          <div class="callout"><span class="meta">Say</span><br>This is the experimental control, in plain words. It's what separates this from a demo and makes it a study.</div>
+        </div>
+      </div>
+      <div class="callout warning"><span class="meta">Leave out</span><br>Don't say "invariance boundary," "frozen object," or name pipeline stages. The plain-English version above is stronger for this room.</div>
+    </section>
+
+    <section id="s5">
+      <div class="section-head"><p class="eyebrow">Slide 05</p><h2>How it works — the participant's view</h2></div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><span class="tag">Show on slide</span><span class="chip chip-info">Light technical</span></div>
+          <p>A 4-step flow:</p>
+          <ul class="task-list">
+            <li><span class="chip chip-pending">1</span> A participant finds a post they disagree with and <strong>tags @eddie_bot</strong> in a reply.</li>
+            <li><span class="chip chip-pending">2</span> The bot reads the post (and any image) and figures out what kind of response it needs.</li>
+            <li><span class="chip chip-pending">3</span> It <strong>verifies against live web evidence</strong> and writes a reply in that participant's assigned tone.</li>
+            <li><span class="chip chip-pending">4</span> It posts the reply with a link to a full <strong>evidence page</strong> (sources + reasoning).</li>
+          </ul>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="tag">Say</span></div>
+          <p>Keep it to the user-visible journey. The point is that it's a real, autonomous agent acting on real posts in real time — not a mock-up.</p>
+          <div class="callout"><span class="meta">Leave out</span><br>No streaming/queueing, no cloud, no per-stage breakdown. One clean diagram.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="s6">
+      <div class="section-head"><p class="eyebrow">Slide 06</p><h2>It does more than "true / false"</h2></div>
+      <div class="panel">
+        <div class="panel-head"><span class="tag">Show on slide</span><span class="chip chip-info">Conceptual — name the 5</span></div>
+        <p>The bot picks the <em>right kind of response</em> for each post:</p>
+        <div class="grid-auto grid-tight mt-12">
+          <div class="callout"><strong>Verify</strong> a checkable factual claim.</div>
+          <div class="callout"><strong>Add context</strong> when a claim is technically true but misleadingly framed.</div>
+          <div class="callout"><strong>Challenge</strong> a strong opinion with credible counter-evidence.</div>
+          <div class="callout"><strong>Surface perspectives</strong> on a genuinely contested topic.</div>
+          <div class="callout"><strong>Decline</strong> when there's nothing to engage (a joke, pure taste).</div>
+        </div>
+      </div>
+      <div class="callout info"><strong>Say:</strong> real posts aren't all checkable facts. A blunt true/false bot would be wrong-footed constantly and feel preachy. This calibration makes the intervention realistic and defensible — and it's the same across all three tones.</div>
+    </section>
+
+    <section id="s7">
+      <div class="section-head"><p class="eyebrow">Slide 07</p><h2>Why the fact-checks are trustworthy</h2><p>Pre-empts the obvious "but does the AI just make things up?" concern.</p></div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><span class="tag">Show on slide</span><span class="chip chip-info">Light technical</span></div>
+          <ul class="task-list">
+            <li>Grounded in <strong>real, current web evidence</strong> — it reads actual articles, not its own memory.</li>
+            <li>Weighs <strong>source quality</strong> — fact-checkers and reputable news count for more than unknown blogs.</li>
+            <li><strong>Conservative by design</strong> — when evidence is thin it says "not enough evidence" rather than guess.</li>
+            <li>Every reply links to an <strong>auditable evidence page</strong> with the sources and reasoning.</li>
+          </ul>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="tag">Say</span></div>
+          <p>Funders worry about AI hallucination. The honest message: accuracy is held to a deliberately cautious bar, it's transparent, and — critically — accuracy is <em>identical</em> across tones, so it can't confound the result.</p>
+          <div class="callout"><span class="meta">Leave out</span><br>No source-tier table internals, no model names, no retrieval mechanics.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="s8">
+      <div class="section-head"><p class="eyebrow">Slide 08</p><h2>The three tones, side by side</h2><p>The payoff slide — make the manipulation concrete.</p></div>
+      <div class="panel">
+        <div class="panel-head"><span class="tag">Show on slide</span><span class="chip chip-active">Worked example</span></div>
+        <p>Take one real, easily-grasped case (a miscaptioned viral photo works well) and show the three replies stacked, with the shared facts/sources highlighted identically:</p>
+        <div class="grid-3 grid-tight mt-12">
+          <div class="callout sky"><strong>Agreeable ☺️</strong><br>Acknowledges why someone would believe it, then gently corrects with the same sources.</div>
+          <div class="callout"><strong>Neutral 🧐</strong><br>Plain, declarative correction; names the same sources; no flourish.</div>
+          <div class="callout warning"><strong>Satirical 😎</strong><br>Pokes fun at the <em>claim and its source</em> — never the person — while landing the same facts.</div>
+        </div>
+      </div>
+      <div class="callout info"><strong>Say:</strong> same facts, same sources, same verdict — only the voice changes. Call out the <strong>satire boundary</strong> explicitly here: it targets the claim and the source, never the individual. That single sentence reassures the ethics-minded in the room and sets up slide 11.</div>
+    </section>
+
+    <section id="s9">
+      <div class="section-head"><p class="eyebrow">Slide 09</p><h2>Study design</h2></div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><span class="tag">Show on slide</span><span class="chip chip-info">Conceptual</span></div>
+          <ul class="task-list">
+            <li><strong>Field experiment</strong> on X with the live bot.</li>
+            <li>~30 UW students recruited; each <strong>assigned one tone</strong> at enrolment (between-subjects; tone stays fixed per person).</li>
+            <li>Over <strong>5 days</strong>, each finds 10 high-engagement posts they disagree with and invokes the bot on them.</li>
+            <li>Plus <strong>organic bystanders</strong> — anyone who sees a reply — who get a randomly-assigned tone.</li>
+          </ul>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="tag">Say</span></div>
+          <p>Two exposed populations: the recruited <em>invokers</em> (measured directly via survey) and the <em>bystanders</em> (measured via public engagement). Note this gives both controlled self-report and real-world behavioral signal.</p>
+          <div class="callout"><span class="meta">Suggested visual</span><br>A small 5-day timeline, or a two-box "invokers / bystanders" split.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="s10">
+      <div class="section-head"><p class="eyebrow">Slide 10</p><h2>What we measure</h2></div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr><th>Population</th><th>How</th><th>Outcomes</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Invokers</strong><br><span class="meta">recruited participants</span></td><td>Pre-survey, daily DM surveys, post-survey</td><td>Affective polarization (antagonistic &amp; agonistic) · engagement / willingness to discuss · satisfaction with the bot</td></tr>
+            <tr><td><strong>Bystanders</strong><br><span class="meta">organic viewers</span></td><td>Public engagement + automated classifiers on replies</td><td>Likes / reposts / replies · reply sentiment · antagonistic-language rate</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout info"><strong>Say:</strong> map the measures back to the two halves of the RQ — engagement and (antagonistic vs. agonistic) polarization. <span class="meta">Leave out:</span> the individual Likert items — group them; offer the instrument on request.</div>
+    </section>
+
+    <section id="s11">
+      <div class="section-head"><p class="eyebrow">Slide 11</p><h2>Ethics &amp; safety</h2><p>Funders weight this heavily — give it a full slide.</p></div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><span class="tag">Show on slide</span><span class="chip chip-active">Conceptual — thorough</span></div>
+          <ul class="task-list">
+            <li><strong>Disclosed</strong> research bot — it identifies itself as one.</li>
+            <li><strong>Opt-out</strong> registry + deletion on request.</li>
+            <li><strong>Post-hoc debriefing</strong> for identifiable users.</li>
+            <li><strong>Satire boundary</strong> — targets the claim and source, never the person; no slurs or identity attacks (enforced in the system, not just policy).</li>
+            <li><strong>Stopping rule</strong> — halt the satirical arm if downstream hostility rises.</li>
+            <li><strong>IRB approval + preregistration</strong> before launch.</li>
+          </ul>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="tag">Say</span></div>
+          <p>You've thought hard about the risk of deploying an "edgy" bot on real people. The boundary and stopping rule are concrete, built-in safeguards — not aspirations. This is where you build trust.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="s12">
+      <div class="section-head"><p class="eyebrow">Slide 12</p><h2>Status &amp; what the grant enables</h2><p>De-risk the ask: it already works.</p></div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><span class="tag">Built &amp; running</span><span class="chip chip-done">Live</span></div>
+          <ul class="task-list">
+            <li><span class="chip chip-done">done</span> Bot deployed and posting on X end-to-end.</li>
+            <li><span class="chip chip-done">done</span> Evidence-grounded verification working.</li>
+            <li><span class="chip chip-done">done</span> All three tones + the public evidence page.</li>
+            <li><span class="chip chip-done">done</span> Live dashboard + instrumentation for the study.</li>
+          </ul>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="tag">What funding supports</span><span class="chip chip-active">Next</span></div>
+          <ul class="task-list">
+            <li><span class="chip chip-pending">next</span> Recruit participants &amp; run the field study.</li>
+            <li><span class="chip chip-pending">next</span> Analysis &amp; write-up.</li>
+            <li><span class="chip chip-pending">next</span> Extend to images / video; broaden topics.</li>
+            <li><span class="chip chip-pending">next</span> Scale beyond the pilot cohort.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout info"><strong>Say:</strong> the hard engineering is done and demonstrable today — the grant funds the science, not the build. That's a strong feasibility story. <em>(Offer a live demo or screenshot of the dashboard if appropriate.)</em></div>
+    </section>
+
+    <section id="s13">
+      <div class="section-head"><p class="eyebrow">Slide 13</p><h2>Contribution — why it matters</h2><p>Close on impact.</p></div>
+      <div class="panel">
+        <div class="panel-head"><span class="tag">Show on slide</span><span class="chip chip-info">Conceptual</span></div>
+        <ul class="task-list">
+          <li>First controlled test isolating the <strong>tone</strong> of AI fact-checks on <strong>real platform behavior</strong>.</li>
+          <li>Directly informs how platforms and civic-tech should design corrections — to cut hostility <em>without</em> silencing healthy disagreement.</li>
+          <li>Generalizes beyond this bot: design guidance for Community-Notes-style systems and AI assistants now shipping fact-checks at scale.</li>
+        </ul>
+      </div>
+      <div class="callout info"><strong>Say:</strong> one-sentence vision — the goal is evidence-based design for the AI correction tools that are <em>already</em> reaching millions, so they reduce conflict instead of fueling it.</div>
+    </section>
+
+    <section id="backup">
+      <div class="section-head"><p class="eyebrow">Backup</p><h2>"Under the hood" — for Q&amp;A only</h2></div>
+      <div class="panel">
+        <div class="panel-head"><span class="tag">Hold in reserve</span><span class="chip chip-suggest">Optional</span></div>
+        <p>Keep one appendix slide with the high-level pipeline (read claim → choose action → verify against web evidence → freeze result → render in tone → post) for a technical reviewer who probes. Point to <code class="inline-code">docs/architecture.md</code> for the full system. Do <strong>not</strong> present it unless asked.</p>
+      </div>
+    </section>
+
+  </main>
+</div>
+<script src="assets/html-design-system.js"></script>
+<script>document.addEventListener('DOMContentLoaded', function(){ initScrollSpy('#toc a'); });</script>
+</body>
+</html>

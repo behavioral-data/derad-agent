@@ -13,7 +13,7 @@
 
   <header class="info-masthead">
     <span class="info-masthead-label">Fact-check context</span>
-    <span class="info-masthead-tag">Web-evidence sources</span>
+    <span class="info-masthead-tag">Evidence dossier</span>
   </header>
 
   {% if info %}
@@ -42,17 +42,17 @@
 
   {# ── 1. What the bot was asked + what it did ── #}
   <section class="info-section info-section-first">
-    <div class="info-section-hd"><span class="info-section-label">What this is</span></div>
+    <div class="info-section-hd"><span class="info-section-label">Assessment</span></div>
     <div class="info-task-header">
       <span class="info-action-pill">{{ action_label }}</span>
       {% if outcome_label %}<span class="info-outcome-pill">{{ outcome_label }}</span>{% endif %}
     </div>
     {% if info.get('invoker_instruction_text') %}
-    <p class="info-invoker-ask">Invoker asked: &ldquo;{{ info.invoker_instruction_text }}&rdquo;</p>
+    <p class="info-invoker-ask">Requested: &ldquo;{{ info.invoker_instruction_text }}&rdquo;</p>
     {% endif %}
     {% if info.get('pivoted_from') %}
     <div class="info-pivot-note">
-      The invoker asked for <strong>{{ info.pivoted_from.replace('_', ' ') }}</strong>, but the claim doesn't support that. The bot pivoted to <strong>{{ action.replace('_', ' ') }}</strong> and discloses the pivot in the reply.
+      A <strong>{{ info.pivoted_from.replace('_', ' ') }}</strong> was requested, but the claim doesn&rsquo;t support that. The bot pivoted to <strong>{{ action.replace('_', ' ') }}</strong> and discloses the pivot in the reply.
     </div>
     {% endif %}
   </section>
@@ -162,7 +162,7 @@
   {# ── 5. Primary sources (the URLs the reply talks about by name) ── #}
   {% if info.get('primary_sources') %}
   <section class="info-section">
-    <div class="info-section-hd"><span class="info-section-label">Cited sources</span></div>
+    <div class="info-section-hd"><span class="info-section-label">Sources cited in the reply</span></div>
     <div class="info-reasons">
       {% for src in info.primary_sources %}
       <div class="info-reason">
@@ -182,7 +182,7 @@
   {# ── 6. Full source-quality table (transparency) ── #}
   {% if info.get('source_quality_table') %}
   <section class="info-section">
-    <div class="info-section-hd"><span class="info-section-label">All sources retrieved</span></div>
+    <div class="info-section-hd"><span class="info-section-label">All evidence reviewed</span></div>
     <table class="info-source-table">
       <thead>
         <tr><th>Source</th><th>Tier</th><th>Why</th></tr>
@@ -216,6 +216,7 @@
       ratings, and a model-based fallback for uncovered domains.
       Responses may contain inaccuracies — verify claims using the cited sources.
     </p>
+    <p class="info-about-link"><a href="/about">About Eddie Bot &amp; this study →</a></p>
     <span class="info-copyright">© 2026 University of Washington</span>
   </footer>
 

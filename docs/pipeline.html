@@ -88,6 +88,10 @@
       text-transform: uppercase;
       letter-spacing: 0.06em;
     }
+    .arrow-branch-label {
+      display: flex;
+      justify-content: center;
+    }
     .arrow-branch-line { height: 1px; background: var(--gray-300); }
     .stage-cond {
       border-left: 4px solid var(--sky);
@@ -98,10 +102,36 @@
       background: var(--gray-300);
       opacity: 0.85;
     }
+    .action-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .action-cell {
+      border: var(--border);
+      padding: 8px 10px;
+      background: var(--gray-100);
+    }
+    .action-cell-name {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--slate);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .action-cell-desc {
+      font-size: 12px;
+      color: var(--gray-600);
+      margin-top: 4px;
+      line-height: 1.4;
+    }
     [data-theme="dark"] .stage,
     [data-theme="dark"] .stage-cond,
     [data-theme="dark"] .stage-skip { background: #1f1f1f; }
     [data-theme="dark"] .stage-row { border-bottom-color: #333; }
+    [data-theme="dark"] .action-cell { background: #252525; }
   </style>
 </head>
 <body>
@@ -112,6 +142,7 @@
       <nav>
         <a href="#summary">Summary</a>
         <a href="#contract">Invariance contract</a>
+        <a href="#actions">5 actions</a>
         <a href="#flowchart">Flowchart</a>
         <a href="#services">Services</a>
         <a href="#failure">Failure modes</a>
@@ -124,18 +155,18 @@
 
     <main class="main">
       <header class="page-head">
-        <p class="eyebrow">spec v0.5 · live on Azure App Service</p>
+        <p class="eyebrow">spec v0.6 · live on Azure App Service</p>
         <h1>Fact-check pipeline</h1>
-        <p>How one X mention becomes one tone-rendered, evidence-cited reply. Each stage below shows the model it uses, the goal, a one-line prompt summary, and the tools it touches.</p>
+        <p>How one X mention becomes one tone-rendered, evidence-cited reply. Each stage shows the model it uses, the goal, a one-line prompt summary, and the tools it touches. The pipeline is now <strong>action-typed</strong>: Stage 2+3 selects one of five actions that drives Stage 4 search strategy, Stage 4.5 reconcile mode, and Stage 7 render template.</p>
       </header>
 
       <!-- ───── SUMMARY ───── -->
       <section id="summary">
         <div class="stat-row">
           <div class="stat"><div class="stat-num">9</div><div class="stat-label">stages</div></div>
-          <div class="stat"><div class="stat-num">2</div><div class="stat-label">models</div></div>
+          <div class="stat"><div class="stat-num">5</div><div class="stat-label">actions</div></div>
+          <div class="stat"><div class="stat-num">3</div><div class="stat-label">tones</div></div>
           <div class="stat"><div class="stat-num">50–90&nbsp;s</div><div class="stat-label">p50 latency</div></div>
-          <div class="stat"><div class="stat-num">25</div><div class="stat-label">concurrent pipelines</div></div>
           <div class="stat"><div class="stat-num">~$0.12</div><div class="stat-label">/ mention</div></div>
         </div>
       </section>
@@ -143,7 +174,38 @@
       <!-- ───── INVARIANCE CONTRACT ───── -->
       <section id="contract">
         <div class="callout info mt-24">
-          <strong>Invariance contract.</strong> Stages 1–6 produce a deep-immutable <code class="inline-code">FrozenVerdict</code>. The renderer at stage 7 reads <em>only</em> <code class="inline-code">presentation_payload</code> + <code class="inline-code">tone_neutral_justification</code> — reasoning fields are off-limits by contract. Three tones → identical facts, identical sources, different affect.
+          <strong>Invariance contract.</strong> Stages 1–6 produce a deep-immutable <code class="inline-code">FrozenVerdict</code> that now carries <code class="inline-code">action</code>, <code class="inline-code">action_source</code>, <code class="inline-code">pivoted_from</code>, <code class="inline-code">action_outcome</code>, and <code class="inline-code">invoker_instruction_text</code> in addition to the legacy <code class="inline-code">verdict_label</code>. The renderer at Stage 7 reads <em>only</em> <code class="inline-code">presentation_payload</code> + <code class="inline-code">tone_neutral_justification</code> — reasoning fields are off-limits by contract. Reply bodies contain <strong>zero URLs</strong>; all sources live on the <code class="inline-code">/info</code> page reached via the t.co short link the poster appends automatically.
+        </div>
+      </section>
+
+      <!-- ───── 5 ACTIONS ───── -->
+      <section id="actions">
+        <div class="section-head">
+          <p class="eyebrow">action vocabulary</p>
+          <h2>Five actions, one chosen per mention</h2>
+          <p class="meta">Stage 2+3 selects the action. It drives the seed queries in Stage 4, the reconcile mode in Stage 4.5, and the render template in Stage 7.</p>
+        </div>
+        <div class="action-grid">
+          <div class="action-cell">
+            <div class="action-cell-name">verify</div>
+            <div class="action-cell-desc">Falsifiable factual claim. Check against primary sources, fact-checkers, reputable news. Default action.</div>
+          </div>
+          <div class="action-cell">
+            <div class="action-cell-name">provide_context</div>
+            <div class="action-cell-desc">Claim is literally true but the framing omits something material (cherry-picked stat, decontextualised image). Surface the missing context.</div>
+          </div>
+          <div class="action-cell">
+            <div class="action-cell-name">challenge_opinion</div>
+            <div class="action-cell-desc">Strongly-stated opinion with falsifiable premises. Named credible critics have published push-back. Surface the counterpoints.</div>
+          </div>
+          <div class="action-cell">
+            <div class="action-cell-name">surface_perspectives</div>
+            <div class="action-cell-desc">Genuinely contested topic; no single correct answer. Present ≥2 distinct credible camps with equal weight.</div>
+          </div>
+          <div class="action-cell">
+            <div class="action-cell-name">decline</div>
+            <div class="action-cell-desc">Nothing actionable — pure personal-aesthetic reaction, joke, or non-sequitur. Short-circuits Stages 4–5. Bot acknowledges politely.</div>
+          </div>
         </div>
       </section>
 
@@ -178,11 +240,11 @@
               </div>
               <div class="stage-row">
                 <div class="stage-key">tools</div>
-                <div class="stage-val">filtered stream · <code>posts.get_by_id</code> (text, author, public_metrics, entities, referenced_tweets, attachments)</div>
+                <div class="stage-val">filtered stream · <code>posts.get_by_id</code> (text, author, public_metrics, entities, referenced_tweets, attachments) · 15 s timeout + retry on transient failures</div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">output</div>
-                <div class="stage-val"><code>TweetSnapshot</code> + <code>tweet_context</code> dict</div>
+                <div class="stage-val"><code>TweetSnapshot</code> + <code>tweet_context</code> dict (author_username, author_description, author_verified, posted_at, expanded_urls, referenced_tweets, public_metrics)</div>
               </div>
             </div>
           </div>
@@ -192,7 +254,7 @@
           <!-- Branch indicator for image vs text -->
           <div class="arrow-branch">
             <div class="arrow-branch-line"></div>
-            <div>if photos</div>
+            <div class="arrow-branch-label">if photos</div>
             <div class="arrow-branch-line"></div>
           </div>
 
@@ -206,25 +268,25 @@
               <div class="stage-name">OCR + describe + provenance</div>
               <div class="stage-chips">
                 <span class="chip chip-suggest">Claude Sonnet 4.6 (VLM)</span>
-                <span class="chip chip-suggest">gpt-5.4-mini + web_search</span>
+                <span class="chip chip-suggest">Claude + web_search provenance</span>
                 <span class="chip">parallel × 4</span>
                 <span class="chip">60 s VLM · 90 s search</span>
               </div>
               <div class="stage-row">
                 <div class="stage-key">goal</div>
-                <div class="stage-val">Identify <em>who</em> and <em>what</em> is in each photo (named entities, not generic descriptions), and surface articles that have written about this image before.</div>
+                <div class="stage-val">Identify <em>who</em> and <em>what</em> is in each photo (named entities, not generic descriptions). Surface articles that have written about this image before. Detect canonical / famous photographs (<code>canonical_image_match</code>) such as Tank Man, AI-generated Pope, etc.</div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">prompt</div>
-                <div class="stage-val">"You are the multimodal extraction stage. Produce <code>ocr_text</code> (verbatim), <code>description</code> (name people / landmarks / events when you recognize them — hedging is fine, generic is not), and <code>search_hint</code> (entity-rich query to find articles about this image)."</div>
+                <div class="stage-val">"Produce <code>ocr_text</code> (verbatim), <code>description</code> (name people / landmarks / events when recognized — hedging OK, generic not), <code>canonical_image_match</code> (if this is a famous photograph), and <code>search_hint</code> (entity-rich query for provenance search)."</div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">tools</div>
-                <div class="stage-val">Claude VLM (one call per image; concurrent across images) → <code>search_hint</code> fed to <code>web_search</code> for Tier 3 provenance</div>
+                <div class="stage-val">Claude VLM (one call per image; concurrent across images) → <code>search_hint</code> fed to ClaudeWebSearchBackend for Tier 3 provenance</div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">output</div>
-                <div class="stage-val"><code>ImageEvidence(image_url, ocr_text, description, search_hint, provenance_hits)</code></div>
+                <div class="stage-val"><code>ImageEvidence(image_url, ocr_text, description, canonical_image_match, search_hint, provenance_hits)</code></div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">degrades</div>
@@ -239,44 +301,48 @@
           <div class="stage">
             <div>
               <div class="stage-num">2&nbsp;+&nbsp;3</div>
-              <div class="stage-num-sub">Extract &amp; gate</div>
+              <div class="stage-num-sub">Extract &amp; select</div>
             </div>
             <div>
-              <div class="stage-name">Claim decomposition + check-worthiness</div>
+              <div class="stage-name">Claim decomposition + action selection</div>
               <div class="stage-chips">
                 <span class="chip chip-active">Claude Sonnet 4.6</span>
                 <span class="chip">reasoning_effort=low</span>
                 <span class="chip">45 s timeout</span>
               </div>
               <div class="stage-row">
-                <div class="stage-key">goal</div>
-                <div class="stage-val">Decompose the tweet into atomic propositions, label each as <code>verifiable / opinion / mixed</code>, mark the one central claim, and decide if any is worth fact-checking.</div>
+                <div class="stage-key">job A</div>
+                <div class="stage-val">Decompose the tweet into atomic propositions. Label each as <code>verifiable / opinion / mixed</code>. Mark exactly one <code>is_central=true</code>.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">job B</div>
+                <div class="stage-val">Parse the invoker's instruction (text in the mention after the bot handle) and select ONE action for the whole mention: <code>verify / provide_context / challenge_opinion / surface_perspectives / decline</code>. If the invoker's ask doesn't fit the claim (e.g. asks "fact check" on pure opinion), pivot silently to the fitting action and record <code>pivoted_from</code> — the renderer will weave a short disclosure into the reply.</div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">prompt</div>
-                <div class="stage-val">"You are the claim-extraction stage. Be CONSERVATIVE on 'verifiable' — spurious fact-checks of opinion are worse than missed ones. Output ExtractionOutput JSON. EXACTLY one claim is_central=true."</div>
+                <div class="stage-val">"Be CONSERVATIVE on 'verifiable' — spurious fact-checks of opinion are worse than missed ones. Be CONSERVATIVE on 'challenge_opinion' — only when named credible critics have published push-back. Prefer any actionable action over 'decline'."</div>
               </div>
               <div class="stage-row">
-                <div class="stage-key">tools</div>
-                <div class="stage-val">Claude reasoning (no external tools). Sees <code>tweet_text</code> + <code>tweet_context</code> (author bio, posted_at, expanded URLs) + per-image OCR/description.</div>
+                <div class="stage-key">input</div>
+                <div class="stage-val"><code>tweet_text</code> + <code>invoker_instruction</code> (may be empty — means invoker only tagged) + <code>tweet_context</code> + per-image OCR/description/canonical_image_match</div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">output</div>
-                <div class="stage-val"><code>ExtractionOutput(claims, overall_state ∈ {checked, no_checkable_claim})</code></div>
+                <div class="stage-val"><code>ExtractionOutput(claims, action, action_source ∈ {explicit, inferred, explicit_but_unactionable}, pivoted_from, invoker_instruction_parsed, overall_state)</code></div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">degrades</div>
-                <div class="stage-val">Parse / timeout → fallback treats whole tweet as one verifiable central claim</div>
+                <div class="stage-val">Parse / timeout → fallback treats whole tweet as one verifiable central claim with <code>action=verify</code></div>
               </div>
             </div>
           </div>
 
           <div class="arrow">↓</div>
 
-          <!-- Branch: short-circuit on no_checkable_claim -->
+          <!-- Branch: short-circuit on decline -->
           <div class="arrow-branch">
             <div class="arrow-branch-line"></div>
-            <div>if no_checkable_claim · skip 4 + 4.5 + 5</div>
+            <div class="arrow-branch-label">if action == decline · skip 4 + 4.5 + 5</div>
             <div class="arrow-branch-line"></div>
           </div>
 
@@ -286,18 +352,18 @@
               <div class="stage-num-sub">Short-circuit</div>
             </div>
             <div>
-              <div class="stage-name">Render "no claim to check" reply directly</div>
+              <div class="stage-name">Render "nothing actionable" reply directly</div>
               <div class="stage-chips">
                 <span class="chip">skips Stages 4, 4.5, 5</span>
                 <span class="chip">straight to render</span>
               </div>
               <div class="stage-row">
                 <div class="stage-key">goal</div>
-                <div class="stage-val">When extraction says "this is opinion / aesthetic / personal reflection", don't run search or reconcile — go straight to a tone-aware "nothing to fact-check here" reply.</div>
+                <div class="stage-val">When extraction says "pure aesthetic / joke / non-sequitur — no actionable angle", skip search and reconcile. Go straight to a tone-aware short acknowledgment.</div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">freeze</div>
-                <div class="stage-val">FrozenVerdict has <code>verdict_label=NotEnoughEvidence</code> and <code>overall_state=no_checkable_claim</code>; renderer sees this state and matches register.</div>
+                <div class="stage-val"><code>FrozenVerdict</code> has <code>action=decline</code>, <code>action_outcome=declined</code>, <code>overall_state=no_checkable_claim</code>. Renderer sees <code>state=declined</code> and emits ≤120-char acknowledgment.</div>
               </div>
             </div>
           </div>
@@ -311,40 +377,46 @@
               <div class="stage-num-sub">Verify (Papelo)</div>
             </div>
             <div>
-              <div class="stage-name">Iterative search loop · seed + controller</div>
+              <div class="stage-name">Action-conditional iterative search loop</div>
               <div class="stage-chips">
-                <span class="chip chip-suggest">gpt-5.4-mini + web_search</span>
+                <span class="chip chip-suggest">Claude + web_search_20250305 (default)</span>
+                <span class="chip chip-warning">gpt-5.4-mini (fallback)</span>
                 <span class="chip chip-active">Claude controller</span>
-                <span class="chip">≤5 questions</span>
+                <span class="chip">action-conditional caps</span>
                 <span class="chip">60 s wall-clock</span>
               </div>
               <div class="stage-row">
                 <div class="stage-key">goal</div>
-                <div class="stage-val">Gather text evidence about the central claim through a question-at-a-time loop. Skip the controller call for the first iteration — issue the claim text itself as the seed query.</div>
+                <div class="stage-val">Gather web evidence for the chosen action. Seed queries and stop conditions are action-specific. The default search backend is Claude + <code>web_search_20250305</code> on Foundry — it doesn't refuse on sensitive queries the way gpt-5.4-mini did.</div>
               </div>
               <div class="stage-row">
-                <div class="stage-key">seed prompt</div>
-                <div class="stage-val">— (no LLM. Query is literally <code>"fact check: {central_claim}"</code>.)</div>
+                <div class="stage-key">seed queries</div>
+                <div class="stage-val">
+                  <code>verify</code> — 1 seed: <code>"fact check: {claim}"</code><br>
+                  <code>provide_context</code> — 2 seeds: <code>"{claim} background context"</code>, <code>"{claim} full story"</code><br>
+                  <code>challenge_opinion</code> — 2 seeds: <code>"critique of: {claim}"</code>, <code>"evidence against: {claim}"</code><br>
+                  <code>surface_perspectives</code> — 2 seeds: <code>"{claim} debate"</code>, <code>"{claim} different perspectives"</code>
+                </div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">controller</div>
-                <div class="stage-val">"You decide if enough evidence has been gathered. If not, issue the SINGLE next question that closes the biggest gap. Bias toward primary-source / fact-checker / publisher angles. Don't repeat history."</div>
+                <div class="stage-val">"Decide if enough evidence has been gathered for the action's stop condition. If not, issue the SINGLE next question that closes the biggest gap." Stop conditions are action-specific: <code>verify</code> = ≥2 fact-checker / reputable-news agree; <code>provide_context</code> = ≥2 sources document the missing piece; <code>challenge_opinion</code> = ≥2 named credible critics; <code>surface_perspectives</code> = ≥2 distinct camps each with ≥1 credible source.</div>
               </div>
               <div class="stage-row">
-                <div class="stage-key">search</div>
-                <div class="stage-val">"You are a web-search assistant for fact-checking. Always invoke web_search at least once; cite each bullet with the source." (gpt-5.4-mini + native <code>web_search</code> tool. URLs come from <code>url_citation</code> annotations — fabrication impossible — or markdown fallback.)</div>
+                <div class="stage-key">caps</div>
+                <div class="stage-val"><code>verify</code>: ≤5 questions. All other actions: ≤6 questions (2 seeds + 4 controller steps). 3 hits per question.</div>
               </div>
               <div class="stage-row">
-                <div class="stage-key">validate</div>
-                <div class="stage-val">8-worker thread pool. Annotation URLs short-circuit (server-vouched). Markdown URLs: GET + first 32 KB + <code>&lt;title&gt;</code> + Jaccard ≥ 0.20.</div>
+                <div class="stage-key">search prompt</div>
+                <div class="stage-val">"Surface primary-source coverage; cite each result. Stay grounded in what published sources actually say — do not editorialize. Surfacing accurate sources is the task." (Claude + native <code>web_search_20250305</code> tool. URLs come from <code>web_search_tool_result</code> blocks — fabrication impossible.)</div>
               </div>
               <div class="stage-row">
-                <div class="stage-key">stop when</div>
-                <div class="stage-val">≥2 fact-checker / reputable-news hits agree · OR no relevant coverage · OR cap hit</div>
+                <div class="stage-key">validate + enrich</div>
+                <div class="stage-val">8-worker thread pool. Each hit is fetched once via <code>_fetch_clean_page</code>: annotation URLs (server-vouched) skip title-match check but still get body extracted; markdown URLs get HEAD + Jaccard title-match ≥ 0.20. Clean article body extracted by trafilatura (up to 3000 chars) → stored as <code>body_markdown</code> per hit for Stage 4.5.</div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">output</div>
-                <div class="stage-val">list of <code>Evidence(question, source_url, snippet, stance="neutral")</code> — stances re-stamped by Stage 4.5</div>
+                <div class="stage-val">list of <code>Evidence(question, source_url, snippet, stance="neutral", body_markdown)</code> — stances re-stamped by Stage 4.5</div>
               </div>
             </div>
           </div>
@@ -365,7 +437,7 @@
               </div>
               <div class="stage-row">
                 <div class="stage-key">goal</div>
-                <div class="stage-val">Tag every URL as <code>fact-checker / reputable-news / primary-source / aggregator / low-quality / satirical / unknown</code> so the structural verdict rule can read off it.</div>
+                <div class="stage-val">Tag every URL as <code>fact-checker / reputable-news / primary-source / aggregator / low-quality / satirical / unknown</code> so structural verdict and action-outcome rules can read off it.</div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">L1</div>
@@ -373,7 +445,7 @@
               </div>
               <div class="stage-row">
                 <div class="stage-key">L2</div>
-                <div class="stage-val">Azure Tables <code>SourceTierCache</code> — fleet-wide; survives worker / pod restarts. One classification ever per domain.</div>
+                <div class="stage-val">Azure Tables <code>SourceTierCache</code> — fleet-wide; survives worker/pod restarts. One classification ever per domain.</div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">L3 prompt</div>
@@ -381,7 +453,7 @@
               </div>
               <div class="stage-row">
                 <div class="stage-key">output</div>
-                <div class="stage-val"><code>SourceQualityEntry(url, tier, tier_source, rationale)</code> for every URL</div>
+                <div class="stage-val"><code>SourceQualityEntry(url, tier, tier_source, rationale)</code> for every URL. Image-provenance hit URLs are rolled in alongside text-evidence URLs.</div>
               </div>
             </div>
           </div>
@@ -395,7 +467,7 @@
               <div class="stage-num-sub">Reconcile</div>
             </div>
             <div>
-              <div class="stage-name">Three-lens cascade in one Claude call</div>
+              <div class="stage-name">Action-driven, four-mode evidence reconciliation</div>
               <div class="stage-chips">
                 <span class="chip chip-active">Claude Sonnet 4.6</span>
                 <span class="chip">reasoning_effort=medium · 4096 thinking</span>
@@ -404,15 +476,31 @@
               </div>
               <div class="stage-row">
                 <div class="stage-key">goal</div>
-                <div class="stage-val">Reason across the evidence + image OCR + image provenance + author context. Classify every atomic proposition as verified / refuted / disputed / unaddressed. Emit a renderer-facing payload.</div>
+                <div class="stage-val">Reason across text evidence + image OCR + image provenance + author context. Mode is set by the pipeline's action — each mode populates a different set of output buckets.</div>
               </div>
               <div class="stage-row">
-                <div class="stage-key">prompt</div>
-                <div class="stage-val">"Use tweet_context actively — parody handles, recycled-event tweets, third-party aggregators. Image is incidental vs image IS the claim. Lens 1 = text-text, Lens 2 = image-text, Lens 3 = cross-modal. Don't invent sources; cite only from source_quality_table. Conservative when evidence is thin."</div>
+                <div class="stage-key">evidence</div>
+                <div class="stage-val">Each Evidence row carries <code>snippet</code> (~150 chars, the cited quote) AND <code>body_markdown</code> (full article body from trafilatura, up to 3000 chars). Claude uses <code>body_markdown</code> as the primary basis — what the publisher actually reported — and falls back to <code>snippet</code> only when body extraction failed (paywall, JS-only, 404).</div>
               </div>
               <div class="stage-row">
-                <div class="stage-key">tools</div>
-                <div class="stage-val">Pure Claude reasoning. Input prompt carries evidence (snippets capped at 240 chars), source-quality table, image OCR + description + provenance, tweet_context.</div>
+                <div class="stage-key">mode: verify</div>
+                <div class="stage-val">Populate <code>verified / refuted / disputed / unaddressed</code> buckets. <code>counter_fact</code> when refuted. <code>primary_sources_to_cite</code> (1–3, fact-checker > reputable-news).</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">mode: provide_context</div>
+                <div class="stage-val">Populate <code>contextual_findings</code> — one entry with <code>is_central=true</code>. <code>context_note</code> (≤220 chars): the missing context the framing hides. Don't populate verified/refuted buckets.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">mode: challenge_opinion</div>
+                <div class="stage-val">Populate <code>challenged_propositions</code> — 1–3 <code>Counterpoint</code> objects each with named credible critic, <code>summary</code> (≤160 chars), <code>citing_sources</code>, <code>weight ∈ {strong, moderate, weak}</code>.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">mode: surface_perspectives</div>
+                <div class="stage-val">Populate <code>perspectives</code> — 2–3 entries each with <code>label</code> (≤22 chars, tweet-compact: "Pro-UBI", "Cost-control view"), <code>summary</code> (≤140 chars), <code>citing_sources</code>. Central proposition goes in <code>unaddressed_propositions</code> — topic itself can't be "verified".</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">shared prompt</div>
+                <div class="stage-val">"Use tweet_context actively — parody handles, recycled-event tweets, third-party aggregators. For image-bearing claims fold Lens 2 (image-text) + Lens 3 (cross-modal) reasoning inline into the narrative. Don't invent sources; cite only from source_quality_table. Conservative when evidence is thin."</div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">skip when</div>
@@ -434,22 +522,22 @@
               <div class="stage-num-sub">Audit</div>
             </div>
             <div>
-              <div class="stage-name">Mechanical verdict check + URL containment</div>
+              <div class="stage-name">Mechanical action-outcome check + URL containment</div>
               <div class="stage-chips">
                 <span class="chip chip-info">pure Python</span>
                 <span class="chip">&lt; 50 ms</span>
               </div>
               <div class="stage-row">
                 <div class="stage-key">goal</div>
-                <div class="stage-val">Catch reconcile drift before the reply is rendered. Force NotEnoughEvidence if anything is off.</div>
+                <div class="stage-val">Catch reconcile drift before the reply is rendered. Force the action's unavailable outcome if anything is off.</div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">checks</div>
-                <div class="stage-val">(1) Reconciled verdict matches the structural rule. (2) Every URL in <code>tone_neutral_justification</code> AND <code>load_bearing_evidence_snippet</code> AND <code>primary_sources_to_cite</code> is in <code>source_quality_table</code>. (3) Central proposition lives in exactly one verified/refuted/disputed/unaddressed bucket. (4) Refuted ⇒ counter_fact present.</div>
+                <div class="stage-val">(1) Reconciled <code>action_outcome</code> matches the structural rule <code>derive_action_outcome(action, findings, quality_table)</code>. (2) Every URL in <code>tone_neutral_justification</code> AND <code>load_bearing_evidence_snippet</code> AND <code>primary_sources_to_cite</code> is in <code>source_quality_table</code>. (3) Central proposition lives in exactly one bucket. (4) For <code>verify</code>: refuted ⇒ counter_fact present.</div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">on fail</div>
-                <div class="stage-val">Verdict overwritten to <code>NotEnoughEvidence</code>; NEI payload swapped in with reason "evidence retrieved but silent".</div>
+                <div class="stage-val">Action outcome overwritten to the action's <code>_unavailable / _nei</code> literal; NEI payload swapped in with reason "evidence retrieved but silent".</div>
               </div>
             </div>
           </div>
@@ -473,12 +561,16 @@
                 <div class="stage-val">Persist a complete, immutable record of everything the backend produced before the renderer sees it. Stages 7+ are forbidden from issuing new searches or model calls that touch evidence.</div>
               </div>
               <div class="stage-row">
-                <div class="stage-key">contents</div>
-                <div class="stage-val">All claims · all Evidence records · source-quality table · consolidated findings · presentation payload · image OCR + descriptions + provenance · thread context · pipeline git SHA · model + VLM version strings</div>
+                <div class="stage-key">new fields</div>
+                <div class="stage-val"><code>action</code> · <code>action_source ∈ {explicit, inferred, explicit_but_unactionable}</code> · <code>pivoted_from</code> · <code>invoker_instruction_text</code> · <code>action_outcome</code> (11-value ActionOutcome). Legacy <code>verdict_label</code> (4-value Verdict) retained for backwards-compat.</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">full contents</div>
+                <div class="stage-val">All claims · all Evidence records (with body_markdown) · source-quality table · consolidated findings · presentation payload · image OCR + descriptions + canonical_image_match + provenance · thread context · pipeline git SHA · model + VLM version strings</div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">where</div>
-                <div class="stage-val"><code>data/freezes/&lt;invocation_id&gt;.json</code> (Blob upload is a follow-up per design §4.7)</div>
+                <div class="stage-val"><code>data/freezes/&lt;invocation_id&gt;.json</code></div>
               </div>
             </div>
           </div>
@@ -492,35 +584,50 @@
               <div class="stage-num-sub">Render</div>
             </div>
             <div>
-              <div class="stage-name">Tone-controlled reply · agreeable / neutral / agonistic</div>
+              <div class="stage-name">5 action templates × 3 tone registers — compositional renderer</div>
               <div class="stage-chips">
                 <span class="chip chip-active">Claude Sonnet 4.6</span>
                 <span class="chip">no thinking · 30 s timeout</span>
                 <span class="chip">≤256 X-weighted chars</span>
+                <span class="chip">zero URLs in body</span>
               </div>
               <div class="stage-row">
-                <div class="stage-key">goal</div>
-                <div class="stage-val">Write ONE reply tweet in the requested register. Three tones share the same factual payload; only affect varies.</div>
+                <div class="stage-key">architecture</div>
+                <div class="stage-val"><code>system = _ACTION_TEMPLATES[action] + _TONE_REGISTERS[tone] + _hard_constraints_for(action, state, pivoted)</code>. Five action templates × three tone registers compose into 15 distinct prompts — not a hand-written Cartesian product.</div>
               </div>
               <div class="stage-row">
-                <div class="stage-key">prompts</div>
-                <div class="stage-val">Three independent system prompts share a common <code>_INPUT_CONTRACT</code> + <code>_HARD_CONSTRAINTS</code>. Tone-specific register guidance: <strong>neutral</strong> = Bode &amp; Vraga 2020 "straightforward, evidence-first, detached"; <strong>agreeable</strong> = Lewandowsky Debunking Handbook "affirm impulse, lead with alternative fact, never condescending"; <strong>agonistic</strong> = Boukes &amp; Hameleers 2022 "pointed, sarcastic — target the claim or source's credibility, never the person."</div>
+                <div class="stage-key">action templates</div>
+                <div class="stage-val">
+                  <strong>verify</strong>: state the headline_finding, name sources by display_name, incorporate counter_fact if refuted.<br>
+                  <strong>provide_context</strong>: surface the missing context from context_note. Don't argue the claim is wrong.<br>
+                  <strong>challenge_opinion</strong>: NAME the credible critic / outlet / study. Push back on the opinion not the person.<br>
+                  <strong>surface_perspectives</strong>: present EXACTLY two perspectives in tension. Strict neutrality — no editorial stance. Sarcasm OFF.<br>
+                  <strong>decline</strong>: brief acknowledgment (≤120 chars) that there's nothing to fact-check.
+                </div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">tone registers</div>
+                <div class="stage-val"><strong>neutral</strong> = Bode &amp; Vraga 2020 "straightforward, evidence-first, detached"; <strong>agreeable</strong> = Lewandowsky Debunking Handbook "affirm impulse, lead with alternative fact, never condescending"; <strong>satirical</strong> = Boukes &amp; Hameleers 2022 "pointed, sardonic — target the claim or source's credibility, never the person."</div>
+              </div>
+              <div class="stage-row">
+                <div class="stage-key">URL rule</div>
+                <div class="stage-val">Zero URLs in reply body — hard constraint. The poster appends a t.co-shortened <code>/info</code> link automatically (+23 chars). The renderer names sources by <code>display_name</code> only (e.g. "Snopes", "AP News"). Old conditional-URL logic removed.</div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">state-aware</div>
-                <div class="stage-val">Prompt receives <code>state ∈ {verified, no_sources, no_checkable_claim}</code>. URL inclusion is conditional: verified ⇒ ≥1 URL from <code>primary_sources_to_cite</code>; otherwise no URL.</div>
+                <div class="stage-val">State derives from <code>action_outcome</code>: <code>actionable</code> (verify supported/refuted/conflicting, context_provided, challenged, perspectives_surfaced) · <code>no_evidence</code> (any <code>_nei / _unavailable / _insufficient</code> outcome) · <code>declined</code>.</div>
               </div>
               <div class="stage-row">
-                <div class="stage-key">tools</div>
-                <div class="stage-val">Reads only <code>RendererView</code> (presentation_payload + tone_neutral_justification + state). Reasoning fields are unreachable by contract.</div>
+                <div class="stage-key">pivot disclosure</div>
+                <div class="stage-val">When <code>pivoted_from</code> is set: renderer is given the original ask + invoker's mention text and is instructed to weave a brief natural disclosure into the reply (e.g. "this is actually verifiable, so: …"). Model owns the full 256-char budget including any pivot clause.</div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">enforce</div>
-                <div class="stage-val">Runtime invariance check: rejects renders that introduce URLs outside <code>primary_sources_to_cite</code>, miss the required URL when state=verified, exceed 256 chars, or look like a refusal.</div>
+                <div class="stage-val">Runtime invariance check: rejects renders that include any URL, exceed 256 X-weighted chars, or look like a refusal. Retries with constraint-feedback up to 3 times.</div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">degrades</div>
-                <div class="stage-val">Pass 1: ≤2 invariance-feedback retries. Pass 2: one retry with harm-reduction nudge. Pass 3: raise → <code>pipeline_error</code>.</div>
+                <div class="stage-val">Pass 1: ≤3 invariance-feedback retries. Pass 2: one retry with harm-reduction nudge. Pass 3: raise → <code>pipeline_error</code>.</div>
               </div>
             </div>
           </div>
@@ -541,11 +648,11 @@
               </div>
               <div class="stage-row">
                 <div class="stage-key">goal</div>
-                <div class="stage-val">Post the rendered text as a reply to the original mention from <code>@eddiexbot</code>. Append a t.co-shortened <code>/info</code> URL for transparency.</div>
+                <div class="stage-val">Post the rendered text + appended t.co-shortened <code>/info</code> link as a reply to the original mention from <code>@eddiexbot</code>.</div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">guards</div>
-                <div class="stage-val"><code>DERAD_DRY_RUN</code> gates the actual POST; 280-char X-weighted hard cap; 100 posts/day X Basic plan.</div>
+                <div class="stage-val"><code>DERAD_DRY_RUN</code> gates the actual POST (currently <code>false</code> — live); 280-char X-weighted hard cap; 100 posts/day X Basic plan.</div>
               </div>
             </div>
           </div>
@@ -570,7 +677,7 @@
               </div>
               <div class="stage-row">
                 <div class="stage-key">tables</div>
-                <div class="stage-val"><code>MentionEvents</code> (outcome, tone, participant, pipeline_ms, reply_type derived from verdict) · <code>MentionDrops</code> · <code>EngagementSnapshots</code> · <code>BotReplyReplies</code></div>
+                <div class="stage-val"><code>MentionEvents</code> (outcome, tone, action, action_outcome, participant, pipeline_ms, reply_type) · <code>MentionDrops</code> · <code>EngagementSnapshots</code> · <code>BotReplyReplies</code></div>
               </div>
               <div class="stage-row">
                 <div class="stage-key">degrades</div>
@@ -597,13 +704,18 @@
             <tbody>
               <tr>
                 <td><strong>Claude Sonnet 4.6</strong> on Azure AI Services</td>
-                <td>Stage 1.5 VLM · Stage 2+3 extract · Stage 4 controller · Stage 4.5 reconcile · Stage 4.5.2 model-prior fallback · Stage 7 renderer</td>
+                <td>Stage 1.5 VLM · Stage 2+3 extract+action · Stage 4 controller · Stage 4.5 reconcile · Stage 4.5.2 model-prior fallback · Stage 7 renderer</td>
                 <td><code>derad-2-resource</code> · 1500 RPM · 1.5M TPM</td>
               </tr>
               <tr>
+                <td><strong>Claude + web_search_20250305</strong> on Microsoft Foundry</td>
+                <td>Stage 4 search (default) · Stage 1.5 Tier-3 provenance search. Replaced gpt-5.4-mini as primary — doesn't refuse on sensitive queries.</td>
+                <td><code>AZURE_CLAUDE_ENDPOINT + CLAUDE_SEARCH_DEPLOYMENT</code></td>
+              </tr>
+              <tr>
                 <td><strong>gpt-5.4-mini + web_search</strong> via Azure OpenAI Responses API</td>
-                <td>Stage 4 seed + controller-driven searches · Stage 1.5 Tier-3 provenance search</td>
-                <td><code>azfdyspzdzrbtv3v4o · gpt-54-mini-search</code> · 250 RPM · 250K TPM</td>
+                <td>Stage 4 search <em>(fallback only)</em> — used when Claude search env vars are not set. Observed to silently refuse on some queries (zero hits).</td>
+                <td><code>FOUNDRY_PROJECT_ENDPOINT + FOUNDRY_SEARCH_MODEL</code> · 250 RPM · 250K TPM</td>
               </tr>
               <tr>
                 <td><strong>X API v2</strong> (Basic)</td>
@@ -630,7 +742,7 @@
         <div class="section-head">
           <p class="eyebrow">degradation</p>
           <h2>How each stage fails toward NEI</h2>
-          <p class="meta">Every stage is designed to fail toward NotEnoughEvidence rather than toward a confident wrong reply.</p>
+          <p class="meta">Every stage is designed to fail toward NotEnoughEvidence / the action's unavailable outcome rather than toward a confident wrong reply.</p>
         </div>
 
         <div class="table-wrap">
@@ -639,12 +751,14 @@
             <tbody>
               <tr><td>Parent unreachable (deleted / private)</td><td>Stage 1</td><td><code>parent_fetch_failed</code> outcome; mention dropped silently</td></tr>
               <tr><td>Image too large / unreadable / VLM error</td><td>Stage 1.5</td><td>Skip that image; others continue; text path unaffected</td></tr>
-              <tr><td>Extract parse / timeout</td><td>Stage 2+3</td><td>Fallback: treat whole tweet as one verifiable central claim</td></tr>
+              <tr><td>Extract parse / timeout</td><td>Stage 2+3</td><td>Fallback: whole tweet as one verifiable central claim with <code>action=verify</code></td></tr>
               <tr><td>web_search 429 / tool error</td><td>Stage 4 / 1.5</td><td>That question returns <code>[]</code>; controller decides retry or stop</td></tr>
+              <tr><td>URL fetch fails / title-mismatch</td><td>Stage 4 validation</td><td>Hit dropped from evidence; others continue</td></tr>
               <tr><td>Claude per-stage timeout (30–90 s)</td><td>Any LLM stage</td><td>Narrow <code>(ValueError, TimeoutError)</code> handlers degrade per-stage. Unexpected exceptions → <code>pipeline_error</code>.</td></tr>
               <tr><td>Reconcile stance-count drift</td><td>Stage 4.5</td><td>Pad/truncate; emit <code>reconcile_stance_drift</code> metric with delta size</td></tr>
+              <tr><td>Reconcile failure (parse / refusal)</td><td>Stage 4.5</td><td>Degrade to no-sources output: central claim → unaddressed, <code>action_outcome</code> = action's <code>_unavailable / _nei</code> literal</td></tr>
               <tr><td>Verdict / URL containment mismatch</td><td>Stage 5</td><td>Force NEI; swap in NEI-shaped payload</td></tr>
-              <tr><td>Render refusal or invariance breach</td><td>Stage 7</td><td>Retry with feedback → harm-reduction nudge → <code>pipeline_error</code></td></tr>
+              <tr><td>Render refusal or invariance breach (incl. URL in body)</td><td>Stage 7</td><td>Retry with feedback → harm-reduction nudge → <code>pipeline_error</code></td></tr>
               <tr><td>Tables write stalls</td><td>Stage 9</td><td>15 s daemon-thread join; semaphore slot releases regardless</td></tr>
               <tr><td>Pipeline semaphore queue full 10 min</td><td>app-level</td><td><code>pipeline_queue_timeout</code> drop event</td></tr>
             </tbody>
@@ -653,7 +767,7 @@
       </section>
 
       <footer class="meta mt-24">
-        derad-agent · spec v0.5 · pipeline rendered against the deployed image
+        derad-agent · spec v0.6 · pipeline rendered against the deployed image
       </footer>
     </main>
   </div>

@@ -3,7 +3,7 @@
 **Version:** 0.5 (build-week final; Azure stack locked)
 **Owner:** Advait
 **Status:** Ready for implementation
-**Purpose:** Define a fixed verification backend and a swappable tone-rendering layer for a between-subjects field study on X, in which recruited participants invoke a fact-checking bot to reply to real tweets under one of three tone conditions (agreeable, neutral, agonistic/satirical).
+**Purpose:** Define a fixed verification backend and a swappable tone-rendering layer for a between-subjects field study on X, in which recruited participants invoke a fact-checking bot to reply to real tweets under one of three tone conditions (agreeable, neutral, satirical).
 
 **Changes from v0.4:**
 
@@ -236,14 +236,14 @@ Serializes the complete frozen object (Section 5.1) to **Azure Blob Storage** (r
 
 - **Agreeable / empathetic.** Lewandowsky Debunking Handbook structure.
 - **Neutral.** Bode, Vraga & Tully (2020) register.
-- **Agonistic / satirical.** Boukes & Hameleers (2022) register.
+- **Satirical.** Boukes & Hameleers (2022) register.
 
 **Hard constraints:**
 
 - Factual content, verdict implied, and cited sources identical across renderers. Only wording, stylistic ordering, and affect change.
 - No facts introduced outside `presentation_payload`.
 - At least one source link from `primary_sources_to_cite`.
-- **Agonistic boundary:** targets the *claim* and the *source*, not the person. No profanity, no slurs, no demographic or appearance-based mockery, no attacks on identity.
+- **Satirical boundary:** targets the *claim* and the *source*, not the person. No profanity, no slurs, no demographic or appearance-based mockery, no attacks on identity.
 
 ### 4.9 X poster (Stage 8)
 
@@ -370,7 +370,7 @@ Collects engagement on the bot's correction; engagement on the target user's sub
 {
   "invocation_id": "uuid",
   "participant_id": "string",
-  "condition": "agreeable | neutral | agonistic",
+  "condition": "agreeable | neutral | satirical",
   "rendered_text": "string",
   "posted_tweet_id": "string",
   "posted_at": "ISO-8601"
@@ -440,7 +440,7 @@ Collects engagement on the bot's correction; engagement on the target user's sub
 - **Post-hoc debriefing.** Identifiable target users enter a debrief queue. Reuter et al. (2024).
 - **Deletion on request.** Any corrected user can request removal.
 - **Preregistration.** OSF registration before launch.
-- **Stopping rule for the agonistic arm.** 20% increase in downstream low-quality sharing halts that arm.
+- **Stopping rule for the satirical arm.** 20% increase in downstream low-quality sharing halts that arm.
 - **Satire boundary.** Renderer-prompt constraint: targets claim/source, not person.
 - **Consent expectations.** CITI guidance addressed in IRB application.
 - **Data residency.** Azure region pinned (suggested: East US 2) for predictable jurisdiction. Document in IRB.
@@ -454,7 +454,7 @@ Collects engagement on the bot's correction; engagement on the target user's sub
 | Confident wrong verdict | Structural verdict rule (≥ 2 reliable-tier sources); Stage 5 audit forces NEI |
 | Tone manipulation shifts factual content | Renderer reads only `presentation_payload + tone_neutral_justification`; runtime check |
 | Renderer drifts headline across conditions | Pre-committed `headline_finding` in `presentation_payload` |
-| Agonistic arm causes real-world harm | Stopping rule; opt-out; debriefing; satire boundary in renderer prompt |
+| Satirical arm causes real-world harm | Stopping rule; opt-out; debriefing; satire boundary in renderer prompt |
 | Platform policy or pricing changes | Bot kept portable to Bluesky or Mastodon |
 | Image used out of context | Tier 3 Track A (description-grounded search) + Lens 3 cross-modal reconciliation |
 | Confident "this image is fake" verdict | Tier 4 forced to NEI |
@@ -542,6 +542,6 @@ Collects engagement on the bot's correction; engagement on the target user's sub
 
 **Neutral:** "This image is miscaptioned. It shows 101-year-old Rosa Camfield with her great-granddaughter Kaylee (March 2015), not a mother with her newborn. The story originated from a satirical site and was debunked by Snopes and The Quint."
 
-**Agonistic:** "Ten seconds with reverse image search: she's a great-grandmother, not a mother. The 'mother of 17 at 101' story came from a satire site that says it makes things up. Snopes and The Quint covered this years ago."
+**Satirical:** "Ten seconds with reverse image search: she's a great-grandmother, not a mother. The 'mother of 17 at 101' story came from a satire site that says it makes things up. Snopes and The Quint covered this years ago."
 
-All three reference the same facts, cite the same sources in the same order, and state the same counter-fact. The agonistic rendering mocks the claim and the satirical source, not the target user. The invariance contract holds because the renderer only saw `presentation_payload` and `tone_neutral_justification`.
+All three reference the same facts, cite the same sources in the same order, and state the same counter-fact. The satirical rendering mocks the claim and the satirical source, not the target user. The invariance contract holds because the renderer only saw `presentation_payload` and `tone_neutral_justification`.

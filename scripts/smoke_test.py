@@ -117,8 +117,13 @@ dedup_module._default_store = dedup_module.InMemoryStore()
 e_store = events_module.InMemoryEventsStore()
 events_module.reset_store(e_store)
 
-assert_true("participant in _PARTICIPANTS_BY_ID", "test_author_123" in app_module._PARTICIPANTS_BY_ID)
-print(f"  {_CYAN}participants loaded (metadata only): {len(app_module._PARTICIPANTS_BY_ID)}{_RESET}")
+# Participant metadata loads lazily via _lookup_participant's write-through
+# cache — no eager preload at import. First lookup populates the cache.
+assert_true("no eager preload at import", "test_author_123" not in app_module._PARTICIPANTS_BY_ID)
+assert_true("participant resolves via lazy lookup",
+            app_module._lookup_participant("test_author_123") is not None)
+assert_true("participant cached after first lookup", "test_author_123" in app_module._PARTICIPANTS_BY_ID)
+print(f"  {_CYAN}participants in lazy cache: {len(app_module._PARTICIPANTS_BY_ID)}{_RESET}")
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Phase 3 — Open dispatch: unregistered authors are accepted (no allow-list)
@@ -127,11 +132,17 @@ section("Phase 3 · Open dispatch (no allow-list gate)")
 
 
 class _SyncThread:
-    """Runs process_mention synchronously for testing."""
+    """Runs the target synchronously for testing. Implements the bits of the
+    threading.Thread API the pipeline touches (start/join/is_alive) so that
+    _finalize's timeout-guarded persist thread works under the stub."""
     def __init__(self, target=None, args=(), kwargs=None, daemon=False, **_):
-        self._target, self._args = target, args
+        self._target, self._args, self._kwargs = target, args, kwargs or {}
     def start(self):
-        self._target(*self._args)
+        self._target(*self._args, **self._kwargs)
+    def join(self, timeout=None):
+        return None
+    def is_alive(self):
+        return False
 
 
 # Unregistered author should now be accepted (no allow-list gate)
@@ -150,7 +161,7 @@ last_drop_or_event_tone = (e_store.events[-1].tone if e_store.events else None) 
     (e_store.drops[-1].tone if e_store.drops else None)
 assert_true(
     "unregistered mention got a valid random tone",
-    last_drop_or_event_tone in ("agreeable", "neutral", "satirical"),
+    last_drop_or_event_tone in app_module.VALID_TONES,
 )
 
 drop_reasons = [d.drop_reason for d in e_store.drops]
@@ -308,17 +319,18 @@ bystander_tweet = {
     "id": "bystander_reply_001",
     "author_id": "bystander_user_999",
     "text": "This bot actually makes a good point.",
-    "in_reply_to_tweet_id": "old_reply_tweet",
+    "referenced_tweets": [{"type": "replied_to", "id": "old_reply_tweet"}],
     "public_metrics": {"like_count": 5},
 }
 bystander_user = {"id": "bystander_user_999", "username": "bystanderhandle"}
 
-fake_search_response = MagicMock()
-fake_search_response.data = [bystander_tweet]
-fake_search_response.includes = {"users": [bystander_user]}
+# posts.search_recent yields a generator of page objects, each with .data/.includes.
+fake_search_page = MagicMock()
+fake_search_page.data = [bystander_tweet]
+fake_search_page.includes = {"users": [bystander_user]}
 
 fake_collect_client = MagicMock()
-fake_collect_client.tweets.search_recent.return_value = fake_search_response
+fake_collect_client.posts.search_recent.return_value = iter([fake_search_page])
 
 with patch("agent.cli.collect_replies.get_x_client", return_value=fake_collect_client):
     count = _collect_one(

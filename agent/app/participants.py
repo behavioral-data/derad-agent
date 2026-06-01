@@ -25,10 +25,16 @@ logger = logging.getLogger(__name__)
 _TABLE_NAME = "Participants"
 _PARTITION = "participants"
 
-VALID_TONES = ("agreeable", "neutral", "agonistic")
+VALID_TONES = ("agreeable", "neutral", "satirical")
 
-# Any legacy rows in Tables still carry tone="satirical"; normalize on read.
-_LEGACY_TONE_ALIASES = {"satirical": "agonistic"}
+# The satirical condition was originally labeled "agonistic"; legacy rows still
+# carry tone="agonistic", so normalize them to the current label on read.
+_LEGACY_TONE_ALIASES = {"agonistic": "satirical"}
+
+
+def canonical_tone(tone: str) -> str:
+    """Map legacy tone labels (e.g. 'agonistic') to their current condition."""
+    return _LEGACY_TONE_ALIASES.get(tone, tone)
 
 
 class ParticipantLookupError(Exception):
@@ -40,7 +46,7 @@ class Participant:
     """One registered study participant."""
     author_id: str           # X numeric user ID — primary lookup key
     author_username: str     # @handle (human-readable, for DM composition)
-    tone: str                # assigned bot: agreeable | neutral | agonistic
+    tone: str                # assigned bot: agreeable | neutral | satirical
     enrolled_at_utc: datetime
     notes: str = ""          # optional researcher notes
 
@@ -142,8 +148,7 @@ def _entity_to_participant(ent: dict) -> Participant:
         enrolled = datetime.fromisoformat(enrolled)
     if enrolled and enrolled.tzinfo is None:
         enrolled = enrolled.replace(tzinfo=timezone.utc)
-    tone = ent.get("tone", "")
-    tone = _LEGACY_TONE_ALIASES.get(tone, tone)
+    tone = canonical_tone(ent.get("tone", ""))
     return Participant(
         author_id=ent["RowKey"],
         author_username=ent.get("author_username", ""),

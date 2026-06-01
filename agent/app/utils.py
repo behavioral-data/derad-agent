@@ -1,4 +1,5 @@
 import logging
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -37,6 +38,9 @@ class TweetSnapshot:
     author_followers_count: Optional[int] = None
 
 
+_FETCH_TWEET_MAX_ATTEMPTS = 3
+
+
 def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
     """Fetch a tweet by id with author expansion. Returns None on failure.
 
@@ -45,25 +49,58 @@ def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
     typed Pydantic models. Subscript access only — ``getattr`` on a dict
     always returns the default and would make every parent-fetch silently
     return None.
+
+    Retry policy: up to ``_FETCH_TWEET_MAX_ATTEMPTS`` attempts with
+    exponential backoff (1s, 2s) on transient failures —
+    ``ConnectionError``, ``Timeout``, and 5xx/429 HTTP responses. 4xx
+    permanent failures (404, 403, etc.) skip retries and return None
+    immediately.
     """
-    try:
-        response = get_x_client().posts.get_by_id(
-            id=str(tweet_id),
-            tweet_fields=[
-                "text", "author_id", "public_metrics", "attachments",
-                "created_at", "lang", "possibly_sensitive", "entities",
-                "referenced_tweets",
-            ],
-            expansions=["author_id", "attachments.media_keys"],
-            user_fields=[
-                "username", "verified", "verified_type", "description",
-                "created_at", "public_metrics",
-            ],
-            media_fields=["url", "preview_image_url", "type"],
+    response = None
+    for attempt in range(1, _FETCH_TWEET_MAX_ATTEMPTS + 1):
+        try:
+            response = get_x_client().posts.get_by_id(
+                id=str(tweet_id),
+                tweet_fields=[
+                    "text", "author_id", "public_metrics", "attachments",
+                    "created_at", "lang", "possibly_sensitive", "entities",
+                    "referenced_tweets",
+                ],
+                expansions=["author_id", "attachments.media_keys"],
+                user_fields=[
+                    "username", "verified", "verified_type", "description",
+                    "created_at", "public_metrics",
+                ],
+                media_fields=["url", "preview_image_url", "type"],
+            )
+            break  # success
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else None
+            # Permanent failures (4xx other than 429): don't retry.
+            if status is not None and 400 <= status < 500 and status != 429:
+                logger.warning(
+                    "fetch_tweet(%s) failed: HTTP %s (permanent, no retry)", tweet_id, status,
+                )
+                return None
+            transient_exc: Exception = exc
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+            transient_exc = exc
+
+        if attempt >= _FETCH_TWEET_MAX_ATTEMPTS:
+            logger.warning(
+                "fetch_tweet(%s) gave up after %d attempts: %s",
+                tweet_id, _FETCH_TWEET_MAX_ATTEMPTS, transient_exc,
+            )
+            return None
+
+        backoff = 2 ** (attempt - 1)
+        logger.info(
+            "fetch_tweet(%s) attempt %d/%d transient (%s) — retrying in %ds",
+            tweet_id, attempt, _FETCH_TWEET_MAX_ATTEMPTS, transient_exc, backoff,
         )
-    except requests.HTTPError as exc:
-        status = exc.response.status_code if exc.response is not None else "?"
-        logger.warning("fetch_tweet(%s) failed: HTTP %s", tweet_id, status)
+        time.sleep(backoff)
+
+    if response is None:
         return None
 
     data = getattr(response, "data", None) or {}
@@ -155,9 +192,8 @@ def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
 _APP_TO_FACTCHECK_TONE = {
     "agreeable": "agreeable",
     "neutral": "neutral",
-    "agonistic": "agonistic",
-    "satirical": "agonistic",  # legacy alias — any pre-rename participant
-                                # records still resolve correctly.
+    "satirical": "satirical",
+    "agonistic": "satirical",  # legacy alias — pre-rename records still resolve.
 }
 
 
@@ -239,7 +275,9 @@ def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5,
         tweet_context=tweet_context or None,
         invoker_instruction=invoker_instruction or "",
     )
-    text = render(view_for_renderer(frozen), factcheck_tone)
+    text = render(
+        view_for_renderer(frozen, parent_post_text=statement), factcheck_tone
+    )
 
     sources = [
         s.url for s in frozen.presentation_payload.primary_sources_to_cite

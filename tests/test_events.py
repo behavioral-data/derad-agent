@@ -167,7 +167,7 @@ class TestEventWiring:
         from agent.app.utils import TweetSnapshot
         snap = TweetSnapshot(
             text="Mail-in voting causes fraud.",
-            author_id="999",
+            author_id="12345",
             author_username="parent_user",
         )
         gen = {
@@ -182,7 +182,7 @@ class TestEventWiring:
         ev, ts_passed = self._run_process(
             fetch_snap=snap,
             generate_reply_result=gen,
-            post_reply_returns=["REPLY_ID"],
+            post_reply_returns=["REPLY_ID", "LINK_REPLY_ID"],
             monkeypatch=monkeypatch,
             fake_events_store=fake_events_store,
             received_at_utc=ts,
@@ -191,13 +191,15 @@ class TestEventWiring:
         assert ev.received_at_utc == ts_passed
         assert ev.reply_id == "REPLY_ID"
         assert ev.parent_text == "Mail-in voting causes fraud."
-        assert ev.parent_author_id == "999"
+        assert ev.parent_author_id == "12345"
         assert ev.parent_author_username == "parent_user"
         assert ev.author_username == "alice"
         assert ev.queries == ["query1", "query2"]
         assert ev.reply_type == "factcheck"
         assert ev.reply_text.startswith("Here are the facts.")
         assert ev.pipeline_ms is not None and ev.pipeline_ms >= 0
+        # Forward-join key to InfoTokens — must be set before the event is written.
+        assert isinstance(ev.info_token, str) and ev.info_token
 
     def test_parent_fetch_failed_outcome(self, monkeypatch, fake_events_store):
         ev = self._run_process(
@@ -212,7 +214,7 @@ class TestEventWiring:
 
     def test_empty_reply_outcome(self, monkeypatch, fake_events_store):
         from agent.app.utils import TweetSnapshot
-        snap = TweetSnapshot(text="claim", author_id="999", author_username="u")
+        snap = TweetSnapshot(text="claim", author_id="12345", author_username="u")
         ev = self._run_process(
             fetch_snap=snap,
             generate_reply_result={"text": "", "sources": None, "verdict_label": "NotEnoughEvidence",
@@ -227,7 +229,7 @@ class TestEventWiring:
 
     def test_x_post_error_outcome(self, monkeypatch, fake_events_store):
         from agent.app.utils import TweetSnapshot
-        snap = TweetSnapshot(text="claim", author_id="999", author_username="u")
+        snap = TweetSnapshot(text="claim", author_id="12345", author_username="u")
         gen = {
             "text": "the response", "sources": None, "verdict_label": "Supported",
             "action": "verify", "action_outcome": "verified_supported",
@@ -261,6 +263,72 @@ class TestEventWiring:
         assert "synthetic explosion" in (ev.error_detail or "")
 
 
+# ─── Link self-reply threading ──────────────────────────────────────────────
+
+class TestLinkSelfReplyThreading:
+    """The info link is posted as a separate self-reply so the main fact-check
+    reply carries no URL (links suppress reach on X). Verifies the thread shape:
+    mention → main reply (no link) → link reply (URL, parented to the main reply).
+    """
+
+    def _setup(self, monkeypatch, fake_events_store, post_reply_returns):
+        monkeypatch.setattr(app_module, "DRY_RUN", False)
+        from agent.app.utils import TweetSnapshot
+        from agent.app import utils as utils_module
+        snap = TweetSnapshot(
+            text="Mail-in voting causes fraud.",
+            author_id="12345",
+            author_username="parent_user",
+        )
+        monkeypatch.setattr(utils_module, "fetch_tweet", lambda *a, **kw: snap)
+        monkeypatch.setattr(app_module, "fetch_tweet", lambda *a, **kw: snap)
+        monkeypatch.setattr(app_module, "generate_reply", lambda **kw: {
+            "text": "Here are the facts.",
+            "sources": ["https://a.example"],
+            "verdict_label": "Refuted",
+            "action": "verify",
+            "action_outcome": "verified_refuted",
+            "queries": ["q1"],
+        })
+        calls: list[dict] = []
+        def _post(parent_id, reply_text):
+            calls.append({"parent_id": parent_id, "reply_text": reply_text})
+            return post_reply_returns[len(calls) - 1]
+        monkeypatch.setattr(app_module, "post_reply", _post)
+        tweet = {"id_str": "555", "in_reply_to_status_id_str": "444",
+                 "user": {"id_str": "111", "screen_name": "alice"}}
+        app_module.process_mention("neutral", tweet, events_module.utcnow())
+        return calls, fake_events_store.events[-1]
+
+    def test_main_reply_has_no_url_and_link_threads_under_it(self, monkeypatch, fake_events_store):
+        calls, ev = self._setup(monkeypatch, fake_events_store, ["MAIN_ID", "LINK_ID"])
+        assert len(calls) == 2, "expected a main reply and a separate link self-reply"
+        main, link = calls
+        # Main reply: parented to the mention, body only, NO URL.
+        assert main["parent_id"] == "555"
+        assert main["reply_text"] == "Here are the facts."
+        assert "http" not in main["reply_text"]
+        # Link reply: parented to the MAIN reply id (a self-reply), carries /info URL.
+        assert link["parent_id"] == "MAIN_ID"
+        assert "http" in link["reply_text"]
+        assert "/i/" in link["reply_text"]
+        # Engagement tracking + dossier embed point at the main reply, not the link.
+        assert ev.outcome == "replied"
+        assert ev.reply_id == "MAIN_ID"
+        assert ev.reply_text == "Here are the facts."
+
+    def test_link_reply_failure_marks_replied_no_link(self, monkeypatch, fake_events_store):
+        # Main reply posts; link self-reply returns None on both attempt and
+        # retry — the fact-check went out, but with NO sources link. We surface
+        # that gap with outcome='replied_no_link' so analytics can see it.
+        monkeypatch.setattr(app_module.time, "sleep", lambda *_a, **_kw: None)
+        calls, ev = self._setup(monkeypatch, fake_events_store, ["MAIN_ID", None, None])
+        assert len(calls) == 3  # main reply + initial link attempt + 1 retry
+        assert ev.outcome == "replied_no_link"
+        assert ev.reply_id == "MAIN_ID"
+        assert ev.link_reply_id is None
+
+
 # ─── TablesEventsStore schema regression ────────────────────────────────────
 
 class _FakeResourceExistsError(Exception):
@@ -273,11 +341,13 @@ def _patched_tables_store(monkeypatch):
     drops_client = MagicMock()
     engagements_client = MagicMock()
     reply_replies_client = MagicMock()
+    info_views_client = MagicMock()
     service = MagicMock()
     # Use return_value (not side_effect list) to avoid StopIteration in Python 3.12+
     service.create_table = MagicMock(return_value=None)
     service.get_table_client = MagicMock(
-        side_effect=[events_client, drops_client, engagements_client, reply_replies_client]
+        side_effect=[events_client, drops_client, engagements_client,
+                     reply_replies_client, info_views_client]
     )
 
     tables_mod = MagicMock()
@@ -345,3 +415,65 @@ class TestTablesEventsStoreSchema:
         entity = events_client.create_entity.call_args[0][0]
         assert len(entity["parent_text"]) <= 32_000
         assert len(entity["reply_text"]) <= 32_000
+
+    def test_drop_with_naive_datetime_normalizes_to_utc_month(self, monkeypatch):
+        """A naive datetime must be treated as UTC at the storage boundary —
+        otherwise ``.strftime("%Y-%m")`` and ``.timestamp()`` would silently use
+        the host's local tz and could land the row in the wrong month partition.
+
+        Construct a naive datetime at an instant that, in UTC, is firmly in May
+        2026; the entity's PartitionKey must be "2026-05" regardless of the
+        host's local tz.
+        """
+        store, _, drops_client = _patched_tables_store(monkeypatch)
+        # Naive datetime — no tzinfo. In UTC this is mid-May 2026.
+        naive = datetime(2026, 5, 18, 12, 0, 0)
+        drop = events_module.MentionDrop(
+            drop_reason="invalid_payload",
+            received_at_utc=naive,
+            tone="neutral",
+        )
+        store.write_drop(drop)
+        entity = drops_client.create_entity.call_args[0][0]
+        assert entity["PartitionKey"] == "2026-05"
+        # RowKey is built from the same normalized timestamp.
+        assert entity["RowKey"].startswith("2026-05-18T12:00:00")
+        # The nomid_ fingerprint uses the UTC timestamp, not local time.
+        expected_ts = naive.replace(tzinfo=timezone.utc).timestamp()
+        assert f"nomid_{expected_ts:.6f}" in entity["RowKey"]
+
+    def test_ensure_utc_helper_normalizes_naive_and_non_utc_tz(self):
+        from datetime import timedelta as _td
+        # Naive: treated as UTC.
+        naive = datetime(2026, 5, 18, 12, 0, 0)
+        out = events_module._ensure_utc(naive)
+        assert out.tzinfo == timezone.utc
+        assert out.replace(tzinfo=None) == naive
+        # Tz-aware UTC: passes through unchanged.
+        utc = datetime(2026, 5, 18, 12, 0, 0, tzinfo=timezone.utc)
+        assert events_module._ensure_utc(utc) == utc
+        # Tz-aware non-UTC: converted to UTC.
+        pacific = timezone(_td(hours=-8))
+        non_utc = datetime(2026, 5, 18, 4, 0, 0, tzinfo=pacific)
+        out = events_module._ensure_utc(non_utc)
+        assert out.utcoffset() == _td(0)
+        assert out.hour == 12  # 04:00 -08:00 == 12:00 UTC
+
+    def test_info_view_rows_have_unique_sortable_keys(self, monkeypatch):
+        store, _, _ = _patched_tables_store(monkeypatch)
+        ts = datetime(2026, 5, 18, 12, 0, 0, tzinfo=timezone.utc)
+        view = events_module.InfoView(
+            token="tok", viewed_at_utc=ts, reply_id="r1", mention_id="m1",
+            participant_id="a1", tone="neutral", user_agent="Twitterbot/1.0",
+            is_bot=True,
+        )
+        store.write_info_view(view)
+        store.write_info_view(view)
+        calls = store._info_views.create_entity.call_args_list
+        e0, e1 = calls[0][0][0], calls[1][0][0]
+        assert e0["PartitionKey"] == "2026-05"
+        assert e0["RowKey"].startswith("2026-05-18T12:00:00")
+        assert e0["reply_id"] == "r1"
+        assert e0["is_bot"] is True
+        # Same token viewed twice → distinct RowKeys (per-view nonce).
+        assert e0["RowKey"] != e1["RowKey"]

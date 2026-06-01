@@ -6,14 +6,23 @@ import random
 import secrets
 import threading
 import time
-from datetime import datetime, timezone
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context, url_for
 from markupsafe import escape
 
 from agent.app import events, metrics
 from agent.app.dedup import get_store
-from agent.app.events import MentionDrop, MentionEvent, log_mention_drop, log_mention_event
+from agent.app.events import (
+    InfoView,
+    MentionDrop,
+    MentionEvent,
+    log_info_view,
+    log_mention_drop,
+    log_mention_event,
+    parse_iso_utc,
+)
 from agent.app import participants as _participants
 from agent.app.participants import VALID_TONES
 from agent.app.utils import (
@@ -23,7 +32,6 @@ from agent.app.utils import (
 )
 from agent.app import streamer as _streamer
 from agent.llm.config import _parse_bool_env, _require_env
-from agent.shared.text import X_TCO_LEN, x_weighted_length
 
 _LOG_FILE = os.getenv("DERAD_LOG_FILE", "/tmp/derad_stream.log")
 _log_fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -65,7 +73,6 @@ BOT_USER_ID = os.getenv("BOT_USER_ID") or None
 DRY_RUN = _parse_bool_env("DERAD_DRY_RUN")
 RATE_LIMIT_PER_SEC = int(os.getenv("DERAD_RATE_LIMIT_PER_SEC", "3"))
 USER_DAILY_CAP = int(os.getenv("DERAD_USER_DAILY_CAP", "20"))  # mentions/UTC-day/user; 0 disables
-TWEET_LIMIT = 280
 
 # Cap concurrent fact-check pipelines so a mention burst can't blow through
 # Foundry/Claude rate limits. Threads beyond the cap block on acquire; if a
@@ -157,6 +164,8 @@ def _make_info_token(
     parent_id: str = "",
     parent_author_username: str = "",
     bot_handle: str = "",
+    mention_id: str = "",
+    participant_id: str = "",
 ) -> str:
     """Create a /info token. `info_payload` is the rich projection of the
     FrozenVerdict (action + outcome + counterpoints + perspectives +
@@ -171,6 +180,8 @@ def _make_info_token(
         "parent_id": parent_id,
         "parent_author_username": parent_author_username,
         "bot_handle": bot_handle,
+        "mention_id": mention_id,
+        "participant_id": participant_id,
         "_ts": time.monotonic(),
     }
     with _INFO_STORE_LOCK:
@@ -201,6 +212,30 @@ def _make_info_token(
             if len(payload_json.encode("utf-8")) > _LIMIT:
                 trimmed["source_quality_table"] = []
                 payload_json = json.dumps(trimmed, ensure_ascii=False)
+            # Final guard: Tables enforces ~64 KiB per string property. If
+            # counterpoints/perspectives alone still blow the cap, collapse
+            # to a minimal-but-renderable shape so the row still persists.
+            if len(payload_json.encode("utf-8")) > _LIMIT:
+                logger.warning(
+                    "info_token payload still oversized after truncation, "
+                    "falling back to minimal shape (token=%s)", token,
+                )
+                minimal = {
+                    "action": info_payload.get("action", ""),
+                    "action_outcome": info_payload.get("action_outcome", ""),
+                    "verdict_label": info_payload.get("verdict_label", ""),
+                    "headline_finding": (info_payload.get("headline_finding") or "")[:1000],
+                    "counterpoints": [],
+                    "perspectives": [],
+                    "source_quality_table": [],
+                }
+                payload_json = json.dumps(minimal, ensure_ascii=False)
+                if len(payload_json.encode("utf-8")) > _LIMIT:
+                    logger.error(
+                        "info_token minimal-shape payload still over limit; "
+                        "writing empty payload (token=%s)", token,
+                    )
+                    payload_json = "{}"
         try:
             table.upsert_entity({
                 "PartitionKey": "info",
@@ -211,6 +246,8 @@ def _make_info_token(
                 "parent_id": parent_id,
                 "parent_author_username": parent_author_username,
                 "bot_handle": bot_handle,
+                "mention_id": mention_id,
+                "participant_id": participant_id,
                 "created_at": datetime.now(timezone.utc),
             })
         except Exception:
@@ -265,6 +302,8 @@ def _get_info_params(token: str) -> dict | None:
             "parent_author_username": entity.get("parent_author_username", ""),
             "bot_handle": entity.get("bot_handle", ""),
             "reply_id": entity.get("reply_id", ""),
+            "mention_id": entity.get("mention_id", ""),
+            "participant_id": entity.get("participant_id", ""),
             "_ts": time.monotonic(),
         }
         with _INFO_STORE_LOCK:
@@ -371,6 +410,27 @@ def _is_self_reply(tweet: dict) -> tuple[bool, str]:
     return False, "self_reply"
 
 
+def _is_bot_thread_continuation(parent_author_id: str | None, parent_text: str) -> bool:
+    """True when the post we'd fact-check is itself part of an existing bot
+    thread, so this mention is a continuation rather than a fresh invocation
+    on a third-party post.
+
+    Two cases, both arising because X auto-prepends @-mentions of thread
+    participants — so a reply inside a bot thread silently mentions the bot
+    and arrives as a "mention" we'd otherwise act on:
+      • parent authored by the bot — someone replied to the bot's own tweet;
+      • parent text mentions the bot — someone replied to an invocation (which
+        itself tags the bot) before we posted our reply.
+    A genuine invocation replies to a third-party post that neither is the
+    bot's nor mentions it, so this stays False for real invocations.
+    """
+    if BOT_USER_ID and parent_author_id == BOT_USER_ID:
+        return True
+    if f"@{BOT_HANDLE}".lower() in (parent_text or "").lower():
+        return True
+    return False
+
+
 # Startup warning for missing BOT_USER_ID — surfaces misconfiguration
 # before the first mention silently fails closed.
 if not BOT_USER_ID:
@@ -426,14 +486,6 @@ def _build_info_url(tone: str, tweet_ids, note_ids, reply_id: str = "") -> str:
         note_id=note_ids,
         _external=True,
     )
-
-
-def _append_url(text: str, url: str, limit: int = TWEET_LIMIT) -> str:
-    """Append url on its own line, truncating text with ellipsis if needed to stay within limit."""
-    budget = limit - X_TCO_LEN - 1  # -1 for the newline
-    if x_weighted_length(text) > budget:
-        text = text[:budget - 1] + "…"
-    return f"{text}\n{url}"
 
 
 def _clean_invoker_text(text: str, bot_handle: str) -> str:
@@ -555,6 +607,20 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         ev.parent_retweet_count = snap.retweet_count
         ev.parent_reply_count = snap.reply_count
         ev.parent_quote_count = snap.quote_count
+
+        # Don't act on continuations of an existing bot thread. If the post we'd
+        # fact-check is the bot's own tweet (a reply TO the bot) or itself
+        # mentions the bot (a reply to an invocation, auto-tagged into the
+        # thread), this is not a fresh invocation — replying would target the
+        # replier / the reply instead of the original invocation.
+        if _is_bot_thread_continuation(snap.author_id, snap.text):
+            logger.info(
+                "Skipping mention %s — parent %s is a bot-thread continuation, not a fresh invocation",
+                mention_id, parent_id,
+            )
+            _finalize("bot_thread_continuation")
+            return
+
         statement = snap.text
         if DRY_RUN:
             logger.info("DRY_RUN: parent_text=%r", statement)
@@ -631,21 +697,24 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             parent_id=parent_id,
             parent_author_username=ev.parent_author_username or "",
             bot_handle=BOT_HANDLE,
+            mention_id=mention_id,
+            participant_id=author_id,
         )
+        # Forward-join key to InfoTokens — captured before _finalize writes the row.
+        ev.info_token = token
 
         with app.app_context():
             info_url = url_for("info_short", token=token, _external=True)
-        reply_text = _append_url(reply["text"], info_url)
+        reply_text = reply["text"]
         ev.reply_text = reply_text
+        link_reply_text = f"Sources & reasoning: {info_url}"
 
         if DRY_RUN:
-            logger.info("DRY_RUN reply (tone=%s): %s", tone, reply_text)
-        else:
-            logger.info("Posting reply (tone=%s): (text suppressed)", tone)
-
-        if DRY_RUN:
+            logger.info("DRY_RUN reply (tone=%s): %s\n[link reply] %s", tone, reply_text, link_reply_text)
             _finalize("dry_run")
             return
+
+        logger.info("Posting reply (tone=%s): (text suppressed)", tone)
 
         reply_id = post_reply(parent_id=mention_id, reply_text=reply_text)
         if reply_id is None:
@@ -655,6 +724,25 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         _update_info_token(token, reply_id=reply_id)
         ev.reply_posted_utc = events.utcnow()
 
+        # Post the info link as a separate self-reply so the main fact-check
+        # reply carries no URL — links suppress reach on X. Best-effort: one
+        # quick retry on transient failure, then we give up and surface the
+        # gap via the 'replied_no_link' outcome so analytics can see it.
+        link_reply_id = post_reply(parent_id=reply_id, reply_text=link_reply_text)
+        if link_reply_id is None:
+            logger.warning(
+                "Link self-reply failed for mention %s (main reply %s already posted); retrying once",
+                mention_id, reply_id,
+            )
+            time.sleep(1.0)
+            link_reply_id = post_reply(parent_id=reply_id, reply_text=link_reply_text)
+            if link_reply_id is None:
+                logger.warning(
+                    "Link self-reply retry also failed for mention %s; recording replied_no_link",
+                    mention_id,
+                )
+        ev.link_reply_id = link_reply_id
+
         ev.study_code = _make_study_code(reply_id)
         participant = _lookup_participant(author_id)
         if participant:
@@ -663,7 +751,7 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
                 received_at_utc.date() - participant.enrolled_at_utc.date()
             ).days + 1)
 
-        _finalize("replied")
+        _finalize("replied" if link_reply_id is not None else "replied_no_link")
 
     except Exception as exc:
         logger.exception("Pipeline failed for mention %s (tone=%s)", mention_id, tone)
@@ -768,12 +856,45 @@ def info():
     return render_template("info.html", reply=reply_html, notes=""), 200
 
 
+# User-agent substrings that mark link-card crawlers / chat-app unfurlers.
+# The dossier link lives in a tweet, so these hit /i/<token> automatically;
+# flagging them lets analysis exclude phantom hits from real click-throughs.
+_BOT_UA_MARKERS = (
+    "bot", "crawler", "spider", "preview", "fetch", "scrap",
+    "whatsapp", "facebookexternalhit", "embedly", "yandex", "pinterest",
+    "vkshare", "headlesschrome", "python-requests", "curl", "wget",
+    "go-http-client", "okhttp", "axios", "node-fetch",
+)
+
+
+def _is_bot_ua(user_agent: str) -> bool:
+    ua = (user_agent or "").lower()
+    if not ua:
+        return True  # no UA header at all → almost certainly automated
+    return any(marker in ua for marker in _BOT_UA_MARKERS)
+
+
 @app.route("/i/<token>", methods=["GET"])
 def info_short(token: str):
     params = _get_info_params(token)
     if params is None:
         return render_template("info.html"), 404
     tone = params.get("tone", "")
+
+    ua = request.headers.get("User-Agent", "")
+    log_info_view(InfoView(
+        token=token,
+        viewed_at_utc=events.utcnow(),
+        reply_id=params.get("reply_id") or "",
+        parent_id=params.get("parent_id") or "",
+        mention_id=params.get("mention_id") or "",
+        participant_id=params.get("participant_id") or "",
+        tone=tone,
+        user_agent=ua,
+        referrer=request.headers.get("Referer", ""),
+        is_bot=_is_bot_ua(ua),
+    ))
+
     return render_template(
         "info.html",
         info=params.get("info_payload") or {},
@@ -784,6 +905,11 @@ def info_short(token: str):
         parent_author_username=params.get("parent_author_username", ""),
         reply_tweet_id=params.get("reply_id", ""),
     ), 200
+
+
+@app.route("/about", methods=["GET"])
+def about():
+    return render_template("about.html", bot_handle=BOT_HANDLE), 200
 
 
 @app.route("/healthz", methods=["GET"])
@@ -812,7 +938,7 @@ def api_activity():
     for ev in recent_events:
         outcome = ev.get("outcome") or "unknown"
         outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
-        tone = ev.get("tone") or ""
+        tone = _participants.canonical_tone(ev.get("tone") or "")
         if tone in tone_counts:
             tone_counts[tone] += 1
         action = ev.get("action") or ""
@@ -893,6 +1019,267 @@ def api_replies():
             "parent_text": e.get("parent_text"),
         })
     return jsonify({"replies": out}), 200
+
+
+def _parse_iso(ts):
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts)
+    except (ValueError, TypeError):
+        return None
+
+
+def _bot_tweet_url(reply_id: str) -> str:
+    if not reply_id:
+        return ""
+    if BOT_HANDLE:
+        return f"https://twitter.com/{BOT_HANDLE}/status/{reply_id}"
+    return f"https://twitter.com/i/web/status/{reply_id}"
+
+
+@app.route("/api/engagement", methods=["GET"])
+def api_engagement():
+    """Downstream measurement data from the cron, for live monitoring.
+
+    Each bot reply is polled every ~12 h for 10 days, so EngagementSnapshots
+    holds a cumulative series (≈20 rows/reply). We collapse to the latest
+    snapshot per reply for the table and totals, and build a 14-day daily
+    cumulative time series for the growth chart. Bystander reply text
+    (BotReplyReplies) is returned as-is.
+
+    Tweet URLs are built server-side: bot replies post from BOT_HANDLE
+    (single-app bot); bystander replies link via the bystander's own username.
+    """
+    store = events.get_store()
+    # Full history — low volume (≤ ~20 rows per reply) so a generous cap is safe.
+    snaps = store.list_recent_engagements(50000)
+    replies = store.list_recent_reply_replies(2000)
+    info_views = store.list_recent_info_views(50000)
+
+    # ── Click aggregation (dossier /i/ link views) ─────────────────────────
+    # Clicks land the moment a reply posts, but engagement snapshots only start
+    # after the 3-day poll delay — so a reply can have clicks with no snapshot.
+    # We count clicks independently and reconcile with by_reply below.
+    # `is_bot` rows (X card crawler, chat unfurlers) are counted separately so
+    # the table can show real (human) click-throughs.
+    clicks_all: dict[str, int] = defaultdict(int)
+    clicks_human: dict[str, int] = defaultdict(int)
+    view_tone: dict[str, str] = {}
+    view_mention: dict[str, str] = {}
+    view_last: dict[str, str] = {}  # latest view ts per reply, for sorting click-only rows
+    tone_clicks_all: dict[str, int] = defaultdict(int)
+    tone_clicks_human: dict[str, int] = defaultdict(int)
+    for v in info_views:
+        rid = v.get("reply_id")
+        is_bot = bool(v.get("is_bot"))
+        ct = _participants.canonical_tone(v.get("tone") or "unknown")
+        tone_clicks_all[ct] += 1
+        if not is_bot:
+            tone_clicks_human[ct] += 1
+        if not rid:
+            continue
+        clicks_all[rid] += 1
+        if not is_bot:
+            clicks_human[rid] += 1
+        view_tone.setdefault(rid, v.get("tone"))
+        if v.get("mention_id"):
+            view_mention.setdefault(rid, v.get("mention_id"))
+        ts = v.get("viewed_at_utc") or ""
+        # Parse before compare: backends mix `Z` vs `+00:00` suffixes so lex order ≠ chron order.
+        if parse_iso_utc(ts) > parse_iso_utc(view_last.get(rid, "")):
+            view_last[rid] = ts
+
+    for r in replies:
+        tid = r.get("reply_tweet_id")
+        uname = r.get("author_username")
+        if tid and uname:
+            r["reply_url"] = f"https://twitter.com/{uname}/status/{tid}"
+        elif tid:
+            r["reply_url"] = f"https://twitter.com/i/web/status/{tid}"
+        else:
+            r["reply_url"] = ""
+
+    # ── Group snapshots per reply (sorted oldest→newest) ───────────────────
+    per_reply: dict[str, list[tuple[datetime, dict]]] = {}
+    for s in snaps:
+        rid = s.get("reply_id")
+        ts = _parse_iso(s.get("polled_at_utc"))
+        if not rid or ts is None:
+            continue
+        per_reply.setdefault(rid, []).append((ts, s))
+    for lst in per_reply.values():
+        lst.sort(key=lambda t: t[0])
+
+    # ── Collapse to the latest cumulative snapshot per reply ───────────────
+    # `series` holds each metric's per-poll trajectory (oldest→newest) for
+    # the in-cell sparklines; ≤ ~20 points per reply.
+    def _ints(lst, key):
+        return [int(s.get(key) or 0) for _, s in lst]
+
+    by_reply = []
+    for rid, lst in per_reply.items():
+        latest = lst[-1][1]
+        by_reply.append({
+            "reply_id": rid,
+            "reply_url": _bot_tweet_url(rid),
+            "tone": latest.get("tone"),
+            "like_count": int(latest.get("like_count") or 0),
+            "retweet_count": int(latest.get("retweet_count") or 0),
+            "reply_count": int(latest.get("reply_count") or 0),
+            # genuine (non-bot) replies — excludes the bot's link self-reply.
+            # Falls back to raw reply_count for snapshots predating the backfill.
+            "adjusted_reply_count": int(
+                (latest.get("adjusted_reply_count")
+                 if latest.get("adjusted_reply_count") is not None
+                 else latest.get("reply_count")) or 0
+            ),
+            "quote_count": int(latest.get("quote_count") or 0),
+            "click_count": clicks_all.get(rid, 0),
+            "human_click_count": clicks_human.get(rid, 0),
+            "poll_count": len(lst),
+            "last_polled_utc": latest.get("polled_at_utc"),
+            "mention_id": latest.get("mention_id"),
+            "series": {
+                "likes": _ints(lst, "like_count"),
+                "retweets": _ints(lst, "retweet_count"),
+                "replies": _ints(lst, "reply_count"),
+                "quotes": _ints(lst, "quote_count"),
+            },
+        })
+
+    # Replies clicked before their first engagement poll have no snapshot yet —
+    # surface them so early click-throughs aren't hidden from the table.
+    for rid in clicks_all:
+        if rid in per_reply:
+            continue
+        by_reply.append({
+            "reply_id": rid,
+            "reply_url": _bot_tweet_url(rid),
+            "tone": view_tone.get(rid),
+            "like_count": 0, "retweet_count": 0, "reply_count": 0,
+            "adjusted_reply_count": 0, "quote_count": 0,
+            "click_count": clicks_all[rid],
+            "human_click_count": clicks_human.get(rid, 0),
+            "poll_count": 0,
+            "last_polled_utc": None,
+            "mention_id": view_mention.get(rid),
+            "series": {"likes": [], "retweets": [], "replies": [], "quotes": []},
+        })
+
+    by_reply.sort(
+        key=lambda r: parse_iso_utc(r.get("last_polled_utc") or view_last.get(r["reply_id"], "")),
+        reverse=True,
+    )
+
+    totals = {
+        "reply_count": len(by_reply),
+        "snapshot_count": len(snaps),
+        "total_likes": sum(r["like_count"] for r in by_reply),
+        "total_retweets": sum(r["retweet_count"] for r in by_reply),
+        "total_replies": sum(r["reply_count"] for r in by_reply),
+        "total_adjusted_replies": sum(r["adjusted_reply_count"] for r in by_reply),
+        "total_quotes": sum(r["quote_count"] for r in by_reply),
+        "total_clicks": sum(clicks_all.values()),
+        "total_human_clicks": sum(clicks_human.values()),
+        "bystander_count": len(replies),
+    }
+
+    # ── Daily cumulative aggregation (14-day window) ───────────────────────
+    # At each day's end, take each reply's latest snapshot at-or-before that
+    # time (carried forward after polling stops) and sum across a reply set.
+    today = datetime.now(timezone.utc).date()
+    days = [today - timedelta(days=i) for i in range(13, -1, -1)]
+    bucket_ends = [
+        datetime(d.year, d.month, d.day, tzinfo=timezone.utc) + timedelta(days=1)
+        for d in days
+    ]
+
+    def _latest_before(lst, bucket_end):
+        latest = None
+        for ts, s in lst:
+            if ts < bucket_end:
+                latest = s
+            else:
+                break
+        return latest
+
+    def _series_for(reply_ids):
+        """Per-bucket cumulative totals + active-reply count, summed over reply_ids."""
+        out = {"likes": [], "retweets": [], "replies": [], "quotes": [], "active": []}
+        for be in bucket_ends:
+            lk = rt = rp = qt = active = 0
+            for rid in reply_ids:
+                latest = _latest_before(per_reply[rid], be)
+                if latest is not None:
+                    active += 1
+                    lk += int(latest.get("like_count") or 0)
+                    rt += int(latest.get("retweet_count") or 0)
+                    rp += int(latest.get("reply_count") or 0)
+                    qt += int(latest.get("quote_count") or 0)
+            out["likes"].append(lk); out["retweets"].append(rt)
+            out["replies"].append(rp); out["quotes"].append(qt); out["active"].append(active)
+        return out
+
+    def _avg_series(totals_list, counts):
+        return [round(v / c, 1) if c else 0 for v, c in zip(totals_list, counts)]
+
+    overall = _series_for(list(per_reply.keys()))
+    timeseries = {
+        "labels": [d.strftime("%m-%d") for d in days],
+        "likes": overall["likes"], "retweets": overall["retweets"],
+        "replies": overall["replies"], "quotes": overall["quotes"],
+    }
+
+    # ── Per-condition (tone) breakdown ─────────────────────────────────────
+    # Group by condition; legacy "agonistic" rows fold into the "satirical" label.
+    reply_tone = {
+        rid: _participants.canonical_tone(lst[-1][1].get("tone") or "unknown")
+        for rid, lst in per_reply.items()
+    }
+    # Clicks may exist for a condition with no engagement snapshots yet, so the
+    # tone set unions both sources; engagement averages stay over snapshot
+    # replies (clean denominator), click figures are totals across all views.
+    tones = sorted(set(reply_tone.values()) | set(tone_clicks_all.keys()))
+    by_tone = []
+    for tone in tones:
+        rids = [rid for rid, t in reply_tone.items() if t == tone]
+        n = len(rids)
+        tl = tr = trp = tq = 0
+        for rid in rids:
+            latest = per_reply[rid][-1][1]
+            tl += int(latest.get("like_count") or 0)
+            tr += int(latest.get("retweet_count") or 0)
+            trp += int(latest.get("reply_count") or 0)
+            tq += int(latest.get("quote_count") or 0)
+        ser = _series_for(rids)
+        by_tone.append({
+            "tone": tone,
+            "reply_count": n,
+            "total_likes": tl, "total_retweets": tr, "total_replies": trp, "total_quotes": tq,
+            "total_clicks": tone_clicks_all.get(tone, 0),
+            "total_human_clicks": tone_clicks_human.get(tone, 0),
+            "avg_likes": round(tl / n, 1) if n else 0,
+            "avg_retweets": round(tr / n, 1) if n else 0,
+            "avg_replies": round(trp / n, 1) if n else 0,
+            "avg_quotes": round(tq / n, 1) if n else 0,
+            "avg_series": {
+                "likes": _avg_series(ser["likes"], ser["active"]),
+                "retweets": _avg_series(ser["retweets"], ser["active"]),
+                "replies": _avg_series(ser["replies"], ser["active"]),
+                "quotes": _avg_series(ser["quotes"], ser["active"]),
+            },
+        })
+    # Conditions with data first, then the empty canonical ones; tone name within.
+    by_tone.sort(key=lambda t: (t["reply_count"] == 0, t["tone"]))
+
+    return jsonify({
+        "by_reply": by_reply,
+        "by_tone": by_tone,
+        "totals": totals,
+        "timeseries": timeseries,
+        "replies": replies,
+    }), 200
 
 
 def _serialize_participant(p: _participants.Participant) -> dict:

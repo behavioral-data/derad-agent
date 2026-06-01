@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agent.shared.text import URL_RE
+from agent.shared.text import URL_RE, canonicalize_url
 
 from .schema import (
     Action,
@@ -54,7 +54,7 @@ def _collect_action_urls(
         urls.extend(s.url for s in cp.citing_sources)
     for p in payload.perspectives:
         urls.extend(s.url for s in p.citing_sources)
-    return urls
+    return [canonicalize_url(u) for u in urls]
 
 
 def _central_bucket_check(
@@ -124,12 +124,24 @@ def audit(
     # that a pure structural-rule recompute would miss.
 
     # 2. Every URL the renderer can surface must be in source_quality_table.
-    known_urls = {entry.url for entry in source_quality_table}
-    # tone_neutral_justification + load_bearing_evidence_snippet — free-form
-    # text from reconcile that the renderer is allowed to quote.
-    for field in (tone_neutral_justification, presentation_payload.load_bearing_evidence_snippet):
+    known_urls = {canonicalize_url(entry.url) for entry in source_quality_table}
+    # Free-form text fields the renderer can quote — any URL the LLM
+    # fabricated into these must still resolve to source_quality_table.
+    free_text_fields: list[str] = [
+        tone_neutral_justification,
+        presentation_payload.headline_finding,
+        presentation_payload.load_bearing_evidence_snippet,
+        presentation_payload.counter_fact,
+        presentation_payload.context_note,
+    ]
+    for cp in presentation_payload.counterpoints:
+        free_text_fields.append(cp.summary)
+    for p in presentation_payload.perspectives:
+        free_text_fields.append(p.summary)
+        free_text_fields.append(p.label)
+    for field in free_text_fields:
         for url in URL_RE.findall(field or ""):
-            if url not in known_urls:
+            if canonicalize_url(url) not in known_urls:
                 failures.append(f"Text cites URL not in source_quality_table: {url}")
 
     # Structured URLs across the action-specific payload fields.

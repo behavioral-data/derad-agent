@@ -26,10 +26,12 @@ SourceTier = Literal[
     "satirical",
     "unknown",
 ]
-TierSource = Literal["ifcn", "wikipedia-rsp", "mbfc", "model-prior", "meta-search"]
+TierSource = Literal[
+    "ifcn", "wikipedia-rsp", "mbfc", "editorial-curated", "model-prior", "meta-search"
+]
 Verdict = Literal["Supported", "Refuted", "NotEnoughEvidence", "Conflicting"]
 OverallState = Literal["checked", "no_checkable_claim"]
-Tone = Literal["agreeable", "neutral", "agonistic"]
+Tone = Literal["agreeable", "neutral", "satirical"]
 
 # What the bot is being asked (or has decided) to do for one mention.
 # The action drives Stage 4 search strategy, Stage 4.5 reconcile prompt,
@@ -132,7 +134,6 @@ class Claim(_Frozen):
     text: str
     type: ClaimType
     modality: Modality = "text"
-    check_worthy: bool = True
     is_central: bool = False
     evidence: tuple[Evidence, ...] = Field(default_factory=tuple)
 
@@ -217,7 +218,7 @@ class UnaddressedProposition(_Frozen):
 class Counterpoint(_Frozen):
     """One distinct counter-argument against a strongly-stated opinion,
     grounded in sources from source_quality_table."""
-    summary: str                                            # ≤160 chars; one-sentence counter
+    summary: str                                            # 2–4 sentences; argument + empirical basis
     citing_sources: tuple[TierRef, ...]                     # at least one URL in source_quality_table
     weight: Literal["strong", "moderate", "weak"] = "moderate"
 
@@ -235,7 +236,7 @@ class ContextualFinding(_Frozen):
     against the public record, but the framing leaves out something
     material that changes how a reader should interpret it."""
     topic: str                                              # the claim's surface statement
-    missing_context: str                                    # ≤220 chars; the framing the claim hides
+    missing_context: str                                    # 3–6 sentences; what the framing hides and why it matters
     citing_sources: tuple[TierRef, ...]
     is_central: bool
 
@@ -243,8 +244,8 @@ class ContextualFinding(_Frozen):
 class Perspective(_Frozen):
     """Used when action == surface_perspectives. One distinct credible
     viewpoint on a contested topic."""
-    label: str                                              # ≤60 chars; e.g. "Economic-cost view"
-    summary: str                                            # ≤200 chars; the view in its own terms
+    label: str                                              # short shorthand; e.g. "Economic-cost view"
+    summary: str                                            # 2–4 sentences; the view, its evidence, and the values underlying it
     citing_sources: tuple[TierRef, ...]                     # at least one credible source
 
 

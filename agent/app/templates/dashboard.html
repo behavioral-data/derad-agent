@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>DeRad Agent — Live Dashboard</title>
+  <title>Agonistic Agent — Live Dashboard</title>
   <link rel="stylesheet" href="/static/dash/html-design-system.css">
   <style>
     /* ── Sidebar flex so theme toggle sticks to bottom ── */
@@ -53,9 +53,9 @@
     .oc-x_post_error { border-color: #e85040; color: #e85040; }
     .oc-empty_reply  { border-color: #e8a040; color: #e8a040; }
 
-    .tone-agonistic { color: #e85040; }
     .tone-agreeable { color: #6fe080; }
     .tone-neutral   { color: #4fc1ff; }
+    .tone-satirical { color: #c586f0; }
     .drop-reason    { font-size: 10px; font-family: var(--mono); color: #e8a040; }
 
     /* ── Sidebar info rows ── */
@@ -158,8 +158,58 @@
     }
     .bot-chip.tone-agreeable { color: #6fe080; border-color: #6fe080; }
     .bot-chip.tone-neutral   { color: #4fc1ff; border-color: #4fc1ff; }
-    .bot-chip.tone-agonistic { color: #e85040; border-color: #e85040; }
+    .bot-chip.tone-satirical { color: #c586f0; border-color: #c586f0; }
     .bot-chip.tone-unknown   { color: var(--gray-500); border-color: var(--gray-500); }
+
+    /* ── Copy button ── */
+    .copy-btn {
+      font-size: 10px; font-family: var(--mono); cursor: pointer;
+      background: transparent; border: 1px solid #333;
+      color: var(--gray-500); padding: 1px 6px; margin-left: 8px;
+      vertical-align: middle;
+    }
+    .copy-btn:hover { border-color: var(--clay); color: var(--clay); }
+    .copy-btn.copied { border-color: #6fe080; color: #6fe080; }
+
+    /* ── Sortable headers ── */
+    th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+    th.sortable:hover { color: var(--clay); }
+    th.sortable .sort-arrow { margin-left: 4px; opacity: 0.35; font-size: 10px; }
+    th.sortable.sort-asc  .sort-arrow,
+    th.sortable.sort-desc .sort-arrow { opacity: 1; color: var(--clay); }
+
+    /* ── Table toolbar (search / filter / export controls above a table) ── */
+    .tbl-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .tbl-toolbar .spacer { flex: 1 1 auto; }
+    .tbl-input {
+      background: transparent; border: 1px solid #333; color: var(--gray-700);
+      font-family: var(--mono); font-size: 12px; padding: 6px 10px; outline: none;
+    }
+    .tbl-input:focus { border-color: var(--clay); }
+    .tbl-input[type="date"] { color-scheme: dark; }
+    .tbl-btn {
+      font-size: 11px; font-family: var(--mono); cursor: pointer;
+      background: transparent; border: 1px solid #333; color: var(--gray-500);
+      padding: 6px 12px; letter-spacing: 0.03em;
+    }
+    .tbl-btn:hover { border-color: var(--clay); color: var(--clay); }
+    .tbl-btn.export { border-color: var(--clay); color: var(--clay); }
+    .tbl-btn.export:hover { background: var(--clay); color: #000; }
+    .tbl-btn:disabled { opacity: 0.4; cursor: default; }
+    .tbl-btn:disabled:hover { border-color: #333; color: var(--gray-500); }
+    .tbl-note { font-size: 10px; font-family: var(--mono); color: var(--gray-500); }
+    /* ── Pager (controls below a table) ── */
+    .tbl-pager { margin-top: 12px; margin-bottom: 0; }
+    .tbl-pager select.tbl-input { padding: 5px 8px; }
+
+    /* ── Inline chart legend ── */
+    .chart-legend { display: flex; gap: 16px; align-items: center; }
+    .chart-legend .lg { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--gray-500); }
+    .chart-legend .lg i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+    /* ── Metric cell: sparkline + current value ── */
+    .metric-cell { display: flex; align-items: center; gap: 8px; }
+    .metric-cell .metric-val { font-family: var(--mono); font-variant-numeric: tabular-nums; min-width: 2ch; text-align: right; }
   </style>
 </head>
 <body>
@@ -168,7 +218,7 @@
   <!-- ── Sidebar ──────────────────────────────────────────────────── -->
   <aside class="sidebar">
     <div class="sidebar-logo">
-      <div class="logo-name">DeRad Agent</div>
+      <div class="logo-name">Agonistic Agent</div>
       <div class="logo-sub">Live Dashboard</div>
     </div>
 
@@ -178,6 +228,7 @@
       <a href="#events">Events</a>
       <a href="#drops">Drops</a>
       <a href="#bot-replies">Bot Replies</a>
+      <a href="#engagement">Engagement</a>
       <a href="#participants">Participants</a>
       <a href="#logs">Live Logs</a>
     </nav>
@@ -257,6 +308,7 @@
           </tbody>
         </table>
       </div>
+      <div class="tbl-toolbar tbl-pager" id="events-pager"></div>
     </section>
 
     <!-- 03 · Drops -->
@@ -282,6 +334,7 @@
           </tbody>
         </table>
       </div>
+      <div class="tbl-toolbar tbl-pager" id="drops-pager"></div>
     </section>
 
     <!-- 04 · Bot Replies -->
@@ -291,16 +344,27 @@
         <h2>Bot Replies by User · by Day</h2>
         <p>Every successful bot reply, grouped by UTC date, newest first. Each row links to the live tweet on X. Showing up to 200 most recent.</p>
       </div>
+      <div class="tbl-toolbar">
+        <input type="text" id="bot-search" class="tbl-input" placeholder="Search username…"
+          style="width:200px;" oninput="onBotSearch(this.value)">
+        <input type="date" id="bot-date" class="tbl-input"
+          title="Show replies from one UTC day" oninput="onBotDate(this.value)">
+        <button class="tbl-btn" id="bot-date-clear" onclick="clearBotDate()">Clear date</button>
+        <span class="spacer"></span>
+        <span class="tbl-note" id="bot-count">—</span>
+        <button class="tbl-btn export" onclick="exportBotReplies()">Export CSV</button>
+      </div>
+      <div class="tbl-note" style="margin:-4px 0 12px;">Date filter applies within the most recent 200 replies.</div>
       <div class="table-wrap">
         <table class="data-table" id="bot-replies-table">
           <thead>
             <tr>
-              <th>Time (UTC)</th>
-              <th>User</th>
-              <th>Bot</th>
-              <th>Study Day</th>
-              <th>Code</th>
-              <th>Reply text</th>
+              <th class="sortable" data-col="time">Time (UTC)<span class="sort-arrow">↕</span></th>
+              <th class="sortable" data-col="user">User<span class="sort-arrow">↕</span></th>
+              <th class="sortable" data-col="bot">Bot<span class="sort-arrow">↕</span></th>
+              <th class="sortable" data-col="day">Study Day<span class="sort-arrow">↕</span></th>
+              <th class="sortable" data-col="code">Code<span class="sort-arrow">↕</span></th>
+              <th class="sortable" data-col="text">Reply text<span class="sort-arrow">↕</span></th>
               <th>Link</th>
             </tr>
           </thead>
@@ -309,12 +373,124 @@
           </tbody>
         </table>
       </div>
+      <div class="tbl-toolbar tbl-pager" id="bot-pager"></div>
     </section>
 
-    <!-- 05 · Participants -->
+    <!-- 05 · Engagement -->
+    <section id="engagement" style="margin-top:48px;">
+      <div class="section-head">
+        <p class="eyebrow">05 · Engagement</p>
+        <h2>Engagement &amp; Bystander Replies <span id="eng-refresh" class="refresh-note"></span></h2>
+        <p>Downstream measurement from the twice-daily cron. Each bot reply is polled every ~12 h for 10 days (≈20 snapshots), giving a cumulative engagement series; bystander replies are collected at the 3-day mark. Totals below are the latest cumulative value per reply.</p>
+      </div>
+
+      <div class="stat-row" id="eng-stat-row">
+        <div class="stat"><div class="num" id="eng-snaps">—</div><div class="label">Replies tracked</div></div>
+        <div class="stat"><div class="num" id="eng-likes">—</div><div class="label">Total likes</div></div>
+        <div class="stat"><div class="num" id="eng-rts">—</div><div class="label">Total reposts</div></div>
+        <div class="stat"><div class="num" id="eng-replies">—</div><div class="label">Total replies</div></div>
+        <div class="stat"><div class="num" id="eng-quotes">—</div><div class="label">Total quotes</div></div>
+        <div class="stat"><div class="num" id="eng-clicks">—</div><div class="label">Link clicks (human)</div></div>
+        <div class="stat"><div class="num" id="eng-byst">—</div><div class="label">Bystander replies</div></div>
+      </div>
+
+      <div class="panel" style="margin-top:24px;">
+        <div class="panel-head">
+          <span class="meta">Cumulative engagement · last 14 days</span>
+          <span class="spacer"></span>
+          <span class="chart-legend">
+            <span class="lg"><i style="background:var(--clay)"></i>Likes</span>
+            <span class="lg"><i style="background:var(--olive)"></i>Reposts</span>
+            <span class="lg"><i style="background:var(--sky)"></i>Replies</span>
+            <span class="lg"><i style="background:var(--rust)"></i>Quotes</span>
+          </span>
+        </div>
+        <div id="eng-chart" style="margin-top:12px;min-height:180px;"></div>
+      </div>
+
+      <div class="tbl-toolbar" style="margin-top:32px;">
+        <span class="meta">By Condition · avg per reply (sparkline = 14-day trend)</span>
+        <span class="spacer"></span>
+        <span class="tbl-note" id="cond-count">—</span>
+        <button class="tbl-btn export" onclick="exportByCondition()">Export CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="bycond-table">
+          <thead>
+            <tr>
+              <th>Condition</th>
+              <th>Replies</th>
+              <th>Avg likes</th>
+              <th>Avg reposts</th>
+              <th>Avg replies</th>
+              <th>Avg quotes</th>
+              <th>Clicks</th>
+            </tr>
+          </thead>
+          <tbody id="bycond-tbody">
+            <tr><td colspan="7" style="color:var(--gray-500);">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="tbl-toolbar" style="margin-top:32px;">
+        <span class="meta">Engagement by Reply</span>
+        <span class="spacer"></span>
+        <span class="tbl-note" id="byreply-count">—</span>
+        <button class="tbl-btn export" onclick="exportByReply()">Export CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="byreply-table">
+          <thead>
+            <tr>
+              <th>Bot reply</th>
+              <th>Tone</th>
+              <th>Likes</th>
+              <th>Reposts</th>
+              <th>Replies</th>
+              <th>Quotes</th>
+              <th>Clicks</th>
+              <th>Polls</th>
+              <th>Last polled (UTC)</th>
+            </tr>
+          </thead>
+          <tbody id="byreply-tbody">
+            <tr><td colspan="9" style="color:var(--gray-500);">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="tbl-toolbar tbl-pager" id="byreply-pager"></div>
+
+      <div class="tbl-toolbar" style="margin-top:32px;">
+        <span class="meta">Bystander Replies</span>
+        <span class="spacer"></span>
+        <span class="tbl-note" id="byst-count">—</span>
+        <button class="tbl-btn export" onclick="exportBystander()">Export CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="bystander-table">
+          <thead>
+            <tr>
+              <th>Collected (UTC)</th>
+              <th>From user</th>
+              <th>Tone</th>
+              <th>Likes</th>
+              <th>Reply text</th>
+              <th>Link</th>
+            </tr>
+          </thead>
+          <tbody id="bystander-tbody">
+            <tr><td colspan="6" style="color:var(--gray-500);">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="tbl-toolbar tbl-pager" id="bystander-pager"></div>
+    </section>
+
+    <!-- 06 · Participants -->
     <section id="participants" style="margin-top:48px;">
       <div class="section-head">
-        <p class="eyebrow">05 · Participants</p>
+        <p class="eyebrow">06 · Participants</p>
         <h2>Add Participant</h2>
         <p>Enter an X handle (with or without <code class="inline-code">@</code>). The X user ID is looked up automatically. Pick a tone, or use <em>Balanced</em> to assign the least-used condition for cohort balance.</p>
       </div>
@@ -325,13 +501,18 @@
           <option value="random" selected>Balanced (random)</option>
           <option value="agreeable">Agreeable</option>
           <option value="neutral">Neutral</option>
-          <option value="agonistic">Agonistic</option>
+          <option value="satirical">Satirical</option>
         </select>
         <input type="text" id="ap-notes" name="notes" placeholder="notes (optional)">
         <button type="submit" id="ap-submit">Add</button>
       </form>
       <div class="add-part-msg info" id="ap-msg">Ready.</div>
 
+      <div class="tbl-toolbar">
+        <span class="tbl-note" id="part-count">—</span>
+        <span class="spacer"></span>
+        <button class="tbl-btn export" onclick="exportParticipants()">Export CSV</button>
+      </div>
       <div class="table-wrap">
         <table class="data-table" id="participants-table">
           <thead>
@@ -348,12 +529,13 @@
           </tbody>
         </table>
       </div>
+      <div class="tbl-toolbar tbl-pager" id="part-pager"></div>
     </section>
 
     <!-- 05 · Logs -->
     <section id="logs" style="margin-top:48px;">
       <div class="section-head">
-        <p class="eyebrow">06 · Logs</p>
+        <p class="eyebrow">07 · Logs</p>
         <h2>Live Log Stream</h2>
         <p>Real-time tail of the application log. Color:
           <span style="color:#4fc1ff;">mention accepted</span> ·
@@ -397,6 +579,105 @@
   function toneSpan(tone) {
     return `<span class="tone-${tone || ''}">${tone || '—'}</span>`;
   }
+
+  // ── CSV export ───────────────────────────────────────────────────────────
+  // cols: [{ label, get(row) }]. Quotes fields containing comma/quote/newline.
+  function toCSV(cols, rows) {
+    const cell = v => {
+      const s = v == null ? '' : String(v);
+      return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const lines = [cols.map(c => cell(c.label)).join(',')];
+    for (const r of rows) lines.push(cols.map(c => cell(c.get(r))).join(','));
+    return lines.join('\r\n');
+  }
+
+  function downloadCSV(filename, csv) {
+    // Prepend BOM so Excel reads UTF-8 correctly.
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  // ── Pagination ───────────────────────────────────────────────────────────
+  const PAGERS = {};
+  const PAGE_SIZES = [10, 25, 50, 100];
+
+  // Renders prev/next + page indicator + size selector into `#<key>-pager`.
+  // `size` is passed in (not read from the pager) so bot-replies can share it.
+  function drawPagerControls(key, page, pages, total, start, shown, size, unit) {
+    const el = document.getElementById(key + '-pager');
+    if (!el) return;
+    if (total <= 0) { el.innerHTML = ''; return; }
+    const from = start + 1, to = start + shown;
+    el.innerHTML =
+      `<span class="tbl-note">${from}–${to} of ${total}${unit ? ' ' + unit : ''}</span>` +
+      `<span class="spacer"></span>` +
+      `<button class="tbl-btn" ${page <= 0 ? 'disabled' : ''} onclick="PAGERS['${key}'].prev()">‹ Prev</button>` +
+      `<span class="tbl-note">Page ${page + 1} / ${pages}</span>` +
+      `<button class="tbl-btn" ${page >= pages - 1 ? 'disabled' : ''} onclick="PAGERS['${key}'].next()">Next ›</button>` +
+      `<select class="tbl-input" title="Rows per page" onchange="PAGERS['${key}'].setSize(this.value)">` +
+        PAGE_SIZES.map(n => `<option value="${n}" ${n === size ? 'selected' : ''}>${n}/page</option>`).join('') +
+      `</select>`;
+  }
+
+  // Generic client-side pager for a flat table. Page persists across re-renders
+  // (the activity tables re-fetch every 5 s).
+  function makePager(key, { tbodyId, colspan, emptyMsg, rowHtml, unit }) {
+    const p = {
+      page: 0, size: 10, rows: [],
+      _pages() { return Math.max(1, Math.ceil(p.rows.length / p.size)); },
+      set(rows) { p.rows = rows || []; p.draw(); },
+      prev() { if (p.page > 0) { p.page--; p.draw(); } },
+      next() { if (p.page < p._pages() - 1) { p.page++; p.draw(); } },
+      setSize(s) { p.size = +s; p.page = 0; p.draw(); },
+      draw() {
+        const tbody = document.getElementById(tbodyId);
+        const total = p.rows.length;
+        if (!total) {
+          tbody.innerHTML = `<tr><td colspan="${colspan}" style="color:var(--gray-500);">${emptyMsg}</td></tr>`;
+          drawPagerControls(key, 0, 1, 0, 0, 0, p.size, unit);
+          return;
+        }
+        const pages = p._pages();
+        if (p.page >= pages) p.page = pages - 1;
+        const start = p.page * p.size;
+        const slice = p.rows.slice(start, start + p.size);
+        tbody.innerHTML = slice.map(rowHtml).join('');
+        drawPagerControls(key, p.page, pages, total, start, slice.length, p.size, unit);
+      },
+    };
+    PAGERS[key] = p;
+    return p;
+  }
+
+  // Row templates + pager instances for the flat activity tables.
+  function eventRowHtml(ev) {
+    return `<tr>
+      <td style="white-space:nowrap;">${fmtTime(ev.received_at_utc)}</td>
+      <td>@${esc(ev.author_username || ev.author_id)}</td>
+      <td>${toneSpan(ev.tone)}</td>
+      <td>${outcomeChip(ev.outcome)}</td>
+      <td>${esc(ev.study_day)}</td>
+      <td>${ev.study_code ? `<code class="inline-code">${esc(ev.study_code)}</code>` : '—'}</td>
+      <td>${esc(ev.pipeline_ms)}</td>
+      <td class="reply-text-cell" title="${esc(ev.reply_text)}">${esc(ev.reply_text)}</td>
+    </tr>`;
+  }
+  function dropRowHtml(d) {
+    return `<tr>
+      <td style="white-space:nowrap;">${fmtTime(d.received_at_utc)}</td>
+      <td>${esc(d.author_id)}</td>
+      <td>${toneSpan(d.tone)}</td>
+      <td><span class="drop-reason">${esc(d.drop_reason)}</span></td>
+      <td><code class="inline-code">${esc(d.mention_id)}</code></td>
+    </tr>`;
+  }
+  makePager('events', { tbodyId: 'events-tbody', colspan: 8, emptyMsg: 'No events yet.', rowHtml: eventRowHtml, unit: 'events' });
+  makePager('drops',  { tbodyId: 'drops-tbody',  colspan: 5, emptyMsg: 'No drops yet.',  rowHtml: dropRowHtml,  unit: 'drops' });
 
   // ── Log panel ──────────────────────────────────────────────────────────────
   let paused = false;
@@ -489,7 +770,7 @@
     renderStackedBar('tone-bar', [
       { label: 'agreeable', value: m.tone_counts.agreeable || 0, color: '#6fe080' },
       { label: 'neutral',   value: m.tone_counts.neutral   || 0, color: '#4fc1ff' },
-      { label: 'agonistic', value: m.tone_counts.agonistic || 0, color: '#e85040' },
+      { label: 'satirical', value: m.tone_counts.satirical || 0, color: '#c586f0' },
     ]);
 
     // Outcome bar
@@ -499,34 +780,9 @@
     }));
     if (outcomes.length) renderStackedBar('outcome-bar', outcomes);
 
-    // Events table
-    const tbody = document.getElementById('events-tbody');
-    tbody.innerHTML = data.events.length
-      ? data.events.map(ev => `
-          <tr>
-            <td style="white-space:nowrap;">${fmtTime(ev.received_at_utc)}</td>
-            <td>@${esc(ev.author_username || ev.author_id)}</td>
-            <td>${toneSpan(ev.tone)}</td>
-            <td>${outcomeChip(ev.outcome)}</td>
-            <td>${esc(ev.study_day)}</td>
-            <td>${ev.study_code ? `<code class="inline-code">${esc(ev.study_code)}</code>` : '—'}</td>
-            <td>${esc(ev.pipeline_ms)}</td>
-            <td class="reply-text-cell" title="${esc(ev.reply_text)}">${esc(ev.reply_text)}</td>
-          </tr>`).join('')
-      : '<tr><td colspan="8" style="color:var(--gray-500);">No events yet.</td></tr>';
-
-    // Drops table
-    const dtbody = document.getElementById('drops-tbody');
-    dtbody.innerHTML = data.drops.length
-      ? data.drops.map(d => `
-          <tr>
-            <td style="white-space:nowrap;">${fmtTime(d.received_at_utc)}</td>
-            <td>${esc(d.author_id)}</td>
-            <td>${toneSpan(d.tone)}</td>
-            <td><span class="drop-reason">${esc(d.drop_reason)}</span></td>
-            <td><code class="inline-code">${esc(d.mention_id)}</code></td>
-          </tr>`).join('')
-      : '<tr><td colspan="5" style="color:var(--gray-500);">No drops yet.</td></tr>';
+    // Events + drops tables (paginated; page persists across the 5s refresh)
+    PAGERS.events.set(data.events || []);
+    PAGERS.drops.set(data.drops || []);
   }
 
   function fetchActivity() {
@@ -542,30 +798,48 @@
   // ── Participants ───────────────────────────────────────────────────────────
   function toneChip(tone) {
     const t = (tone || '').toLowerCase();
-    const cls = ['agreeable', 'neutral', 'agonistic'].includes(t) ? t : 'unknown';
+    const cls = ['agreeable', 'neutral', 'satirical'].includes(t) ? t : 'unknown';
     return `<span class="bot-chip tone-${cls}">${esc(t) || '—'}</span>`;
   }
 
+  let participantsData = [];
+
+  const PART_CSV_COLS = [
+    { label: 'Handle',           get: p => p.author_username ? '@' + p.author_username : '' },
+    { label: 'Tone',             get: p => p.tone || '' },
+    { label: 'X User ID',        get: p => p.author_id || '' },
+    { label: 'Registered (UTC)', get: p => p.enrolled_at_utc || '' },
+    { label: 'Notes',            get: p => p.notes || '' },
+  ];
+
+  function exportParticipants() {
+    downloadCSV('participants.csv', toCSV(PART_CSV_COLS, participantsData));
+  }
+
+  function partRowHtml(p) {
+    return `<tr>
+      <td>@${esc(p.author_username)}</td>
+      <td>${toneChip(p.tone)}</td>
+      <td><code class="inline-code">${esc(p.author_id)}</code></td>
+      <td style="white-space:nowrap;">${fmtTime(p.enrolled_at_utc)}</td>
+      <td>${esc(p.notes) || '—'}</td>
+    </tr>`;
+  }
+  makePager('part', { tbodyId: 'participants-tbody', colspan: 5, emptyMsg: 'No participants yet.', rowHtml: partRowHtml, unit: 'participants' });
+
   function renderParticipants(rows) {
-    const tbody = document.getElementById('participants-tbody');
-    if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--gray-500);">No participants yet.</td></tr>';
-      return;
-    }
-    tbody.innerHTML = rows.map(p => `
-      <tr>
-        <td>@${esc(p.author_username)}</td>
-        <td>${toneChip(p.tone)}</td>
-        <td><code class="inline-code">${esc(p.author_id)}</code></td>
-        <td style="white-space:nowrap;">${fmtTime(p.enrolled_at_utc)}</td>
-        <td>${esc(p.notes) || '—'}</td>
-      </tr>`).join('');
+    document.getElementById('part-count').textContent =
+      `${rows.length} participant${rows.length === 1 ? '' : 's'}`;
+    PAGERS.part.set(rows);
   }
 
   function fetchParticipants() {
     fetch('/api/participants')
       .then(r => r.json())
-      .then(data => renderParticipants(data.participants || []))
+      .then(data => {
+        participantsData = data.participants || [];
+        renderParticipants(participantsData);
+      })
       .catch(e => console.error('participants fetch failed', e));
   }
 
@@ -620,60 +894,422 @@
     return (iso || '').slice(11, 19) || '—';
   }
 
-  function renderBotReplies(rows) {
+  let botRepliesData = [];
+  let botSort = { col: null, dir: 'asc' };
+  let botSearchQuery = '';
+  let botDateFilter = '';  // 'YYYY-MM-DD' (UTC day) or '' for all
+
+  function onBotSearch(val) {
+    botSearchQuery = val.trim().toLowerCase().replace(/^@/, '');
+    botPage = 0;
+    renderBotReplies();
+  }
+
+  function onBotDate(val) {
+    botDateFilter = val || '';
+    botPage = 0;
+    renderBotReplies();
+  }
+
+  function clearBotDate() {
+    botDateFilter = '';
+    document.getElementById('bot-date').value = '';
+    botPage = 0;
+    renderBotReplies();
+  }
+
+  // Clamp the date picker to the loaded data window so a user can't select a
+  // day outside the most-recent-200 set and get a misleading empty result.
+  function setBotDateBounds() {
+    const el = document.getElementById('bot-date');
+    const days = botRepliesData.map(r => fmtDay(r.received_at_utc)).filter(d => d && d !== '—');
+    if (!days.length) { el.removeAttribute('min'); el.removeAttribute('max'); return; }
+    el.min = days.reduce((a, b) => (a < b ? a : b));
+    el.max = days.reduce((a, b) => (a > b ? a : b));
+  }
+
+  // Filtered (search + date) and sorted rows — the single source of truth for
+  // both rendering and CSV export.
+  function botVisibleRows() {
+    let rows = botRepliesData;
+    if (botSearchQuery) {
+      rows = rows.filter(r => (r.author_username || r.author_id || '').toLowerCase().includes(botSearchQuery));
+    }
+    if (botDateFilter) {
+      rows = rows.filter(r => fmtDay(r.received_at_utc) === botDateFilter);
+    }
+    if (botSort.col) {
+      rows = [...rows].sort((a, b) => {
+        const ka = BOT_SORT_KEY[botSort.col](a);
+        const kb = BOT_SORT_KEY[botSort.col](b);
+        const cmp = ka < kb ? -1 : ka > kb ? 1 : 0;
+        return botSort.dir === 'asc' ? cmp : -cmp;
+      });
+    }
+    return rows;
+  }
+
+  const BOT_CSV_COLS = [
+    { label: 'Time (UTC)',  get: r => r.received_at_utc || '' },
+    { label: 'Study Day',   get: r => r.study_day ?? '' },
+    { label: 'User',        get: r => r.author_username ? '@' + r.author_username : (r.author_id || '') },
+    { label: 'Tone',        get: r => r.tone || '' },
+    { label: 'Bot',         get: r => r.bot_handle || '' },
+    { label: 'Study Code',  get: r => r.study_code || '' },
+    { label: 'Reply URL',   get: r => r.reply_url || '' },
+    { label: 'Reply text',  get: r => r.reply_text || '' },
+    { label: 'Parent text', get: r => r.parent_text || '' },
+  ];
+
+  function exportBotReplies() {
+    const tag = botDateFilter ? '-' + botDateFilter : '';
+    downloadCSV(`bot-replies${tag}.csv`, toCSV(BOT_CSV_COLS, botVisibleRows()));
+  }
+
+  const BOT_SORT_KEY = {
+    time: r => r.received_at_utc || '',
+    user: r => (r.author_username || r.author_id || '').toLowerCase(),
+    bot:  r => (r.bot_handle || r.tone || '').toLowerCase(),
+    day:  r => String(r.study_day ?? ''),
+    code: r => (r.study_code || '').toLowerCase(),
+    text: r => (r.reply_text || '').toLowerCase(),
+  };
+
+  function updateBotSortHeaders() {
+    document.querySelectorAll('#bot-replies-table th.sortable').forEach(th => {
+      th.classList.remove('sort-asc', 'sort-desc');
+      const arrow = th.querySelector('.sort-arrow');
+      if (th.dataset.col === botSort.col) {
+        th.classList.add(botSort.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+        arrow.textContent = botSort.dir === 'asc' ? '↑' : '↓';
+      } else {
+        arrow.textContent = '↕';
+      }
+    });
+  }
+
+  function copyText(text, btn) {
+    const label = btn.dataset.label || 'copy';
+    function onSuccess() {
+      btn.textContent = 'copied!';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = label; btn.classList.remove('copied'); }, 1500);
+    }
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(onSuccess);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      onSuccess();
+    }
+  }
+
+  let botPage = 0;
+  let botPageSize = 10;
+
+  function renderBotReplies() {
     const tbody = document.getElementById('bot-replies-tbody');
-    if (!rows.length) {
+    const count = document.getElementById('bot-count');
+    const total = botRepliesData.length;
+    const sorted = botVisibleRows();
+
+    const filtered = (botSearchQuery || botDateFilter);
+    count.textContent = filtered
+      ? `${sorted.length} of ${total} replies` + (botDateFilter ? ` · ${botDateFilter}` : '')
+      : `${total} repl${total === 1 ? 'y' : 'ies'}`;
+
+    if (!total) {
       tbody.innerHTML = '<tr><td colspan="7" style="color:var(--gray-500);">No bot replies yet.</td></tr>';
+      drawPagerControls('bot', 0, 1, 0, 0, 0, botPageSize, 'replies');
+      return;
+    }
+    if (!sorted.length) {
+      tbody.innerHTML = '<tr><td colspan="7" style="color:var(--gray-500);">No replies match the current filters.</td></tr>';
+      drawPagerControls('bot', 0, 1, 0, 0, 0, botPageSize, 'replies');
       return;
     }
 
-    // Group by date for the day-header rows; keep rows ordered within the day.
-    const byDay = new Map();
-    for (const r of rows) {
-      const d = fmtDay(r.received_at_utc);
-      if (!byDay.has(d)) byDay.set(d, []);
-      byDay.get(d).push(r);
+    // Paginate the filtered + sorted rows.
+    const pages = Math.max(1, Math.ceil(sorted.length / botPageSize));
+    if (botPage >= pages) botPage = pages - 1;
+    if (botPage < 0) botPage = 0;
+    const pStart = botPage * botPageSize;
+    const slice = sorted.slice(pStart, pStart + botPageSize);
+
+    function rowHtml(r) {
+      const user = r.author_username ? `@${esc(r.author_username)}` : esc(r.author_id || '—');
+      const tone = (r.tone || 'unknown').toLowerCase();
+      const knownTone = ['agreeable', 'neutral', 'satirical'].includes(tone) ? tone : 'unknown';
+      const botLabel = r.bot_handle ? `@${esc(r.bot_handle)}` : esc(tone || '?');
+      const code = r.study_code ? `<code class="inline-code">${esc(r.study_code)}</code>` : '—';
+      const singleLine = r.reply_url && r.study_code
+        ? `${r.reply_url} (${r.study_code})` : (r.reply_url || '');
+      const link = r.reply_url
+        ? `<a class="reply-link" href="${esc(r.reply_url)}" target="_blank" rel="noopener noreferrer">→ tweet</a>
+           <button class="copy-btn" data-copy="${esc(singleLine)}">copy</button>`
+        : '<span class="reply-link disabled">—</span>';
+      return `<tr>
+        <td style="white-space:nowrap;">${esc(fmtClock(r.received_at_utc))}</td>
+        <td>${user}</td>
+        <td><span class="bot-chip tone-${knownTone}">${botLabel}</span></td>
+        <td>${esc(r.study_day)}</td>
+        <td>${code}</td>
+        <td class="reply-text-cell" title="${esc(r.reply_text)}">${esc(r.reply_text)}</td>
+        <td style="white-space:nowrap;">${link}</td>
+      </tr>`;
+    }
+
+    function dayListText(items) {
+      return items
+        .filter(r => r.reply_url)
+        .map(r => r.study_code ? `${r.reply_url} (${r.study_code})` : r.reply_url)
+        .join('\n');
     }
 
     let html = '';
-    for (const [day, items] of byDay) {
-      const count = items.length;
-      html += `<tr class="day-header">
-        <td colspan="7">${esc(day)}<span class="day-count">${count} ${count === 1 ? 'reply' : 'replies'}</span></td>
-      </tr>`;
-      for (const r of items) {
-        const user = r.author_username ? `@${esc(r.author_username)}` : esc(r.author_id || '—');
-        const tone = (r.tone || 'unknown').toLowerCase();
-        const knownTone = ['agreeable', 'neutral', 'agonistic'].includes(tone) ? tone : 'unknown';
-        const botLabel = r.bot_handle ? `@${esc(r.bot_handle)}` : esc(tone || '?');
-        const code = r.study_code
-          ? `<code class="inline-code">${esc(r.study_code)}</code>` : '—';
-        const link = r.reply_url
-          ? `<a class="reply-link" href="${esc(r.reply_url)}" target="_blank" rel="noopener noreferrer">→ tweet</a>`
-          : '<span class="reply-link disabled">—</span>';
-        html += `<tr>
-          <td style="white-space:nowrap;">${esc(fmtClock(r.received_at_utc))}</td>
-          <td>${user}</td>
-          <td><span class="bot-chip tone-${knownTone}">${botLabel}</span></td>
-          <td>${esc(r.study_day)}</td>
-          <td>${code}</td>
-          <td class="reply-text-cell" title="${esc(r.reply_text)}">${esc(r.reply_text)}</td>
-          <td>${link}</td>
-        </tr>`;
+    if (!botSort.col || botSort.col === 'time') {
+      // Full-day groups (over the entire filtered set) so each day's count and
+      // "copy list" stay complete even when the day is split across pages.
+      const byDayFull = new Map();
+      for (const r of sorted) {
+        const d = fmtDay(r.received_at_utc);
+        if (!byDayFull.has(d)) byDayFull.set(d, []);
+        byDayFull.get(d).push(r);
       }
+      // Emit a day header whenever the day changes within this page's slice.
+      let lastDay = null;
+      for (const r of slice) {
+        const day = fmtDay(r.received_at_utc);
+        if (day !== lastDay) {
+          const items = byDayFull.get(day) || [];
+          const c = items.length;
+          html += `<tr class="day-header">
+            <td colspan="7">${esc(day)}<span class="day-count">${c} ${c === 1 ? 'reply' : 'replies'}</span>
+            <button class="copy-btn" data-copy="${esc(dayListText(items))}" data-label="copy list">copy list</button></td>
+          </tr>`;
+          lastDay = day;
+        }
+        html += rowHtml(r);
+      }
+    } else {
+      for (const r of slice) html += rowHtml(r);
     }
+
     tbody.innerHTML = html;
+    drawPagerControls('bot', botPage, pages, sorted.length, pStart, slice.length, botPageSize, 'replies');
   }
+
+  PAGERS.bot = {
+    prev() { if (botPage > 0) { botPage--; renderBotReplies(); } },
+    next() { botPage++; renderBotReplies(); },  // renderBotReplies clamps to last page
+    setSize(s) { botPageSize = +s; botPage = 0; renderBotReplies(); },
+  };
+
+  document.querySelectorAll('#bot-replies-table th.sortable').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.col;
+      botSort.dir = (botSort.col === col && botSort.dir === 'asc') ? 'desc' : 'asc';
+      botSort.col = col;
+      botPage = 0;
+      updateBotSortHeaders();
+      renderBotReplies();
+    });
+  });
+
+  document.getElementById('bot-replies-tbody').addEventListener('click', e => {
+    const btn = e.target.closest('.copy-btn');
+    if (btn && btn.dataset.copy !== undefined) copyText(btn.dataset.copy, btn);
+  });
 
   function fetchBotReplies() {
     fetch('/api/replies?limit=200')
       .then(r => r.json())
-      .then(data => renderBotReplies(data.replies || []))
+      .then(data => {
+        botRepliesData = data.replies || [];
+        setBotDateBounds();
+        renderBotReplies();
+      })
       .catch(e => console.error('bot replies fetch failed', e));
   }
 
+  document.querySelectorAll('#bot-replies-table th.sortable').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.col;
+      botSort.dir = (botSort.col === col && botSort.dir === 'asc') ? 'desc' : 'asc';
+      botSort.col = col;
+      updateBotSortHeaders();
+      renderBotReplies(botRepliesData);
+    });
+  });
+
+  document.getElementById('bot-replies-tbody').addEventListener('click', e => {
+    const btn = e.target.closest('.copy-btn');
+    if (btn && btn.dataset.copy !== undefined) copyText(btn.dataset.copy, btn);
+  });
+
   fetchBotReplies();
   setInterval(fetchBotReplies, 10000);
+
+  // ── Engagement & bystander replies ──────────────────────────────────────────
+  let byReplyData = [], bystanderData = [], byConditionData = [], engTimeseries = null;
+
+  // Metric cell: a sparkline of the metric's trajectory + the latest value.
+  function metricCell(series, value, color) {
+    const spark = (series && series.length > 1) ? sparklineSVG(series, color) : '';
+    return `<td><div class="metric-cell">${spark}<span class="metric-val">${esc(value)}</span></div></td>`;
+  }
+  function byReplyRowHtml(s) {
+    const link = s.reply_url
+      ? `<a class="reply-link" href="${esc(s.reply_url)}" target="_blank" rel="noopener noreferrer">→ tweet</a>`
+      : `<code class="inline-code">${esc(s.reply_id)}</code>`;
+    const ser = s.series || {};
+    return `<tr>
+      <td>${link}</td>
+      <td>${toneSpan(s.tone)}</td>
+      ${metricCell(ser.likes,    s.like_count,    'var(--clay)')}
+      ${metricCell(ser.retweets, s.retweet_count, 'var(--olive)')}
+      ${metricCell(ser.replies,  s.reply_count,   'var(--sky)')}
+      ${metricCell(ser.quotes,   s.quote_count,   'var(--rust)')}
+      <td title="${esc(s.click_count ?? 0)} total incl. crawlers/unfurlers">${esc(s.human_click_count ?? 0)}</td>
+      <td>${esc(s.poll_count)}</td>
+      <td style="white-space:nowrap;">${esc(fmtClock(s.last_polled_utc))}</td>
+    </tr>`;
+  }
+  function bystanderRowHtml(r) {
+    const user = r.author_username ? `@${esc(r.author_username)}` : esc(r.author_id);
+    const link = r.reply_url
+      ? `<a class="reply-link" href="${esc(r.reply_url)}" target="_blank" rel="noopener noreferrer">→ tweet</a>`
+      : '<span class="reply-link disabled">—</span>';
+    return `<tr>
+      <td style="white-space:nowrap;">${esc(fmtClock(r.collected_at_utc))}</td>
+      <td>${user}</td>
+      <td>${toneSpan(r.tone)}</td>
+      <td>${esc(r.like_count)}</td>
+      <td class="reply-text-cell" title="${esc(r.text)}">${esc(r.text)}</td>
+      <td>${link}</td>
+    </tr>`;
+  }
+  makePager('byreply', { tbodyId: 'byreply-tbody', colspan: 9, emptyMsg: 'No bot replies tracked yet — each is polled every ~12 h for 10 days.', rowHtml: byReplyRowHtml, unit: 'replies' });
+  makePager('bystander', { tbodyId: 'bystander-tbody', colspan: 6, emptyMsg: 'No bystander replies collected yet.', rowHtml: bystanderRowHtml, unit: 'replies' });
+
+  const BYREPLY_CSV_COLS = [
+    { label: 'Bot reply ID',     get: s => s.reply_id || '' },
+    { label: 'Reply URL',        get: s => s.reply_url || '' },
+    { label: 'Tone',             get: s => s.tone || '' },
+    { label: 'Likes',            get: s => s.like_count ?? 0 },
+    { label: 'Reposts',          get: s => s.retweet_count ?? 0 },
+    { label: 'Replies',          get: s => s.reply_count ?? 0 },
+    { label: 'Quotes',           get: s => s.quote_count ?? 0 },
+    { label: 'Clicks (human)',   get: s => s.human_click_count ?? 0 },
+    { label: 'Clicks (all)',     get: s => s.click_count ?? 0 },
+    { label: 'Polls',            get: s => s.poll_count ?? 0 },
+    { label: 'Last polled (UTC)', get: s => s.last_polled_utc || '' },
+    { label: 'Mention ID',       get: s => s.mention_id || '' },
+  ];
+  function exportByReply() { downloadCSV('engagement_by_reply.csv', toCSV(BYREPLY_CSV_COLS, byReplyData)); }
+
+  // ── By condition (tone) ──────────────────────────────────────────────────
+  function byCondRowHtml(t) {
+    const av = t.avg_series || {};
+    return `<tr>
+      <td>${toneChip(t.tone)}</td>
+      <td>${esc(t.reply_count)}</td>
+      ${metricCell(av.likes,    t.avg_likes,    'var(--clay)')}
+      ${metricCell(av.retweets, t.avg_retweets, 'var(--olive)')}
+      ${metricCell(av.replies,  t.avg_replies,  'var(--sky)')}
+      ${metricCell(av.quotes,   t.avg_quotes,   'var(--rust)')}
+      <td title="${esc(t.total_clicks ?? 0)} total incl. crawlers/unfurlers">${esc(t.total_human_clicks ?? 0)}</td>
+    </tr>`;
+  }
+  function renderByCondition(rows) {
+    const tbody = document.getElementById('bycond-tbody');
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="7" style="color:var(--gray-500);">No conditions yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(byCondRowHtml).join('');
+    const withData = rows.filter(r => r.reply_count > 0).length;
+    document.getElementById('cond-count').textContent =
+      `${withData} condition${withData === 1 ? '' : 's'} with data`;
+  }
+  const COND_CSV_COLS = [
+    { label: 'Condition',    get: t => t.tone || '' },
+    { label: 'Replies',      get: t => t.reply_count ?? 0 },
+    { label: 'Avg likes',    get: t => t.avg_likes ?? 0 },
+    { label: 'Avg reposts',  get: t => t.avg_retweets ?? 0 },
+    { label: 'Avg replies',  get: t => t.avg_replies ?? 0 },
+    { label: 'Avg quotes',   get: t => t.avg_quotes ?? 0 },
+    { label: 'Total likes',  get: t => t.total_likes ?? 0 },
+    { label: 'Total reposts', get: t => t.total_retweets ?? 0 },
+    { label: 'Total replies', get: t => t.total_replies ?? 0 },
+    { label: 'Total quotes', get: t => t.total_quotes ?? 0 },
+    { label: 'Clicks (human)', get: t => t.total_human_clicks ?? 0 },
+    { label: 'Clicks (all)',   get: t => t.total_clicks ?? 0 },
+  ];
+  function exportByCondition() { downloadCSV('engagement_by_condition.csv', toCSV(COND_CSV_COLS, byConditionData)); }
+
+  const BYST_CSV_COLS = [
+    { label: 'Collected (UTC)', get: r => r.collected_at_utc || '' },
+    { label: 'From user',       get: r => r.author_username ? '@' + r.author_username : (r.author_id || '') },
+    { label: 'Tone',            get: r => r.tone || '' },
+    { label: 'Likes',           get: r => r.like_count ?? 0 },
+    { label: 'Reply text',      get: r => r.text || '' },
+    { label: 'Reply URL',       get: r => r.reply_url || '' },
+    { label: 'Bot reply ID',    get: r => r.bot_reply_id || '' },
+  ];
+  function exportBystander() { downloadCSV('bystander_replies.csv', toCSV(BYST_CSV_COLS, bystanderData)); }
+
+  function drawEngChart() {
+    const ts = engTimeseries;
+    if (!ts || !ts.labels || !ts.labels.length) return;
+    const all = [...ts.likes, ...ts.retweets, ...ts.replies, ...ts.quotes];
+    const maxV = Math.max(1, ...all);  // floor at 1 so an all-zero series isn't degenerate
+    renderLineChart('eng-chart', [
+      { values: ts.likes || [],    color: 'var(--clay)' },
+      { values: ts.retweets || [], color: 'var(--olive)' },
+      { values: ts.replies || [],  color: 'var(--sky)' },
+      { values: ts.quotes || [],   color: 'var(--rust)' },
+    ], ts.labels, { yMin: 0, yMax: maxV * 1.1 });
+  }
+
+  function renderEngagement(data) {
+    const t = data.totals || {};
+    document.getElementById('eng-snaps').textContent   = t.reply_count ?? 0;
+    document.getElementById('eng-likes').textContent   = t.total_likes ?? 0;
+    document.getElementById('eng-rts').textContent     = t.total_retweets ?? 0;
+    document.getElementById('eng-replies').textContent = t.total_replies ?? 0;
+    document.getElementById('eng-quotes').textContent  = t.total_quotes ?? 0;
+    document.getElementById('eng-clicks').textContent  = t.total_human_clicks ?? 0;
+    document.getElementById('eng-byst').textContent    = t.bystander_count ?? 0;
+    byReplyData = data.by_reply || [];
+    bystanderData = data.replies || [];
+    byConditionData = data.by_tone || [];
+    engTimeseries = data.timeseries || null;
+    document.getElementById('byreply-count').textContent =
+      `${byReplyData.length} repl${byReplyData.length === 1 ? 'y' : 'ies'} · ${t.snapshot_count ?? 0} snapshots`;
+    document.getElementById('byst-count').textContent =
+      `${bystanderData.length} repl${bystanderData.length === 1 ? 'y' : 'ies'}`;
+    renderByCondition(byConditionData);
+    PAGERS.byreply.set(byReplyData);
+    PAGERS.bystander.set(bystanderData);
+    drawEngChart();
+    document.getElementById('eng-refresh').textContent = '· ' + new Date().toLocaleTimeString();
+  }
+  function fetchEngagement() {
+    fetch('/api/engagement')
+      .then(r => r.json())
+      .then(renderEngagement)
+      .catch(e => console.error('engagement fetch failed', e));
+  }
+  fetchEngagement();
+  setInterval(fetchEngagement, 30000);
+  // Redraw the chart on resize so the SVG re-fits its container width.
+  window.addEventListener('resize', drawEngChart);
 
   // ── Init ───────────────────────────────────────────────────────────────────
   initScrollSpy();

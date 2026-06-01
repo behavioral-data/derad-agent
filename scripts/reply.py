@@ -1,10 +1,11 @@
 """Reply to a specific tweet with a fact-check.
 
 Usage:
-    python scripts/reply.py --tweet-id <ID> [--tone satirical] [--dry-run]
+    python scripts/reply.py --mention-id <ID> [--tone satirical] [--dry-run]
 
-The script fetches the tweet text, runs the LLM pipeline, and posts a reply.
-With --dry-run (or DERAD_DRY_RUN=true) it prints the reply instead of posting.
+The script fetches the mention tweet, finds its parent claim, runs the LLM
+pipeline, and posts a reply. With --dry-run (or DERAD_DRY_RUN=true) it prints
+the reply instead of posting.
 """
 
 import argparse
@@ -19,7 +20,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / "agent" / "llm" / ".env")
 
 from agent.app.utils import fetch_tweet, generate_reply, post_reply
-from agent.llm.prompts import RESPONSE_STYLES
+from agent.app.participants import VALID_TONES
 
 
 def main():
@@ -27,7 +28,7 @@ def main():
     parser.add_argument("--mention-id", required=True,
                         help="ID of the mention tweet (the @bot tweet). "
                              "The bot replies to this and fact-checks its parent.")
-    parser.add_argument("--tone", default="neutral", choices=RESPONSE_STYLES)
+    parser.add_argument("--tone", default="neutral", choices=VALID_TONES)
     parser.add_argument("--dry-run", action="store_true",
                         help="Print reply instead of posting (also set by DERAD_DRY_RUN=true)")
     args = parser.parse_args()

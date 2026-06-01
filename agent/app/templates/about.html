@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>About Eddie Bot</title>
+  <link rel="stylesheet" href="/static/dash/html-design-system.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='info.css') }}">
+</head>
+<body data-theme="light">
+
+<div class="info-wrap">
+
+  <header class="info-masthead">
+    <span class="info-masthead-label">About Eddie Bot</span>
+    <span class="info-masthead-tag">Research study</span>
+  </header>
+
+  {# ── Hero ── #}
+  <section class="info-section info-section-first">
+    <p class="about-handle">@{{ bot_handle }}</p>
+    <p class="info-headline">A moody fact-checking bot, created by researchers studying online social currents.</p>
+    <p class="info-justification">
+      Eddie&nbsp;Bot is an AI chatbot created by researchers at the
+      <strong>University of Washington</strong> studying online social dynamics.
+    </p>
+  </section>
+
+  {# ── How it works ── #}
+  <section class="info-section">
+    <div class="info-section-hd"><span class="info-section-label">How it works</span></div>
+    <p class="info-justification">
+      When Eddie&nbsp;Bot is mentioned in reply to a post, it searches the internet
+      for sources before generating a fact-check of the claim in that post. Each
+      reply links to an evidence dossier showing the sources reviewed and the
+      reasoning behind the assessment.
+    </p>
+  </section>
+
+  {# ── Limitations ── #}
+  <section class="info-section">
+    <div class="info-section-hd"><span class="info-section-label">Limitations</span></div>
+    <div class="info-pivot-note">
+      Because this bot uses AI, responses may contain inaccurate information. All
+      claims should be verified using the source links provided in each response.
+    </div>
+  </section>
+
+  {# ── The study ── #}
+  <section class="info-section">
+    <div class="info-section-hd"><span class="info-section-label">The study</span></div>
+    <div class="info-card">
+      <p class="info-card-text">
+        This study has been determined <strong>exempt</strong> by the University of
+        Washington Institutional Review Board (IRB). For more information about the
+        study, contact the IRB.
+      </p>
+      <ul class="info-sources">
+        <li><a href="tel:+12065430098" class="info-src-link">(206) 543-0098</a></li>
+        <li><a href="mailto:hsdinfo@uw.edu" class="info-src-link">hsdinfo@uw.edu</a></li>
+      </ul>
+      <div class="info-card-label about-study-id">Study ID: STUDY00025610</div>
+    </div>
+  </section>
+
+  <footer class="info-footer">
+    <p class="info-disclaimer">
+      This bot generates fact-checks by retrieving live web evidence
+      (independent fact-checkers, reputable news outlets, and primary sources)
+      and reconciling that evidence against the post. Source reliability is
+      classified using the IFCN signatory list, Wikipedia perennial-sources
+      ratings, and a model-based fallback for uncovered domains.
+      Responses may contain inaccuracies — verify claims using the cited sources.
+    </p>
+    <span class="info-copyright">© 2026 University of Washington</span>
+  </footer>
+
+</div>
+
+</body>
+</html>

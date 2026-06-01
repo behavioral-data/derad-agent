@@ -31,6 +31,12 @@ class RendererView:
     invoker's explicit ask doesn't match the action taken. Disclosure is
     the renderer's job — it owns the char budget and can phrase the
     clarification within the same 256-weighted-char envelope.
+
+    `parent_post_text` is the raw post being replied to. It is render-only
+    context — NOT part of the frozen verdict — so it lives here, not on
+    FrozenVerdict. The renderer uses it for tone/responsiveness only; the
+    prompt forbids treating its claims as evidence (it is, after all, the
+    misinformation under check).
     """
 
     presentation_payload: PresentationPayload
@@ -40,10 +46,18 @@ class RendererView:
     overall_state: OverallState = "checked"
     pivoted_from: Optional[Action] = None
     invoker_instruction_text: str = ""
+    parent_post_text: str = ""
 
 
-def view_for_renderer(frozen: FrozenVerdict) -> RendererView:
-    """Project the frozen object down to the renderer's allowed fields."""
+def view_for_renderer(
+    frozen: FrozenVerdict, *, parent_post_text: str = ""
+) -> RendererView:
+    """Project the frozen object down to the renderer's allowed fields.
+
+    `parent_post_text` is passed in by the caller (not read from `frozen`)
+    because the raw post is render-only context, deliberately kept off the
+    immutable verdict.
+    """
     return RendererView(
         presentation_payload=frozen.presentation_payload,
         tone_neutral_justification=frozen.tone_neutral_justification,
@@ -52,6 +66,7 @@ def view_for_renderer(frozen: FrozenVerdict) -> RendererView:
         overall_state=frozen.overall_state,
         pivoted_from=frozen.pivoted_from,
         invoker_instruction_text=frozen.invoker_instruction_text,
+        parent_post_text=parent_post_text,
     )
 
 

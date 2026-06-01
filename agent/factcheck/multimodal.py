@@ -19,6 +19,7 @@ import requests
 from pydantic import BaseModel
 
 from agent.llm.config import get_llm
+from agent.shared.http import BROWSER_USER_AGENT
 
 from .llm import _extract_json
 from .schema import CanonicalImageMatch
@@ -35,10 +36,6 @@ _CLAUDE_BASE64_LIMIT = 5 * 1024 * 1024  # Anthropic API max per image (base64-en
 # raw bytes accordingly so the encoded form fits under the API limit.
 _CLAUDE_RAW_LIMIT = int(_CLAUDE_BASE64_LIMIT * 0.74)
 _RESIZE_MAX_DIM = 1568  # Claude downsamples larger anyway
-_USER_AGENT = (
-    "derad-agent/3.0 (fact-checking research bot; "
-    "contact: advaitmb@uw.edu)"
-)
 
 
 _VLM_SYSTEM = """You are the multimodal extraction stage of a fact-checking pipeline. The downstream verification step depends on you correctly identifying *who* and *what* is in the image — generic descriptions lose information the fact-checker can't recover.
@@ -130,7 +127,7 @@ def fetch_image_bytes(url: str) -> Optional[tuple[bytes, str]]:
             url,
             timeout=_IMAGE_FETCH_TIMEOUT,
             stream=True,
-            headers={"User-Agent": _USER_AGENT},
+            headers={"User-Agent": BROWSER_USER_AGENT},
         )
         resp.raise_for_status()
     except (requests.RequestException, requests.HTTPError):

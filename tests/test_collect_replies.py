@@ -17,12 +17,21 @@ def _utc(days_ago=0, **kwargs):
     return base.replace(**kwargs) if kwargs else base
 
 
-def _make_response(tweets: list[dict], users: list[dict] | None = None):
-    """Build a fake X API response object."""
-    resp = MagicMock()
-    resp.data = tweets
-    resp.includes = {"users": users or []}
-    return resp
+def _make_pages(tweets: list[dict], users: list[dict] | None = None):
+    """Build a fake search_recent generator: yields page objects with .data/.includes.
+
+    Mirrors the real xdk contract — posts.search_recent returns a generator of
+    page objects, each carrying a slice of results, not a single response.
+    """
+    page = MagicMock()
+    page.data = tweets
+    page.includes = {"users": users or []}
+    return iter([page])
+
+
+def _replied_to(target_id: str) -> list[dict]:
+    """referenced_tweets entry marking a tweet as a reply to target_id."""
+    return [{"type": "replied_to", "id": target_id}]
 
 
 @pytest.fixture(autouse=True)
@@ -34,18 +43,18 @@ def fresh_events_store(monkeypatch):
 
 class TestCollectOne:
     def test_happy_path_direct_reply(self, monkeypatch):
-        """Direct reply tweet is written as BotReplyReply."""
+        """A tweet whose referenced_tweets replies to the bot is written."""
         tweet = {
             "id": "rr1",
             "author_id": "user42",
             "text": "interesting take",
-            "in_reply_to_tweet_id": "bot99",
+            "referenced_tweets": _replied_to("bot99"),
             "public_metrics": {"like_count": 3},
         }
         user = {"id": "user42", "username": "alice"}
 
         fake_client = MagicMock()
-        fake_client.tweets.search_recent.return_value = _make_response([tweet], [user])
+        fake_client.posts.search_recent.return_value = _make_pages([tweet], [user])
         monkeypatch.setattr(
             "agent.cli.collect_replies.get_x_client",
             lambda: fake_client,
@@ -71,12 +80,12 @@ class TestCollectOne:
             "id": "other1",
             "author_id": "user99",
             "text": "replying to someone else",
-            "in_reply_to_tweet_id": "some_other_tweet",
+            "referenced_tweets": _replied_to("some_other_tweet"),
             "public_metrics": {"like_count": 0},
         }
 
         fake_client = MagicMock()
-        fake_client.tweets.search_recent.return_value = _make_response([tweet])
+        fake_client.posts.search_recent.return_value = _make_pages([tweet])
         monkeypatch.setattr(
             "agent.cli.collect_replies.get_x_client",
             lambda: fake_client,
@@ -86,10 +95,64 @@ class TestCollectOne:
         count = _collect_one("bot99", "neutral", mention_id=None, parent_id="p1")
         assert count == 0
 
+    def test_bot_self_reply_excluded_by_author(self, monkeypatch):
+        """A reply authored by the bot itself is not logged as a bystander reply."""
+        tweets = [
+            {"id": "link1", "author_id": "bot_uid", "text": "dossier: ...",
+             "referenced_tweets": _replied_to("bot99"), "public_metrics": {}},
+            {"id": "rr1", "author_id": "user42", "text": "real reply",
+             "referenced_tweets": _replied_to("bot99"), "public_metrics": {}},
+        ]
+        fake_client = MagicMock()
+        fake_client.posts.search_recent.return_value = _make_pages(
+            tweets, [{"id": "user42", "username": "alice"}]
+        )
+        monkeypatch.setattr("agent.cli.collect_replies.get_x_client", lambda: fake_client)
+        written: list[BotReplyReply] = []
+        monkeypatch.setattr("agent.cli.collect_replies.log_reply_reply", written.append)
+
+        count = _collect_one("bot99", "neutral", mention_id="m1", parent_id="p1",
+                             bot_user_id="bot_uid")
+        assert count == 1
+        assert [w.reply_tweet_id for w in written] == ["rr1"]
+
+    def test_link_self_reply_excluded_by_id_when_bot_id_unset(self, monkeypatch):
+        """Backstop: even with no BOT_USER_ID, the known link_reply_id is dropped."""
+        tweets = [
+            {"id": "link1", "author_id": "bot_uid", "text": "dossier: ...",
+             "referenced_tweets": _replied_to("bot99"), "public_metrics": {}},
+            {"id": "rr1", "author_id": "user42", "text": "real reply",
+             "referenced_tweets": _replied_to("bot99"), "public_metrics": {}},
+        ]
+        fake_client = MagicMock()
+        fake_client.posts.search_recent.return_value = _make_pages(
+            tweets, [{"id": "user42", "username": "alice"}]
+        )
+        monkeypatch.setattr("agent.cli.collect_replies.get_x_client", lambda: fake_client)
+        monkeypatch.delenv("BOT_USER_ID", raising=False)
+        written: list[BotReplyReply] = []
+        monkeypatch.setattr("agent.cli.collect_replies.log_reply_reply", written.append)
+
+        count = _collect_one("bot99", "neutral", mention_id="m1", parent_id="p1",
+                             link_reply_id="link1", bot_user_id=None)
+        assert count == 1
+        assert [w.reply_tweet_id for w in written] == ["rr1"]
+
     def test_api_exception_returns_zero(self, monkeypatch):
         """Network error returns 0 without raising."""
         fake_client = MagicMock()
-        fake_client.tweets.search_recent.side_effect = RuntimeError("timeout")
+        fake_client.posts.search_recent.side_effect = RuntimeError("timeout")
+        monkeypatch.setattr(
+            "agent.cli.collect_replies.get_x_client",
+            lambda: fake_client,
+        )
+
+        count = _collect_one("bot99", "neutral", mention_id=None, parent_id="p1")
+        assert count == 0
+
+    def test_skips_when_no_parent_id(self, monkeypatch):
+        """Without parent_id there's no searchable conversation, so it skips without an API call."""
+        fake_client = MagicMock()
         monkeypatch.setattr(
             "agent.cli.collect_replies.get_x_client",
             lambda: fake_client,
@@ -97,33 +160,15 @@ class TestCollectOne:
 
         count = _collect_one("bot99", "neutral", mention_id=None, parent_id=None)
         assert count == 0
-
-    def test_falls_back_to_in_reply_to_query_when_no_parent(self, monkeypatch):
-        """Without parent_id the query uses in_reply_to_tweet_id:."""
-        captured_queries: list[str] = []
-
-        fake_client = MagicMock()
-
-        def _search(**kwargs):
-            captured_queries.append(kwargs.get("query", ""))
-            return _make_response([])
-
-        fake_client.tweets.search_recent.side_effect = _search
-        monkeypatch.setattr(
-            "agent.cli.collect_replies.get_x_client",
-            lambda: fake_client,
-        )
-
-        _collect_one("bot99", "neutral", mention_id=None, parent_id=None)
-        assert captured_queries[0].startswith("in_reply_to_tweet_id:")
+        fake_client.posts.search_recent.assert_not_called()
 
     def test_uses_conversation_query_when_parent_present(self, monkeypatch):
         """With parent_id the query uses conversation_id:."""
         captured: list[str] = []
 
         fake_client = MagicMock()
-        fake_client.tweets.search_recent.side_effect = lambda **kw: (
-            captured.append(kw.get("query", "")) or _make_response([])
+        fake_client.posts.search_recent.side_effect = lambda **kw: (
+            captured.append(kw.get("query", "")) or _make_pages([])
         )
         monkeypatch.setattr(
             "agent.cli.collect_replies.get_x_client",

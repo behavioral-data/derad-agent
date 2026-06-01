@@ -26,7 +26,14 @@ logger = logging.getLogger(__name__)
 
 class DedupRateStore(Protocol):
     def claim(self, key: str, ttl_seconds: int = 86400) -> bool:
-        """Atomically reserve a key. Returns True if newly inserted, False if already present."""
+        """Atomically reserve a key. Returns True if newly inserted, False if already present.
+
+        ``ttl_seconds`` is honored by ``InMemoryStore`` (expired keys can be
+        re-claimed) but **ignored by ``TablesStore``** — rows stamp
+        ``ExpiresAtUtc`` for out-of-band cleanup but ``claim`` itself never
+        treats an expired row as available. Callers that rely on re-claim
+        after TTL must not use the Tables backend, or must extend it first.
+        """
         ...
 
     def hit_and_count(self, key: str, window_seconds: int) -> int:
@@ -128,6 +135,17 @@ class TablesStore:
         self._rate = self._service.get_table_client(rate_table)
 
     def claim(self, key: str, ttl_seconds: int = 86400) -> bool:
+        """Atomically reserve a key via ``create_entity`` + ResourceExistsError.
+
+        Divergence from the Protocol: ``ttl_seconds`` is stored on the row as
+        ``ExpiresAtUtc`` for an eventual out-of-band cleanup job, but is
+        **not** consulted on subsequent ``claim`` calls — once a row exists,
+        it blocks re-claim forever (or until manually deleted). This matches
+        the only live caller (mention dedup at the 24h default), where
+        never re-claiming is the desired behavior. If a future caller needs
+        true TTL-honoring claim, add an OData filter that treats a row with
+        ``ExpiresAtUtc < now`` as available (insert-or-replace pattern).
+        """
         now = datetime.now(timezone.utc)
         entity = {
             "PartitionKey": self.DEDUP_PARTITION,
@@ -142,6 +160,10 @@ class TablesStore:
             return True
         except self._ResourceExistsError:
             return False
+
+    # Cap per-call deletions so a one-time backlog can't make a single rate
+    # check slow; remaining old rows get cleaned up on subsequent calls.
+    _PRUNE_LIMIT = 100
 
     def hit_and_count(self, key: str, window_seconds: int) -> int:
         now = datetime.now(timezone.utc)
@@ -160,7 +182,34 @@ class TablesStore:
         cutoff = now - timedelta(seconds=window_seconds)
         cutoff_str = cutoff.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         filter_q = f"PartitionKey eq '{key}' and AtUtc ge datetime'{cutoff_str}'"
-        return sum(1 for _ in self._rate.query_entities(query_filter=filter_q))
+        count = sum(1 for _ in self._rate.query_entities(query_filter=filter_q))
+        # Best-effort prune of this author's out-of-window rows. Without this
+        # the partition grows unboundedly and the rolling-window query above
+        # scans every historical row for heavy authors.
+        self._prune_old_rate_rows(key, cutoff_str)
+        return count
+
+    def _prune_old_rate_rows(self, key: str, cutoff_str: str) -> None:
+        old_filter = f"PartitionKey eq '{key}' and AtUtc lt datetime'{cutoff_str}'"
+        try:
+            old_rows = self._rate.query_entities(
+                query_filter=old_filter,
+                results_per_page=self._PRUNE_LIMIT,
+            )
+            deleted = 0
+            for row in old_rows:
+                if deleted >= self._PRUNE_LIMIT:
+                    break
+                try:
+                    self._rate.delete_entity(
+                        partition_key=row["PartitionKey"],
+                        row_key=row["RowKey"],
+                    )
+                    deleted += 1
+                except Exception:
+                    logger.debug("rate-limit prune: delete failed", exc_info=True)
+        except Exception:
+            logger.debug("rate-limit prune: query failed", exc_info=True)
 
 
 def _build_default_store() -> DedupRateStore:

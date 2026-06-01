@@ -353,6 +353,30 @@ function renderSparkRow(label, values, color, current, delta) {
   </div>`;
 }
 
+// ─── Inline sparkline (bare SVG, for table cells) ──────────────────────────
+// Returns just an <svg> string — no label, value, or delta. For dense in-cell
+// trends. Handles 0/1-point series gracefully (empty / single dot).
+function sparklineSVG(values, color = 'var(--clay)', opts = {}) {
+  const W = opts.width || 54, H = opts.height || 18;
+  const vals = (values || []).map(v => +v || 0);
+  if (vals.length === 0) return '';
+  if (vals.length === 1) {
+    return `<svg class="spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +
+      `<circle cx="${(W - 2).toFixed(1)}" cy="${(H / 2).toFixed(1)}" r="2" fill="${color}"/></svg>`;
+  }
+  const max = Math.max(...vals), min = Math.min(...vals);
+  const span = max - min || 1;
+  const pts = vals.map((v, i) => {
+    const x = (i / (vals.length - 1)) * (W - 4) + 2;
+    const y = H - 3 - ((v - min) / span) * (H - 6);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const [lx, ly] = pts[pts.length - 1].split(',');
+  return `<svg class="spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +
+    `<polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>` +
+    `<circle cx="${lx}" cy="${ly}" r="2" fill="${color}"/></svg>`;
+}
+
 // ─── Flowchart diagram (clickable nodes + annotation panel) ────────────────
 // svgId: id of an empty <svg class="diagram-svg" viewBox="0 0 W H"> element
 // annId: id of an adjacent <div class="diagram-ann"> element

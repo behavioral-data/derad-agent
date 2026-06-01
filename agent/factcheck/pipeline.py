@@ -41,6 +41,7 @@ from .schema import (
     Lens2,
     Lens3,
     Modality,
+    OverallState,
     PresentationPayload,
     ProvenanceMatch,
     SourceQualityEntry,
@@ -48,7 +49,7 @@ from .schema import (
     Verdict,
 )
 from .search import SearchBackend, build_default_backend
-from .sources import build_quality_table
+from .sources import build_quality_table, is_non_evidence_domain, source_lists_version
 from .verdict import derive_action_outcome, derive_verdict
 
 
@@ -125,6 +126,51 @@ def _nei_verdict(
         load_bearing_evidence_snippet="",
     )
     return findings, payload, "Not enough reliable evidence was found to verify or refute this claim."
+
+
+# Outcomes where the bot produced a substantive, evidence-backed result.
+# Everything else (verified_nei, *_unavailable, perspectives_insufficient,
+# declined) means the pipeline ran but yielded nothing the renderer could
+# use, so analytics should not count them as "checked".
+_CHECKED_OUTCOMES: frozenset[ActionOutcome] = frozenset({
+    "verified_supported",
+    "verified_refuted",
+    "verified_conflicting",
+    "context_provided",
+    "challenged",
+    "perspectives_surfaced",
+})
+
+
+def _overall_state_for(outcome: ActionOutcome) -> OverallState:
+    """Map a terminal ActionOutcome to its overall_state for analytics.
+
+    OverallState only has "checked" and "no_checkable_claim", so no-usable-result
+    outcomes (verified_nei, *_unavailable, perspectives_insufficient, declined)
+    fall under "no_checkable_claim" — the closest existing literal for "the
+    pipeline ran but produced nothing actionable".
+    """
+    return "checked" if outcome in _CHECKED_OUTCOMES else "no_checkable_claim"
+
+
+def _neutralise_evidence_stances(evidence: list[Evidence]) -> list[Evidence]:
+    """Rebuild evidence rows with stance='neutral', preserving everything else.
+
+    Used after a Stage-5 audit failure: reconcile's per-evidence stances are
+    suspect (audit caught drift between stances and findings), so we
+    neutralise them so the frozen record doesn't carry "supports"/"refutes"
+    rows under an NEI verdict.
+    """
+    return [
+        Evidence(
+            question=e.question,
+            source_url=e.source_url,
+            snippet=e.snippet,
+            stance="neutral",
+            body_markdown=e.body_markdown,
+        )
+        for e in evidence
+    ]
 
 
 _MULTIMODAL_MAX_WORKERS = 4
@@ -205,7 +251,6 @@ def _short_circuit_decline(
             claim_id=f"c{i + 1}",
             text=ec.text,
             type=ec.type,
-            check_worthy=ec.check_worthy,
             is_central=ec.is_central,
             evidence=(),
         )
@@ -223,7 +268,11 @@ def _short_circuit_decline(
             vlm_model="claude-via-azure-ai-services" if image_evidence else "",
             search_provider=backend_name,
             pipeline_commit=_git_sha(),
-            source_reliability_lists_version={"curated_lists": _PIPELINE_VERSION, "model_prior": "claude-sonnet"},
+            source_reliability_lists_version={
+                "curated_lists": _PIPELINE_VERSION,
+                "model_prior": "claude-sonnet",
+                **source_lists_version(),
+            },
         ),
         attached_images=tuple(_attached_image_records(image_evidence)),
         claims=claim_objs,
@@ -321,6 +370,15 @@ def run_pipeline(
     central_text = central.text
     logger.info("run_pipeline[%s]: Stage 4 — iterative verification (Papelo-style)", invocation_id)
     text_evidence = iterative_verify(central_text, ctx, backend=backend, action=extraction.action)
+    # Drop non-evidentiary sources (stock-image / shopping / UGC farms) before
+    # they reach reconcile — they are not sources of factual claims and only add
+    # noise. The quality-table build drops them too; doing it here also keeps
+    # them out of the reasoning input. Image-provenance hits are filtered when
+    # all_urls is assembled below (build_quality_table drops them as well).
+    _pre = len(text_evidence)
+    text_evidence = [e for e in text_evidence if not is_non_evidence_domain(e.source_url)]
+    if len(text_evidence) != _pre:
+        logger.info("run_pipeline[%s]: dropped %d non-evidence record(s)", invocation_id, _pre - len(text_evidence))
     logger.info("run_pipeline[%s]: Stage 4 done (%d evidence records)", invocation_id, len(text_evidence))
 
     # Roll image-provenance hits into the source-quality table too — Claude is
@@ -406,6 +464,10 @@ def run_pipeline(
             "Audit failed: " + "; ".join(audit_result.failures),
             reason_label="evidence retrieved but silent",
         )
+        # Audit caught drift between reconcile's per-evidence stances and the
+        # findings; neutralise stances so the frozen record doesn't carry
+        # "supports"/"refutes" rows under an NEI verdict.
+        evidence = _neutralise_evidence_stances(evidence)
 
     claim_objs: list[Claim] = []
     for i, ec in enumerate(extraction.claims):
@@ -415,7 +477,6 @@ def run_pipeline(
                 claim_id=f"c{i + 1}",
                 text=ec.text,
                 type=ec.type,
-                check_worthy=ec.check_worthy,
                 is_central=ec.is_central,
                 evidence=evidence_for_this,
             )
@@ -457,7 +518,11 @@ def run_pipeline(
             vlm_model="claude-via-azure-ai-services" if image_evidence else "",
             search_provider=backend.name,
             pipeline_commit=_git_sha(),
-            source_reliability_lists_version={"curated_lists": _PIPELINE_VERSION, "model_prior": "claude-sonnet"},
+            source_reliability_lists_version={
+                "curated_lists": _PIPELINE_VERSION,
+                "model_prior": "claude-sonnet",
+                **source_lists_version(),
+            },
         ),
         attached_images=tuple(_attached_image_records(image_evidence)),
         claims=tuple(claim_objs),
@@ -472,6 +537,7 @@ def run_pipeline(
         verdict_label=verdict_label,
         tone_neutral_justification=justification,
         presentation_payload=payload,
+        overall_state=_overall_state_for(action_outcome),
     )
 
     freeze_to_disk(frozen, root=freeze_root)

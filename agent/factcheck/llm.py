@@ -84,8 +84,22 @@ def call_claude_json(
     raw_json = _extract_json(content)
     try:
         data = json.loads(raw_json)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Claude did not return valid JSON: {exc}\n---\n{content[:1000]}") from exc
+    except json.JSONDecodeError as primary_exc:
+        # Common LLM failure: unescaped inner quotes, trailing commas, leftover
+        # code-fence text. json-repair fixes most of these heuristically without
+        # an extra Claude round-trip.
+        import logging
+        try:
+            from json_repair import repair_json
+            repaired = repair_json(content)
+            data = json.loads(repaired)
+            logging.getLogger(__name__).info(
+                "call_claude_json: json-repair recovered output (%s)", primary_exc,
+            )
+        except Exception:
+            raise ValueError(
+                f"Claude did not return valid JSON (json-repair also failed): {primary_exc}\n---\n{content[:1000]}"
+            ) from primary_exc
     try:
         return schema.model_validate(data)
     except ValidationError as exc:

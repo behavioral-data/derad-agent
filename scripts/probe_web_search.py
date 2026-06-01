@@ -31,9 +31,9 @@ load_dotenv(ROOT / "agent" / "llm" / ".env")
 sys.path.insert(0, str(ROOT))
 
 from agent.factcheck.search import (  # noqa: E402
-    _MARKDOWN_LINK_RE,
     _extract_response_text,
     _extract_search_hits,
+    _iter_markdown_links,
 )
 
 
@@ -129,10 +129,10 @@ def probe(client, model: str, query: str) -> None:
     if len(text) > 1500:
         print(f"... ({len(text) - 1500} more chars)")
 
-    md_links = list(_MARKDOWN_LINK_RE.finditer(text))
+    md_links = list(_iter_markdown_links(text))
     print(f"\n-- markdown links in text: {len(md_links)} --")
-    for m in md_links[:5]:
-        print(f"  [{m.group(1)[:60]}]({m.group(2)})")
+    for title, url, _, _ in md_links[:5]:
+        print(f"  [{title[:60]}]({url})")
 
     hits = _extract_search_hits(response)
     print(f"\n-- _extract_search_hits returned {len(hits)} hit(s) --")

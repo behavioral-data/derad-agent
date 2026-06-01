@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>derad-agent · Pipeline Trace</title>
+  <link rel="stylesheet" href="assets/html-design-system.css">
+  <style>
+    .stage-block {
+      border: var(--border);
+      margin-bottom: 2px;
+    }
+    .stage-header {
+      display: grid;
+      grid-template-columns: 52px 1fr auto;
+      gap: 16px;
+      align-items: center;
+      padding: 14px 20px;
+      background: var(--gray-100);
+      border-bottom: var(--border);
+    }
+    .stage-num {
+      font-family: var(--serif);
+      font-size: 32px;
+      font-weight: 500;
+      color: var(--slate);
+      line-height: 1;
+    }
+    .stage-title {
+      font-family: var(--sans);
+      font-weight: 600;
+      font-size: 15px;
+      color: var(--slate);
+    }
+    .stage-meta {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--gray-500);
+    }
+    .stage-body {
+      padding: 16px 20px;
+    }
+    .io-row {
+      display: grid;
+      grid-template-columns: 90px 1fr;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px dashed var(--gray-300);
+      align-items: start;
+    }
+    .io-row:last-child { border-bottom: none; }
+    .io-label {
+      font-family: var(--mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--gray-500);
+      padding-top: 2px;
+    }
+    .io-val {
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--slate);
+    }
+    .io-val code {
+      font-family: var(--mono);
+      font-size: 11px;
+      background: var(--gray-300);
+      padding: 1px 5px;
+    }
+
+    /* Evidence cards */
+    .ev-group { margin-bottom: 16px; }
+    .ev-q {
+      font-family: var(--mono);
+      font-size: 11px;
+      background: var(--gray-200);
+      border: var(--border);
+      padding: 6px 10px;
+      margin-bottom: 6px;
+    }
+    .ev-q-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--gray-500);
+    }
+    .ev-q-text { color: var(--slate); font-size: 12px; }
+    .ev-hit {
+      border: var(--border);
+      border-left-width: 3px;
+      padding: 8px 12px;
+      margin-bottom: 4px;
+      font-size: 12px;
+    }
+    .ev-hit-supports  { border-left-color: var(--green,  #4ec9b0); }
+    .ev-hit-refutes   { border-left-color: var(--clay,   #D97757); }
+    .ev-hit-neutral   { border-left-color: var(--gray-400); }
+    .ev-hit-url { font-family: var(--mono); font-size: 10px; color: var(--gray-500); overflow-wrap: anywhere; }
+    .ev-hit-snippet { color: var(--slate); margin: 4px 0; }
+    .ev-hit-body summary {
+      cursor: pointer;
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--gray-500);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 3px 0;
+    }
+    .ev-hit-body pre {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--gray-600);
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin: 4px 0 0;
+      max-height: 200px;
+      overflow-y: auto;
+      background: var(--gray-200);
+      padding: 6px 8px;
+      border: var(--border);
+    }
+
+    /* Source quality table extras */
+    .tier-fact-checker    { color: var(--sky); font-weight: 600; }
+    .tier-reputable-news  { color: var(--green, #4ec9b0); font-weight: 600; }
+    .tier-primary-source  { color: var(--sky); font-weight: 600; }
+    .tier-unknown         { color: var(--gray-500); }
+    .tier-low-quality     { color: var(--clay); }
+    .tier-satirical       { color: var(--clay); font-style: italic; }
+    .tier-aggregator      { color: var(--gray-600); }
+
+    /* Perspective cards */
+    .perspective-card {
+      border: var(--border);
+      padding: 12px 16px;
+      margin-bottom: 8px;
+    }
+    .perspective-label {
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--sky);
+    }
+    .perspective-summary {
+      font-size: 13px;
+      color: var(--slate);
+      margin: 4px 0 8px;
+    }
+
+    /* Run selector */
+    .run-row {
+      display: grid;
+      grid-template-columns: 130px 130px 130px 1fr;
+      gap: 8px;
+      padding: 6px 0;
+      border-bottom: 1px dashed var(--gray-300);
+      font-size: 12px;
+      align-items: center;
+    }
+    .run-row:last-child { border-bottom: none; }
+    .run-row.active { background: var(--gray-200); padding-left: 6px; border-left: 3px solid var(--sky); }
+    .run-time { font-family: var(--mono); font-size: 10px; color: var(--gray-500); }
+    .run-claim { color: var(--slate); font-size: 11px; }
+
+    [data-theme="dark"] .stage-header { background: #252525; }
+    [data-theme="dark"] .ev-q { background: #252525; }
+    [data-theme="dark"] .ev-hit-body pre { background: #252525; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="eyebrow">derad-agent</div>
+      <h3>Pipeline Trace</h3>
+      <nav>
+        <a href="#run-header">Run info</a>
+        <a href="#stage-23">Stage 2+3 · Extract</a>
+        <a href="#stage-4">Stage 4 · Search</a>
+        <a href="#stage-452">Stage 4.5.2 · Sources</a>
+        <a href="#stage-45">Stage 4.5 · Reconcile</a>
+        <a href="#stage-5">Stage 5 · Audit</a>
+        <a href="#stage-6">Stage 6 · Freeze</a>
+        <a href="#stage-7">Stage 7 · Render</a>
+        <a href="#recent-runs">Recent runs</a>
+      </nav>
+      <div class="theme-toggle" onclick="toggleTheme()">
+        <span class="theme-toggle-label">Theme</span>
+        <span class="theme-toggle-track"></span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="page-head" id="run-header">
+        <p class="eyebrow">run trace · latest local run</p>
+        <h1>UBI / AI job displacement</h1>
+        <p>Full stage-by-stage trace for invocation <code class="inline-code">5ab21772</code>. Action: <strong>surface_perspectives</strong>. Outcome: <strong>perspectives_surfaced</strong>.</p>
+        <div class="stat-row mt-16">
+          <div class="stat"><div class="stat-num">surface_perspectives</div><div class="stat-label">action</div></div>
+          <div class="stat"><div class="stat-num">perspectives_surfaced</div><div class="stat-label">outcome</div></div>
+          <div class="stat"><div class="stat-num">6</div><div class="stat-label">evidence pieces</div></div>
+          <div class="stat"><div class="stat-num">3</div><div class="stat-label">perspectives surfaced</div></div>
+          <div class="stat"><div class="stat-num">2026-05-26 07:44 UTC</div><div class="stat-label">time</div></div>
+        </div>
+      </header>
+
+      <!-- ── Stage INPUT ── -->
+      <section>
+        <div class="section-head">
+          <p class="eyebrow">input</p>
+          <h2>What the pipeline received</h2>
+        </div>
+        <div class="stage-block">
+          <div class="stage-body">
+            <div class="io-row">
+              <div class="io-label">tweet text</div>
+              <div class="io-val">"UBI is the correct policy response to AI-driven job displacement."</div>
+            </div>
+            <div class="io-row">
+              <div class="io-label">invoker instruction</div>
+              <div class="io-val"><em style="color:var(--gray-500)">(empty — invoker only tagged @eddiexbot)</em></div>
+            </div>
+            <div class="io-row">
+              <div class="io-label">images</div>
+              <div class="io-val">none → Stage 1.5 skipped</div>
+            </div>
+            <div class="io-row">
+              <div class="io-label">tweet context</div>
+              <div class="io-val">none (local test run — no X fetch)</div>
+            </div>
+            <div class="io-row">
+              <div class="io-label">search backend</div>
+              <div class="io-val"><code>claude-web-search:claude-sonnet-4-6</code> (ClaudeWebSearchBackend via Microsoft Foundry)</div>
+            </div>
+            <div class="io-row">
+              <div class="io-label">pipeline commit</div>
+              <div class="io-val"><code>3b57f60</code></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Stage 2+3 ── -->
+      <section id="stage-23">
+        <div class="section-head">
+          <p class="eyebrow">stage 2 + 3</p>
+          <h2>Claim decomposition + action selection</h2>
+        </div>
+        <div class="stage-block">
+          <div class="stage-header">
+            <div class="stage-num">2+3</div>
+            <div>
+              <div class="stage-title">ExtractionOutput</div>
+              <div class="stage-meta">Claude Sonnet 4.6 · reasoning_effort=low · 45 s timeout</div>
+            </div>
+            <div><span class="chip chip-suggest">action=surface_perspectives</span></div>
+          </div>
+          <div class="stage-body">
+
+            <p class="meta mb-8">2 propositions extracted. Central is c1 (opinion). Action inferred from claim character — no invoker instruction to parse.</p>
+
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr><th>ID</th><th>Text</th><th>Type</th><th>Central</th><th>Check-worthy</th><th>Suggested action</th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>c1</code></td>
+                    <td>Universal Basic Income is the correct policy response to job displacement caused by AI.</td>
+                    <td><span class="chip chip-warning">opinion</span></td>
+                    <td><span class="chip chip-active">yes</span></td>
+                    <td><span class="chip">no</span></td>
+                    <td><code>surface_perspectives</code></td>
+                  </tr>
+                  <tr>
+                    <td><code>c2</code></td>
+                    <td>AI is causing or will cause significant job displacement.</td>
+                    <td><span class="chip chip-info">mixed</span></td>
+                    <td><span class="chip">no</span></td>
+                    <td><span class="chip">no</span></td>
+                    <td><code>verify</code></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="io-row mt-8">
+              <div class="io-label">action</div>
+              <div class="io-val"><code>surface_perspectives</code></div>
+            </div>
+            <div class="io-row">
+              <div class="io-label">action_source</div>
+              <div class="io-val"><code>inferred</code> — invoker only tagged; model selected action from central claim character</div>
+            </div>
+            <div class="io-row">
+              <div class="io-label">pivoted_from</div>
+              <div class="io-val"><em style="color:var(--gray-500)">null</em> — no pivot</div>
+            </div>
+            <div class="io-row">
+              <div class="io-label">overall_state</div>
+              <div class="io-val"><code>checked</code></div>
+            </div>
+            <div class="io-row">
+              <div class="io-label">decision</div>
+              <div class="io-val">action ≠ decline → pipeline continues to Stage 4</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Stage 4 ── -->
+      <section id="stage-4">
+        <div class="section-head">
+          <p class="eyebrow">stage 4</p>
+          <h2>Iterative search — surface_perspectives seeds</h2>
+        </div>
+        <div class="stage-block">
+          <div class="stage-header">
+            <div class="stage-num">4</div>
+            <div>
+              <div class="stage-title">iterative_verify · action=surface_perspectives</div>
+              <div class="stage-meta">2 seed queries · max 6 questions · 60 s wall-clock · claude-web-search:claude-sonnet-4-6</div>
+            </div>
+            <div><span class="chip chip-suggest">6 evidence records</span></div>
+          </div>
+          <div class="stage-body">
+
+            <p class="meta mb-12">surface_perspectives uses <strong>2 seed queries</strong> (breadth-first: debate + different perspectives). Controller stopped after seeds — the two seed results collectively surfaced enough distinct camps.</p>
+
+            <!-- Seed 1 -->
+            <div class="ev-group">
+              <div class="ev-q">
+                <div class="ev-q-label">Seed query 1 · template: "{claim} debate"</div>
+                <div class="ev-q-text">"Universal Basic Income is the correct policy response to job displacement caused by AI. debate"</div>
+              </div>
+
+              <div class="ev-hit ev-hit-neutral">
+                <div class="ev-hit-url">https://aimultiple.com/ai-job-loss</div>
+                <div class="ev-hit-snippet"><strong>Title:</strong> AI Job Loss — aimultiple.com · <strong>Stance (post-reconcile):</strong> <span class="chip">neutral</span></div>
+                <div class="ev-hit-snippet">WEF Future of Jobs Report 2025 — 92 million jobs projected displaced. McKinsey consultant: 90% of white-collar roles can be automated; mass underemployment would lead to a depression.</div>
+                <details class="ev-hit-body">
+                  <summary>body_markdown (3000 chars extracted by trafilatura)</summary>
+                  <pre>As a McKinsey consultant, I helped enterprises adopt new technology for a decade. My quick answers on AI job loss:
+
+How will AI impact jobs? 90% of all white-collar corporate roles that I have seen can be automated with current AI models and the right agent harness. We predict this transformation to take a decade due to system and process complexity.
+
+What will this lead to? Initially, immense corporate profits. However, mass underemployment would lead to a depression.
+
+Some AI experts predict the loss of half of entry-level white-collar jobs until 2030.
+
+[Karpathy AI exposure analysis] In March 2026, AI researcher Andrej Karpathy published a dataset that scores 342 US occupations on a 0–10 AI-exposure scale, drawing on BLS Occupational Outlook Handbook data covering ~143 million US jobs.
+
+Direct automation: How much of the work can AI perform on its own?
+Indirect productivity: How much AI raises worker output, potentially reducing headcount needed.
+
+The rubric applies a core heuristic: if a job can be performed entirely from a home office on a computer (writing, coding, analyzing, communicating), exposure is inherently high...
+[truncated at 3000 chars]</pre>
+                </details>
+              </div>
+
+              <div class="ev-hit ev-hit-neutral">
+                <div class="ev-hit-url">https://arxiv.org/pdf/2603.20617</div>
+                <div class="ev-hit-snippet"><strong>Title:</strong> "The AI Layoff Trap" (Falk &amp; Tsoukalas, arXiv 2603.20617) · <strong>Stance:</strong> <span class="chip">neutral</span></div>
+                <div class="ev-hit-snippet">In February 2026, Block cut nearly half its 10,000-person workforce — CEO Jack Dorsey stated AI had made many roles unnecessary.</div>
+                <details class="ev-hit-body">
+                  <summary>body_markdown (PDF — binary; trafilatura extraction failed)</summary>
+                  <pre>%PDF-1.7 binary — trafilatura could not extract article body. Only the snippet (from search citation) is available for reconcile reasoning.</pre>
+                </details>
+              </div>
+
+              <div class="ev-hit ev-hit-supports">
+                <div class="ev-hit-url">https://www.bakertilly.global/insights/ai-job-displacement-and-the-case-for-a-new-social-contract</div>
+                <div class="ev-hit-snippet"><strong>Title:</strong> "AI job displacement and the case for a new social contract" — Baker Tilly Global · <strong>Stance:</strong> <span class="chip chip-suggest">supports</span></div>
+                <div class="ev-hit-snippet">"A UBI, or a variant, could provide that safety net." Finland/Netherlands pilots showed wellbeing gains. Higher corporate taxes likely required.</div>
+                <details class="ev-hit-body">
+                  <summary>body_markdown (article body extracted)</summary>
+                  <pre>Morgan Stanley found UK AI job losses are twice the global average — British companies shedding ~8% of roles over the past year.
+
+JP Morgan CEO Jamie Dimon told WEF that governments must support displaced workers or risk civil unrest.
+
+"With the threat of productivity slowing and the need for a safety net, some form of intervention seems inevitable."
+
+"A UBI, or a variant, could provide that safety net."
+
+Countries such as Finland and the Netherlands have already trialled forms of unconditional income support. While these pilots showed only modest effects on employment, they consistently improved wellbeing, financial stability and confidence.
+
+"Funding a UBI would almost certainly require higher corporate taxes or new levies, fundamentally reshaping the business environment."
+
+A key challenge is that AI disproportionately threatens high-skill, white-collar jobs. "A flat-rate UBI may not replace those professional incomes, raising difficult questions around adequacy and incentives."
+[truncated at 3000 chars]</pre>
+                </details>
+              </div>
+            </div>
+
+            <!-- Seed 2 -->
+            <div class="ev-group">
+              <div class="ev-q">
+                <div class="ev-q-label">Seed query 2 · template: "{claim} different perspectives"</div>
+                <div class="ev-q-text">"Universal Basic Income is the correct policy response to job displacement caused by AI. different perspectives"</div>
+              </div>
+
+              <div class="ev-hit ev-hit-supports">
+                <div class="ev-hit-url">https://www.opendemocracy.net/en/beyond-trafficking-and-slavery/why-wait-until-the-robots-take-our-jobs-we-need-a-basic-income-now/</div>
+                <div class="ev-hit-snippet"><strong>Title:</strong> "Why wait until the robots take our jobs? We need a basic income now" — openDemocracy · <strong>Stance:</strong> <span class="chip chip-suggest">supports</span></div>
+                <div class="ev-hit-snippet">UBI gives workers the economic power to say no to poverty wages. Automation disrupts lives even when total job count rises — displacement is traumatic, children suffer.</div>
+                <details class="ev-hit-body">
+                  <summary>body_markdown (article body extracted)</summary>
+                  <pre>In recent years, one of the most popular arguments for UBI has been the fear that AI will someday take our jobs. But I don't think that's the best way to talk about the relationship between automation and UBI. It's too future-oriented.
+
+UBI is long overdue. The argument for it has to be based on the here-and-now.
+
+Automation disrupts people's lives. Even if the total number of jobs increases, people are not interchangeable parts. They spend their lives building up skills, take a job, and then suddenly their skills have no market value — technological displacement. Even if it does not lead to permanent technological unemployment, it's traumatic for workers and their families.
+
+You can see technological displacement in the gates of closed coal mines, the empty factories of hollowed-out post-industrial towns, and the vacant storefronts devastated by big box retailers.
+
+UBI gives workers the economic power to say no to poverty wages and poor working conditions. In doing so, it prevents automation from threatening one's ability to survive.
+[truncated at 3000 chars]</pre>
+                </details>
+              </div>
+
+              <div class="ev-hit ev-hit-refutes">
+                <div class="ev-hit-url">https://reason.com/2026/04/17/elon-musks-mistaken-call-for-a-universal-high-income/</div>
+                <div class="ev-hit-snippet"><strong>Title:</strong> "Elon Musk's Mistaken Call for a 'Universal High Income'" — Reason · <strong>Stance:</strong> <span class="chip chip-warning">refutes</span></div>
+                <div class="ev-hit-snippet">A pretty robust finding in the research is that giving people unconditional cash grants leads them to work less and even stop working at all. 300 years of labor-saving tech has not reduced total employment.</div>
+                <details class="ev-hit-body">
+                  <summary>body_markdown (article body extracted)</summary>
+                  <pre>Even before AI was a meaningful force, technologists and politicians have endorsed UBI to cope with mass unemployment from the AI revolution.
+
+The familiar case: an AI-powered economy will be much richer but leave the average person jobless. The solution: redistribute some gains by sending everyone a check. Elon Musk went further calling for a "universal HIGH INCOME."
+
+Musk is almost certainly right that AI will put downward pressure on prices. He's mistaken in believing this makes universal income a wise policy.
+
+The industrial revolution has been outsourcing tasks to labor-saving machines for ~300 years. While this has made lots of individual jobs obsolete, it has not made jobs generally obsolete. The total number of jobs continues to rise precipitously in the long run.
+
+The AI boosters and doomers argue that this time will be different, because unlike spinning jennies, AI will eventually be smarter than humans at everything. These arguments are obviously speculative.
+
+A pretty robust finding in the research: giving people unconditional cash grants leads them to work less and even stop working if the benefit is generous enough.
+[truncated at 3000 chars]</pre>
+                </details>
+              </div>
+
+              <div class="ev-hit ev-hit-refutes">
+                <div class="ev-hit-url">https://capx.co/ai-and-jobs-the-case-against-universal-basic-income</div>
+                <div class="ev-hit-snippet"><strong>Title:</strong> "AI and jobs: the case against universal basic income" — CapX · <strong>Stance:</strong> <span class="chip chip-warning">refutes</span></div>
+                <div class="ev-hit-snippet">A £11,000/year UK UBI would require a flat income tax rate of ~45%. Leeds woollen workers voiced the same fears two centuries ago — the Industrial Revolution did disrupt them but did not end employment.</div>
+                <details class="ev-hit-body">
+                  <summary>body_markdown (article body extracted)</summary>
+                  <pre>Adam Smith witnessed one of the most profound reorganisations of human capital in history: the transition to mechanised production. Contemporaneous sources warned new machinery would deprive workers of the opportunity of getting a livelihood. Fears of mass unemployment accompanied technological progress then just as they do now.
+
+Today it is AI that has revived these concerns. Some policymakers frame UBI as a necessary response to looming technological unemployment.
+
+One study estimates providing an annual UBI of just over £11,000 per person in Britain would require a flat income tax rate of around 45%.
+
+Advocates argue AI changes this calculus, making UBI financially feasible if AGI dramatically increases output without a corresponding increase in human work. The tax base could shift away from labour towards returns on capital and highly productive AI systems themselves.
+
+Even on these optimistic assumptions, UBI would require the wholesale replacement of the existing welfare system — a far more radical and risky change than advocates acknowledge.
+[truncated at 3000 chars]</pre>
+                </details>
+              </div>
+            </div>
+
+            <div class="callout info mt-8">
+              Controller called after the 2 seeds. Decision: <strong>stop</strong> — the two seed rounds collectively surfaced 2 distinct camps (pro-UBI: openDemocracy + Baker Tilly; market-adaptation: Reason + CapX) each with ≥1 credible source. Stop condition for surface_perspectives met.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Stage 4.5.2 ── -->
+      <section id="stage-452">
+        <div class="section-head">
+          <p class="eyebrow">stage 4.5.2</p>
+          <h2>Source quality classification</h2>
+        </div>
+        <div class="stage-block">
+          <div class="stage-header">
+            <div class="stage-num">4.5.2</div>
+            <div>
+              <div class="stage-title">build_quality_table · 6 URLs</div>
+              <div class="stage-meta">L1 in-memory dict → L2 Azure Tables cache → L3 Claude model-prior</div>
+            </div>
+            <div><span class="chip chip-info">structural · no LLM for L1/L2 hits</span></div>
+          </div>
+          <div class="stage-body">
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr><th>Domain</th><th>Tier</th><th>Source</th><th>Rationale</th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>aimultiple.com</code></td>
+                    <td><span class="tier-unknown">unknown</span></td>
+                    <td><code>model-prior</code></td>
+                    <td>B2B tech research advisory site; lacks editorial standards of reputable news; not a recognized fact-checker or primary source.</td>
+                  </tr>
+                  <tr>
+                    <td><code>arxiv.org</code></td>
+                    <td><span class="tier-primary-source">primary-source</span></td>
+                    <td><code>wikipedia-rsp</code></td>
+                    <td>Peer-reviewed preprint repository; recognized primary-source / academic institution.</td>
+                  </tr>
+                  <tr>
+                    <td><code>bakertilly.global</code></td>
+                    <td><span class="tier-unknown">unknown</span></td>
+                    <td><code>model-prior</code></td>
+                    <td>Major international accounting and advisory network; corporate/professional-services site, not a news outlet, fact-checker, or recognized primary-source institution.</td>
+                  </tr>
+                  <tr>
+                    <td><code>opendemocracy.net</code></td>
+                    <td><span class="tier-reputable-news">reputable-news</span></td>
+                    <td><code>model-prior</code></td>
+                    <td>Independent international media platform with recognizable editorial standards; carries a progressive editorial slant.</td>
+                  </tr>
+                  <tr>
+                    <td><code>reason.com</code></td>
+                    <td><span class="tier-reputable-news">reputable-news</span></td>
+                    <td><code>model-prior</code></td>
+                    <td>Established libertarian magazine with professional journalists and long publishing track record; strong ideological perspective.</td>
+                  </tr>
+                  <tr>
+                    <td><code>capx.co</code></td>
+                    <td><span class="tier-unknown">unknown</span></td>
+                    <td><code>model-prior</code></td>
+                    <td>UK opinion/commentary outlet associated with the Centre for Policy Studies; ideologically oriented; does not meet the threshold for reputable-news.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="callout info mt-8">All 6 URLs were L2 cache misses → went to L3 (Claude model-prior). Results written back to L2 cache for future runs. Note: CapX and Baker Tilly land as <em>unknown</em>, which reduces their weight in the action_outcome structural rule — but reconcile can still cite them as supporting context if the tier threshold isn't determinative.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Stage 4.5 ── -->
+      <section id="stage-45">
+        <div class="section-head">
+          <p class="eyebrow">stage 4.5</p>
+          <h2>Reconcile — mode: surface_perspectives</h2>
+        </div>
+        <div class="stage-block">
+          <div class="stage-header">
+            <div class="stage-num">4.5</div>
+            <div>
+              <div class="stage-title">ReconciliationOutput · action=surface_perspectives</div>
+              <div class="stage-meta">Claude Sonnet 4.6 · reasoning_effort=medium · 4096 thinking tokens · 90 s timeout</div>
+            </div>
+            <div><span class="chip chip-suggest">3 perspectives · 6 stances</span></div>
+          </div>
+          <div class="stage-body">
+
+            <div class="io-row">
+              <div class="io-label">lens 1 narrative</div>
+              <div class="io-val">The six sources collectively reflect a live, ideologically contested debate rather than a settled empirical question. openDemocracy (reputable-news) advocates UBI as an immediate necessity, arguing automation already displaces workers and UBI restores their bargaining power. Baker Tilly (unknown tier, professional advisory) frames some form of income support as "inevitable", cites Finnish/Dutch pilot wellbeing gains, but flags that a flat-rate UBI may be inadequate for high-skill displaced workers and would require higher corporate taxes. Reason.com (reputable-news, libertarian) pushes back hard: 300 years of labor-saving technology has not reduced total employment, UBI research consistently shows it reduces work participation, and the "this time is different" AI argument remains speculative. CapX (unknown tier) adds a fiscal dimension: a £11,000 UK UBI would require ~45% flat income tax, making it prohibitive absent a wholesale welfare replacement. The arxiv PDF body was not extractable (binary), so it contributes no textual evidence. AIMultiple provides AI-displacement background data only, not a policy stance. <em>No source directly refutes another's empirical data — the contradiction is structural: supporters and opponents start from different priors about whether AI-driven unemployment will be historically unprecedented.</em></div>
+            </div>
+
+            <div class="io-row">
+              <div class="io-label">cross-source contradiction</div>
+              <div class="io-val">
+                <strong>Topic:</strong> Whether AI will cause unprecedented mass unemployment (unlike prior automation waves)<br>
+                <strong>For:</strong> openDemocracy (reputable-news), Baker Tilly (unknown)<br>
+                <strong>Against:</strong> Reason (reputable-news), CapX (unknown)<br>
+                <strong>Resolution:</strong> Unresolved — both sides acknowledge uncertainty; the disagreement is about the probability and scale of displacement, not a factual dispute about current data.
+              </div>
+            </div>
+
+            <div class="io-row">
+              <div class="io-label">evidence stances</div>
+              <div class="io-val">
+                <span class="chip">neutral</span> aimultiple.com &nbsp;
+                <span class="chip">neutral</span> arxiv.org &nbsp;
+                <span class="chip chip-suggest">supports</span> bakertilly.global &nbsp;
+                <span class="chip chip-suggest">supports</span> opendemocracy.net &nbsp;
+                <span class="chip chip-warning">refutes</span> reason.com &nbsp;
+                <span class="chip chip-warning">refutes</span> capx.co
+              </div>
+            </div>
+
+            <p class="meta mt-12 mb-8"><strong>Perspectives surfaced</strong> (central claim goes to unaddressed_propositions — topic itself can't be "verified"):</p>
+
+            <div class="perspective-card">
+              <div class="perspective-label">Pro-UBI</div>
+              <div class="perspective-summary">UBI gives displaced workers a floor and bargaining power; Finland/Netherlands pilots showed wellbeing gains even when employment effects were modest.</div>
+              <div><span class="chip chip-suggest">openDemocracy (reputable-news)</span> <span class="chip">Baker Tilly (unknown)</span></div>
+            </div>
+            <div class="perspective-card">
+              <div class="perspective-label">Market-adaptation view</div>
+              <div class="perspective-summary">Tech has always created new jobs; UBI research shows it reduces work participation and the policy faces prohibitive fiscal costs (~45% flat tax in UK).</div>
+              <div><span class="chip chip-suggest">Reason (reputable-news)</span> <span class="chip">CapX (unknown)</span></div>
+            </div>
+            <div class="perspective-card">
+              <div class="perspective-label">Reskilling alternative</div>
+              <div class="perspective-summary">Targeted retraining and graduated safety nets better match displaced workers' varied needs; flat-rate UBI is inadequate for high-skill professional incomes.</div>
+              <div><span class="chip">CapX (unknown)</span> <span class="chip">Baker Tilly (unknown)</span></div>
+            </div>
+
+            <div class="io-row mt-8">
+              <div class="io-label">headline_finding</div>
+              <div class="io-val">"Experts are sharply divided on whether UBI or targeted retraining better addresses AI-driven job displacement."</div>
+            </div>
+            <div class="io-row">
+              <div class="io-label">tone_neutral_justification</div>
+              <div class="io-val">"Reason (libertarian) and openDemocracy (progressive) anchor opposing poles; Baker Tilly and CapX add fiscal and labour-market nuance, ensuring no single ideological framing dominates the summary."</div>
+            </div>
+            <div class="io-row">
+              <div class="io-label">primary_sources_to_cite</div>
+              <div class="io-val">
+                openDemocracy (<code>opendemocracy.net</code>) · Reason (<code>reason.com</code>) · CapX (<code>capx.co</code>)
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Stage 5 ── -->
+      <section id="stage-5">
+        <div class="section-head">
+          <p class="eyebrow">stage 5</p>
+          <h2>Audit</h2>
+        </div>
+        <div class="stage-block">
+          <div class="stage-header">
+            <div class="stage-num">5</div>
+            <div>
+              <div class="stage-title">audit() · mechanical action-outcome check</div>
+              <div class="stage-meta">pure Python · &lt;50 ms</div>
+            </div>
+            <div><span class="chip chip-suggest">passed</span></div>
+          </div>
+          <div class="stage-body">
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead><tr><th>Check</th><th>Result</th><th>Detail</th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td>action_outcome matches structural rule</td>
+                    <td><span class="chip chip-suggest">pass</span></td>
+                    <td><code>derive_action_outcome(surface_perspectives, findings, quality_table)</code> → <code>perspectives_surfaced</code> (≥2 distinct perspectives each with ≥1 reliable source: openDemocracy ✓, Reason ✓)</td>
+                  </tr>
+                  <tr>
+                    <td>All cited URLs in source_quality_table</td>
+                    <td><span class="chip chip-suggest">pass</span></td>
+                    <td>3 primary_sources_to_cite all present in the 6-entry quality table</td>
+                  </tr>
+                  <tr>
+                    <td>Central proposition in exactly one bucket</td>
+                    <td><span class="chip chip-suggest">pass</span></td>
+                    <td>Central claim in <code>unaddressed_propositions</code> (correct for surface_perspectives — the topic itself isn't "verified")</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="io-row mt-8">
+              <div class="io-label">final outcome</div>
+              <div class="io-val"><code>action_outcome = perspectives_surfaced</code> · <code>verdict_label = NotEnoughEvidence</code> (legacy field)</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Stage 6 ── -->
+      <section id="stage-6">
+        <div class="section-head">
+          <p class="eyebrow">stage 6</p>
+          <h2>FrozenVerdict written to disk</h2>
+        </div>
+        <div class="stage-block">
+          <div class="stage-header">
+            <div class="stage-num">6</div>
+            <div>
+              <div class="stage-title">freeze_to_disk · Pydantic JSON · deep-immutable</div>
+              <div class="stage-meta">data/freezes/5ab21772-cfd6-4e09-8f9c-9d07767bff8f.json · 33 KB</div>
+            </div>
+            <div><span class="chip chip-info">written</span></div>
+          </div>
+          <div class="stage-body">
+            <div class="io-row">
+              <div class="io-label">key fields</div>
+              <div class="io-val">
+                <code>action</code> = surface_perspectives &nbsp;·&nbsp;
+                <code>action_source</code> = inferred &nbsp;·&nbsp;
+                <code>pivoted_from</code> = null &nbsp;·&nbsp;
+                <code>action_outcome</code> = perspectives_surfaced &nbsp;·&nbsp;
+                <code>verdict_label</code> = NotEnoughEvidence (legacy) &nbsp;·&nbsp;
+                <code>overall_state</code> = checked
+              </div>
+            </div>
+            <div class="io-row">
+              <div class="io-label">claims</div>
+              <div class="io-val">2 claims. c1 (central, opinion) carries 6 Evidence records with populated body_markdown. c2 carries no evidence (not central).</div>
+            </div>
+            <div class="io-row">
+              <div class="io-label">renderer reads</div>
+              <div class="io-val"><code>presentation_payload</code> (headline_finding, perspectives, primary_sources_to_cite) + <code>tone_neutral_justification</code> only. All reasoning fields are inaccessible by contract.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Stage 7 ── -->
+      <section id="stage-7">
+        <div class="section-head">
+          <p class="eyebrow">stage 7</p>
+          <h2>Render</h2>
+        </div>
+        <div class="stage-block">
+          <div class="stage-header">
+            <div class="stage-num">7</div>
+            <div>
+              <div class="stage-title">render() · action=surface_perspectives</div>
+              <div class="stage-meta">system = _SURFACE_PERSPECTIVES_TEMPLATE + _TONE_REGISTER + _hard_constraints · ≤256 X-weighted chars · zero URLs in body</div>
+            </div>
+            <div><span class="chip chip-warning">not captured</span></div>
+          </div>
+          <div class="stage-body">
+            <div class="callout info">
+              This was a local test run — the render step was not invoked from <code>run_local.py</code> (it outputs the frozen verdict; render is called separately by the streamer when a real mention comes in). No reply text was produced for this invocation.
+            </div>
+            <div class="io-row mt-8">
+              <div class="io-label">what render would do</div>
+              <div class="io-val">
+                Compose <code>_SURFACE_PERSPECTIVES_TEMPLATE + _TONE_REGISTER[tone] + _hard_constraints_for("surface_perspectives", "actionable", pivoted=False)</code>.<br><br>
+                Feed: <code>state=actionable</code>, <code>presentation_payload.perspectives</code> (Pro-UBI + Market-adaptation view), <code>headline_finding</code>, <code>primary_sources_to_cite</code>.<br><br>
+                Constraint: present EXACTLY two perspectives. Source naming optional (all URLs on /info). Strict neutrality — no side taken. Sarcasm OFF.<br><br>
+                Example output form: <em>"Two camps: Pro-UBI sees a universal floor as essential; market-adaptation camp points to 300 years of automation creating — not destroying — jobs, and warns UBI reduces work participation. Both backed by credible sources."</em>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Recent runs ── -->
+      <section id="recent-runs">
+        <div class="section-head">
+          <p class="eyebrow">recent runs</p>
+          <h2>Other local test runs</h2>
+          <p class="meta">All local (no X post). Click invocation IDs to find the freeze in <code>data/freezes/</code>.</p>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Time (UTC)</th><th>Action</th><th>Outcome</th><th>Ev</th><th>Inv ID (prefix)</th><th>Central claim</th></tr>
+            </thead>
+            <tbody>
+              <tr style="background:var(--gray-200)">
+                <td>2026-05-26 07:44</td>
+                <td><span class="chip chip-suggest">surface_perspectives</span></td>
+                <td><code>perspectives_surfaced</code></td>
+                <td>6</td>
+                <td><code>5ab21772</code> ← this trace</td>
+                <td>UBI is the correct policy response to AI job displacement</td>
+              </tr>
+              <tr>
+                <td>2026-05-26 07:42</td>
+                <td><span class="chip chip-active">verify</span></td>
+                <td><code>verified_refuted</code></td>
+                <td>3</td>
+                <td><code>a25ca236</code></td>
+                <td>COVID-19 vaccines contain microchips that track people.</td>
+              </tr>
+              <tr>
+                <td>2026-05-26 06:18</td>
+                <td><span class="chip chip-active">verify</span></td>
+                <td><code>verified_nei</code></td>
+                <td>3</td>
+                <td><code>d6885c66</code></td>
+                <td>Donald Trump claimed a new drug can reverse death and bring people back to life.</td>
+              </tr>
+              <tr>
+                <td>2026-05-26 05:42</td>
+                <td><span class="chip">decline</span></td>
+                <td><code>declined</code></td>
+                <td>0</td>
+                <td><code>7228eb4a</code></td>
+                <td>The author went to the gym and is feeling great today.</td>
+              </tr>
+              <tr>
+                <td>2026-05-26 05:36</td>
+                <td><span class="chip chip-info">challenge_opinion</span></td>
+                <td><code>challenged</code></td>
+                <td>6</td>
+                <td><code>a54a5492</code></td>
+                <td>Renewable energy is a scam.</td>
+              </tr>
+              <tr>
+                <td>2026-05-26 05:32</td>
+                <td><span class="chip chip-warning">provide_context</span></td>
+                <td><code>context_provided</code></td>
+                <td>6</td>
+                <td><code>f60c6f78</code></td>
+                <td>60% of Americans live paycheck to paycheck.</td>
+              </tr>
+              <tr>
+                <td>2026-05-26 05:07</td>
+                <td><span class="chip chip-active">verify</span></td>
+                <td><code>verified_nei</code></td>
+                <td>3</td>
+                <td><code>a8c94ad4</code></td>
+                <td>The Apollo 11 moon landing in 1969 was faked and filmed on a soundstage.</td>
+              </tr>
+              <tr>
+                <td>2026-05-25 03:02</td>
+                <td><span class="chip chip-active">verify</span></td>
+                <td><code>verified_refuted</code></td>
+                <td>3</td>
+                <td><code>c9869b86</code></td>
+                <td>Pope Francis was photographed wearing a Balenciaga puffer jacket in 2023.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer class="meta mt-24">
+        derad-agent · pipeline trace · generated from freeze 5ab21772 · 2026-05-26
+      </footer>
+    </main>
+  </div>
+
+  <script src="assets/html-design-system.js"></script>
+  <script>initScrollSpy();</script>
+</body>
+</html>

@@ -9,6 +9,7 @@ Usage:
 """
 
 import logging
+import os
 from datetime import datetime, timezone
 
 from agent.app.events import BotReplyReply, SNAPSHOT_MIN_AGE, get_store, log_reply_reply, utcnow
@@ -17,6 +18,9 @@ from agent.llm.config import get_x_client
 logger = logging.getLogger(__name__)
 
 MAX_REPLIES_PER_BOT_TWEET = 100
+# search_recent auto-paginates the whole conversation; bound the scan so a
+# viral thread can't burn unbounded X-API quota per bot reply.
+MAX_PAGES_PER_BOT_TWEET = 5
 
 
 def _collect_one(
@@ -24,66 +28,102 @@ def _collect_one(
     tone: str,
     mention_id: str | None,
     parent_id: str | None,
+    link_reply_id: str | None = None,
+    bot_user_id: str | None = None,
 ) -> int:
-    """Fetch replies to bot_reply_id from X and write BotReplyReply rows. Returns count written."""
+    """Fetch replies to bot_reply_id from X and write BotReplyReply rows. Returns count written.
+
+    The bot's own dossier link self-reply (and any other bot-authored tweet in
+    the thread) is excluded so it isn't counted as a bystander reply — by
+    author_id == BOT_USER_ID and, as a backstop that works even when that env
+    var is unset, by reply_tweet_id == link_reply_id.
+    """
     now = utcnow()
     written = 0
+    if bot_user_id is None:
+        bot_user_id = os.getenv("BOT_USER_ID") or None
 
-    # conversation_id equals the root tweet of the thread, which is parent_id
-    # (the post the invoker was replying to). We search that conversation and
-    # filter in Python for tweets that directly reply to the bot's reply.
-    query = f"conversation_id:{parent_id}" if parent_id else f"in_reply_to_tweet_id:{bot_reply_id}"
+    # X v2 search has no reply-target operator, so we search the whole
+    # conversation (conversation_id is the thread root = parent_id, the post the
+    # invoker replied to) and filter in Python to tweets that reply to the bot.
+    if not parent_id:
+        logger.info("No parent_id for bot_reply_id=%s — cannot search conversation, skipping", bot_reply_id)
+        return 0
 
+    # posts.search_recent returns a generator of page objects (each with .data /
+    # .includes), not a single response. Iterate pages, bounded by page count
+    # and the per-tweet reply cap.
     try:
         client = get_x_client()
-        response = client.tweets.search_recent(
-            query=query,
-            tweet_fields=["author_id", "public_metrics", "in_reply_to_user_id", "text"],
+        pages = client.posts.search_recent(
+            query=f"conversation_id:{parent_id}",
+            tweet_fields=["author_id", "public_metrics", "referenced_tweets", "text"],
             expansions=["author_id"],
             user_fields=["username"],
             max_results=MAX_REPLIES_PER_BOT_TWEET,
         )
     except Exception:
-        logger.warning("Failed to search replies for bot_reply_id=%s", bot_reply_id)
+        logger.warning(
+            "Failed to search replies for bot_reply_id=%s", bot_reply_id, exc_info=True
+        )
         return 0
 
-    data = getattr(response, "data", None) or []
-    includes = getattr(response, "includes", {}) or {}
-    users_by_id = {u["id"]: u for u in (includes.get("users") or [])}
+    try:
+        for page_num, page in enumerate(pages):
+            if page_num >= MAX_PAGES_PER_BOT_TWEET or written >= MAX_REPLIES_PER_BOT_TWEET:
+                break
 
-    for tweet in data:
-        tweet_dict = tweet if isinstance(tweet, dict) else (tweet.__dict__ if hasattr(tweet, "__dict__") else {})
-        direct = tweet_dict.get("in_reply_to_tweet_id") == bot_reply_id
-        ref_reply = any(
-            r.get("id") == bot_reply_id and r.get("type") == "replied_to"
-            for r in (tweet_dict.get("referenced_tweets") or [])
+            data = getattr(page, "data", None) or []
+            includes = getattr(page, "includes", None) or {}
+            users_by_id = {u["id"]: u for u in (includes.get("users") or [])}
+
+            for tweet in data:
+                tweet_dict = tweet if isinstance(tweet, dict) else getattr(tweet, "__dict__", {})
+                is_reply_to_bot = any(
+                    r.get("id") == bot_reply_id and r.get("type") == "replied_to"
+                    for r in (tweet_dict.get("referenced_tweets") or [])
+                )
+                if not is_reply_to_bot:
+                    continue
+
+                tweet_id = str(tweet_dict.get("id", ""))
+                author_id = str(tweet_dict.get("author_id", ""))
+                text = tweet_dict.get("text", "")
+                if not tweet_id or not author_id or not text:
+                    continue
+
+                # Exclude the bot's own replies (notably the dossier link
+                # self-reply) so they aren't logged as bystander replies.
+                if (bot_user_id and author_id == bot_user_id) or (
+                    link_reply_id and tweet_id == link_reply_id
+                ):
+                    logger.debug("Skipping bot self-reply %s in thread %s", tweet_id, parent_id)
+                    continue
+
+                metrics_data = tweet_dict.get("public_metrics") or {}
+                user = users_by_id.get(author_id, {})
+                username = user.get("username") if isinstance(user, dict) else None
+
+                reply = BotReplyReply(
+                    bot_reply_id=bot_reply_id,
+                    reply_tweet_id=tweet_id,
+                    author_id=author_id,
+                    text=text,
+                    collected_at_utc=now,
+                    author_username=username,
+                    like_count=metrics_data.get("like_count", 0),
+                    mention_id=mention_id,
+                    tone=tone,
+                )
+                log_reply_reply(reply)
+                written += 1
+                if written >= MAX_REPLIES_PER_BOT_TWEET:
+                    break
+    except Exception:
+        logger.warning(
+            "Error while paging replies for bot_reply_id=%s (wrote %d before failure)",
+            bot_reply_id, written, exc_info=True,
         )
-        if not direct and not ref_reply:
-            continue
-
-        tweet_id = str(tweet_dict.get("id", ""))
-        author_id = str(tweet_dict.get("author_id", ""))
-        text = tweet_dict.get("text", "")
-        metrics_data = tweet_dict.get("public_metrics") or {}
-        user = users_by_id.get(author_id, {})
-        username = user.get("username") if isinstance(user, dict) else None
-
-        if not tweet_id or not author_id or not text:
-            continue
-
-        reply = BotReplyReply(
-            bot_reply_id=bot_reply_id,
-            reply_tweet_id=tweet_id,
-            author_id=author_id,
-            text=text,
-            collected_at_utc=now,
-            author_username=username,
-            like_count=metrics_data.get("like_count", 0),
-            mention_id=mention_id,
-            tone=tone,
-        )
-        log_reply_reply(reply)
-        written += 1
 
     return written
 
@@ -95,8 +135,8 @@ def main() -> None:
     now = utcnow()
     already_done = store.collected_reply_ids()
     candidates = [
-        (reply_id, tone, mention_id, parent_id)
-        for reply_id, tone, posted_at, mention_id, parent_id in store.iter_reply_ids()
+        (reply_id, tone, mention_id, parent_id, link_reply_id)
+        for reply_id, tone, posted_at, mention_id, parent_id, link_reply_id in store.iter_reply_ids()
         if posted_at is not None
         and now - (posted_at if posted_at.tzinfo else posted_at.replace(tzinfo=timezone.utc)) >= SNAPSHOT_MIN_AGE
         and reply_id not in already_done
@@ -108,8 +148,8 @@ def main() -> None:
 
     logger.info("Collecting replies for %d bot tweets", len(candidates))
     total = 0
-    for reply_id, tone, mention_id, parent_id in candidates:
-        n = _collect_one(reply_id, tone, mention_id, parent_id)
+    for reply_id, tone, mention_id, parent_id, link_reply_id in candidates:
+        n = _collect_one(reply_id, tone, mention_id, parent_id, link_reply_id=link_reply_id)
         logger.info("bot_reply_id=%s: collected %d bystander replies", reply_id, n)
         total += n
 

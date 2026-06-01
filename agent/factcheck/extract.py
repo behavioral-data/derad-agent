@@ -42,9 +42,6 @@ class ExtractedClaim(BaseModel):
         description="Verbatim quote from the input tweet that motivates this proposition.",
     )
     is_central: bool
-    check_worthy: bool = Field(
-        description="True only if this proposition is BOTH verifiable/mixed AND worth fact-checking effort (not trivial, not vague generality, not pure restatement)."
-    )
     suggested_action: Action = Field(
         default="verify",
         description="What the bot should DO with this proposition — verify against evidence, provide missing context, push back as opinion, surface multiple sides, or decline.",
@@ -126,10 +123,9 @@ For each atomic proposition you find:
     - "mixed" — verifiable factual core inside an opinion frame ("Musk's [verifiable: 2023] Neuralink demo was [opinion: groundbreaking]").
 - `source_span`: a short verbatim quote from the tweet (or image OCR).
 - `is_central`: TRUE for EXACTLY ONE proposition — the headline the tweet is making. Bias toward the most extraordinary / falsifiable claim if there are ties. For a tweet that's purely a contested topic with no single claim, the central proposition IS the topic statement.
-- `check_worthy`: TRUE only when type ∈ {verifiable, mixed} AND the proposition meaningfully impacts what a reader would believe. FALSE for pure opinion, vague generalities, well-known background facts the bot needn't re-verify.
 - `suggested_action`: what the bot should do for THIS proposition (verify / provide_context / challenge_opinion / surface_perspectives / decline) — pre-aggregation; the top-level `action` will draw on the central proposition's suggestion plus the invoker's instruction.
 - `action_rationale`: one short sentence on why this suggested_action fits this proposition.
-- `rationale`: one short sentence on why you assigned this type / check_worthy.
+- `rationale`: one short sentence on why you assigned this type.
 
 CENTRAL-CLAIM defaults: prefer the most extraordinary / falsifiable / image-bearing claim. The central proposition CAN be opinion (then suggested_action is likely challenge_opinion or surface_perspectives).
 
@@ -234,7 +230,6 @@ def _fallback(claim_text: str) -> ExtractionOutput:
                 type="verifiable",
                 source_span=claim_text[:160],
                 is_central=True,
-                check_worthy=True,
                 suggested_action="verify",
                 action_rationale="extraction fallback — assume verifiable claim",
                 rationale="extraction fallback — extractor failed or returned malformed output",

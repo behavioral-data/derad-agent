@@ -104,9 +104,21 @@ def get_llm(
     return ChatAnthropic(**config)
 
 
+# Default (connect, read) timeouts for the X API client's underlying
+# requests session. Without these, xdk calls inherit requests' default of
+# "no timeout" — a stalled X-side TCP connection can block a worker
+# thread for many minutes before being killed (see prod incident where
+# fetch_tweet hung 15 min before RemoteDisconnected).
+_X_CLIENT_TIMEOUT = (5.0, 15.0)
+
+
 @functools.lru_cache(maxsize=1)
 def get_x_client():
-    """Cached X client for the single bot identity."""
+    """Cached X client for the single bot identity.
+
+    Wraps the underlying ``requests.Session.request`` to inject a default
+    ``timeout=`` on every xdk call. Caller-supplied timeouts (if any) win.
+    """
     from xdk import Client
     from xdk.oauth1_auth import OAuth1
 
@@ -118,6 +130,20 @@ def get_x_client():
         access_token_secret=_require_env("X_ACCESS_TOKEN_SECRET"),
     )
     client = Client(auth=oauth1)
+
+    # xdk's PostsClient.get_by_id and friends don't expose a timeout kwarg.
+    # Patch the underlying session so a default propagates through every
+    # call. session.request is the chokepoint for .get/.post/etc.
+    session = getattr(client, "session", None)
+    if session is not None and hasattr(session, "request"):
+        _original_request = session.request
+
+        def _request_with_default_timeout(method, url, **kwargs):
+            kwargs.setdefault("timeout", _X_CLIENT_TIMEOUT)
+            return _original_request(method, url, **kwargs)
+
+        session.request = _request_with_default_timeout
+
     return client
 
 

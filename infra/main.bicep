@@ -381,10 +381,10 @@ resource containerAppsEnv 'Microsoft.App/managedEnvironments@2024-03-01' = {
   }
 }
 
-// Daily engagement cron at 12:00 UTC.
+// Engagement cron at 00:00 + 12:00 UTC (every 12 h).
 // Runs both CLIs in one replica:
-//   - derad-poll-engagement  → EngagementSnapshots (one per reply at the 3-day mark)
-//   - derad-collect-replies  → BotReplyReplies     (bystander text at the same window)
+//   - derad-poll-engagement  → EngagementSnapshots (~20/reply: every 12h for 10 days)
+//   - derad-collect-replies  → BotReplyReplies     (bystander text, once at the 3-day mark)
 // Shell wrapper preserves both exit codes so a partial failure surfaces as a
 // non-zero replica (visible in the Container Apps run history + log alerts).
 // Same UAMI as App Service → AcrPull, Tables, and KV access already in place;
@@ -408,7 +408,7 @@ resource engagementCronJob 'Microsoft.App/jobs@2024-03-01' = {
       replicaTimeout: 1800
       replicaRetryLimit: 1
       scheduleTriggerConfig: {
-        cronExpression: '0 12 * * *'
+        cronExpression: '0 0,12 * * *'
         parallelism: 1
         replicaCompletionCount: 1
       }

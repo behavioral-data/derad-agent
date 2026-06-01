@@ -36,6 +36,19 @@ from .schema import (
 logger = logging.getLogger(__name__)
 
 
+# Import the stance-drift counter at module load. We only swallow
+# ModuleNotFoundError — that's the legitimate test-isolation case (the
+# reconcile stage exercised without the Flask app's metrics module on
+# the path). Any other ImportError (e.g. a broken OpenTelemetry exporter
+# import inside agent.app.metrics) should fail loudly here rather than
+# silently disappear at the per-call site.
+try:
+    from agent.app import metrics as _app_metrics
+    _reconcile_stance_drift = _app_metrics.reconcile_stance_drift
+except ModuleNotFoundError:
+    _reconcile_stance_drift = None
+
+
 _RECONCILE_SNIPPET_CAP = 240
 _RECONCILE_RATIONALE_CAP = 120
 # Per-source article body cap fed to the reconcile LLM. Each Evidence row
@@ -106,15 +119,22 @@ SHARED RULES — every action
 - Re-stamp each input text evidence with a stance (supports / refutes / neutral) in INPUT ORDER (used by every action).
 - Lens 1 narrative (text-text reconciliation) is always written; surface cross-source contradictions there.
 - For image-bearing claims, fold image-text + cross-modal reasoning INTO the narrative (lens_1.narrative) — Lens 2/3 are not separate outputs at this stage.
-- BUDGET (critical — downstream renderer fits ≤256 X-weighted chars):
-    - `headline_finding`: ≤120 chars, one punchy sentence.
-    - `counter_fact`: ≤120 chars; null unless action=verify AND finding is refuted.
-    - `tone_neutral_justification`: ≤220 chars; 1–2 sentences; name load-bearing source(s).
-    - `load_bearing_evidence_snippet`: ≤180 chars.
-    - `context_note`: ≤220 chars; the missing context the framing hides.
-    - Counterpoint.summary: ≤160 chars each; aim for 1–3 counterpoints.
-    - Perspective.label: ≤22 chars — tweet-compact shorthand ("Pro-UBI", "Cost-control view", "Polarization lens"), NOT a sentence. Long labels blow the renderer's char budget.
-    - Perspective.summary: ≤140 chars each; aim for 2–3 perspectives — the renderer only surfaces the top 2.
+
+REASONING DEPTH (critical — the renderer now has a ~24,000 char budget):
+Go beyond citing what sources say. For every populated field, reason about:
+  1. **Mechanism** — WHY does the evidence undermine or support the claim? What specifically about this evidence contradicts the claim's logic?
+  2. **Logical structure** — What is the claim actually asserting? What has to be true for the claim to hold? Does the evidence falsify that specific thing?
+  3. **Implication** — What should a reader update? Not just "Source X found Y" but "this means the claim's core premise [Z] is [wrong / overstated / missing context]."
+
+BUDGET (renderer has ~24,000 char budget — use space proportionate to what the argument needs):
+    - `headline_finding`: 1–2 punchy sentences; the single most important finding stated plainly. This is the TL;DR; the renderer leads with it.
+    - `counter_fact`: 1–2 sentences; null unless action=verify AND finding is refuted.
+    - `tone_neutral_justification`: 3–8 sentences; the reasoning the renderer will build on. Explain the mechanism, the logical structure of the claim, what the evidence actually shows, and what a reader should update. Name the sources, but don't stop there — explain why the evidence matters.
+    - `load_bearing_evidence_snippet`: a verbatim quote from the source body (up to ~400 chars); choose the passage that most directly falsifies or contextualizes the central claim.
+    - `context_note`: 3–6 sentences; explain what framing the claim hides and WHY the missing context changes the picture — not just what it is, but why it's significant.
+    - Counterpoint.summary: 2–4 sentences each; explain the argument and its empirical basis, not just who holds it.
+    - Perspective.label: short shorthand ("Pro-UBI", "Cost-control view", "Polarization lens"), NOT a sentence.
+    - Perspective.summary: 2–4 sentences each; explain the view, the specific evidence it marshals, and the values underlying it.
 
 ═══════════════════════════════════════════════════════════════
 ACTION-SPECIFIC OUTPUT
@@ -122,34 +142,35 @@ ACTION-SPECIFIC OUTPUT
 
 ▌action == "verify"
 Populate the existing buckets — verified_propositions / refuted_propositions / disputed_propositions / unaddressed_propositions. Mark the central proposition with `is_central=true`.
-- presentation_payload.headline_finding: the one most important fact.
-- presentation_payload.counter_fact: set when refuted; otherwise null.
+- presentation_payload.headline_finding: the verdict in 1–2 sentences — what the evidence shows about the claim's central assertion.
+- presentation_payload.counter_fact: set when refuted; explain the actual fact and why it matters.
 - presentation_payload.primary_sources_to_cite: 1–3 sources, fact-checker > reputable-news.
-- presentation_payload.load_bearing_evidence_snippet: a short quote.
+- presentation_payload.load_bearing_evidence_snippet: a verbatim quote from body_markdown that most directly falsifies or contextualizes the claim.
+- tone_neutral_justification: explain the mechanism — what is the claim asserting, what does the evidence specifically show about that, and what should the reader update. Name sources but explain WHY they matter.
 - DO NOT populate context_note / counterpoints / perspectives.
 
 ▌action == "provide_context"
 The literal claim may BE TRUE — the goal is to surface the missing context that changes how a reader should interpret it. STRICT RULE: do NOT populate verified_propositions or refuted_propositions for the central claim. Use contextual_findings instead.
-- consolidated_findings.contextual_findings: one entry with is_central=true; `missing_context` is the framing the claim hides.
-- presentation_payload.headline_finding: the missing context in one sentence (not "this is true" — the bot will read as missing-context).
-- presentation_payload.context_note: ≤220 chars; the missing context.
+- consolidated_findings.contextual_findings: one entry with is_central=true; `missing_context` explains what framing the claim hides AND why that changes the picture.
+- presentation_payload.headline_finding: what the missing context reveals, in 1–2 sentences.
+- presentation_payload.context_note: 3–6 sentences; explain what the claim implies, what it leaves out, and why the missing piece changes how a reader should interpret the claim.
 - presentation_payload.primary_sources_to_cite: 1–3 sources backing the missing context.
 - counter_fact: null. counterpoints / perspectives: empty.
 
 ▌action == "challenge_opinion"
 The central proposition is a strongly-stated opinion. Surface counterpoints from NAMED credible critics (not pundit echo chambers).
 - consolidated_findings.challenged_propositions: one entry with is_central=true, containing 1–3 counterpoints.
-- Each Counterpoint: summary (≤160 chars), citing_sources (≥1 TierRef from source_quality_table, prefer reputable-news / fact-checker / primary-source), weight ∈ {strong, moderate, weak}.
-- presentation_payload.headline_finding: the strongest counterpoint in one sentence.
+- Each Counterpoint: summary (2–4 sentences explaining the argument and its empirical basis — what premise does the counter-evidence falsify and why does that matter), citing_sources (≥1 TierRef from source_quality_table, prefer reputable-news / fact-checker / primary-source), weight ∈ {strong, moderate, weak}.
+- presentation_payload.headline_finding: the strongest counterpoint in 1–2 sentences.
 - presentation_payload.counterpoints: same 1–3 Counterpoint objects.
 - presentation_payload.primary_sources_to_cite: 1–3 sources used by the counterpoints (renderer will cite at least one).
 - counter_fact: null. context_note / perspectives: empty / null.
 
 ▌action == "surface_perspectives"
 The topic is genuinely contested. Surface ≥2 distinct credible perspectives, each with ≥1 reputable source.
-- consolidated_findings.perspectives: 2–3 Perspective entries (renderer surfaces only the top 2). Each with label (≤22 chars, tweet-compact shorthand like "Pro-UBI", "Cost-control view", "Polarization lens" — NOT a sentence), summary (≤140 chars), citing_sources (≥1 TierRef).
+- consolidated_findings.perspectives: 2–3 Perspective entries (renderer surfaces only the top 2). Each with label (short shorthand like "Pro-UBI", "Cost-control view", "Polarization lens" — NOT a sentence), summary (2–4 sentences explaining the view, the specific evidence it marshals, and the values underlying it), citing_sources (≥1 TierRef).
 - Order matters: put the two STRONGEST / most distinct perspectives FIRST (those are the ones the renderer will surface).
-- presentation_payload.headline_finding: a one-sentence framing of the disagreement (NOT a side).
+- presentation_payload.headline_finding: a 1–2 sentence framing of the disagreement (NOT a side).
 - presentation_payload.perspectives: same Perspective objects.
 - presentation_payload.primary_sources_to_cite: 1–3 sources spanning multiple perspectives.
 - Mark the central proposition in… see below.
@@ -206,7 +227,7 @@ def reconcile(
             schema=ReconciliationOutput,
             system=_SYSTEM_PROMPT,
             reasoning_effort="medium",
-            max_tokens=4096,
+            max_tokens=8192,
             timeout=90.0,
         )
     except (ValueError, TimeoutError) as exc:
@@ -248,11 +269,8 @@ def reconcile(
             "reconcile: returned %d stances for %d evidence entries — repairing (delta=%d).",
             len(output.evidence_stances), len(evidence), delta,
         )
-        try:
-            from agent.app import metrics as _metrics
-            _metrics.reconcile_stance_drift.add(1, {"delta": str(delta)})
-        except ImportError:
-            pass  # tests / isolated runs without the metrics module
+        if _reconcile_stance_drift is not None:
+            _reconcile_stance_drift.add(1, {"delta": str(delta)})
         stances = list(output.evidence_stances)[: len(evidence)]
         while len(stances) < len(evidence):
             stances.append("neutral")

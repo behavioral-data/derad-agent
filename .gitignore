@@ -94,3 +94,13 @@ rating_matrix_plan.md
 
 # Screenshots
 Screenshot*.png
+keys.md
+
+# Personal Claude Code settings (project-level config in .claude/ is committed)
+.claude/settings.local.json
+
+# Operational skills coupled to live infra (KV name, deploy targets) — kept local
+.claude/skills/
+
+# Internal project tracking — not for public consumption
+todo.md
