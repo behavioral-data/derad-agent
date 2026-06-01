@@ -293,7 +293,7 @@
         <table class="data-table" id="events-table">
           <thead>
             <tr>
-              <th>Time (UTC)</th>
+              <th>Time (PST)</th>
               <th>Author</th>
               <th>Tone</th>
               <th>Outcome</th>
@@ -322,7 +322,7 @@
         <table class="data-table" id="drops-table">
           <thead>
             <tr>
-              <th>Time (UTC)</th>
+              <th>Time (PST)</th>
               <th>Author</th>
               <th>Tone</th>
               <th>Reason</th>
@@ -342,13 +342,13 @@
       <div class="section-head">
         <p class="eyebrow">04 · Bot Replies</p>
         <h2>Bot Replies by User · by Day</h2>
-        <p>Every successful bot reply, grouped by UTC date, newest first. Each row links to the live tweet on X. Showing up to 200 most recent.</p>
+        <p>Every successful bot reply, grouped by PST date, newest first. Each row links to the live tweet on X. Showing up to 200 most recent.</p>
       </div>
       <div class="tbl-toolbar">
         <input type="text" id="bot-search" class="tbl-input" placeholder="Search username…"
           style="width:200px;" oninput="onBotSearch(this.value)">
         <input type="date" id="bot-date" class="tbl-input"
-          title="Show replies from one UTC day" oninput="onBotDate(this.value)">
+          title="Show replies from one PST day" oninput="onBotDate(this.value)">
         <button class="tbl-btn" id="bot-date-clear" onclick="clearBotDate()">Clear date</button>
         <span class="spacer"></span>
         <span class="tbl-note" id="bot-count">—</span>
@@ -359,7 +359,7 @@
         <table class="data-table" id="bot-replies-table">
           <thead>
             <tr>
-              <th class="sortable" data-col="time">Time (UTC)<span class="sort-arrow">↕</span></th>
+              <th class="sortable" data-col="time">Time (PST)<span class="sort-arrow">↕</span></th>
               <th class="sortable" data-col="user">User<span class="sort-arrow">↕</span></th>
               <th class="sortable" data-col="bot">Bot<span class="sort-arrow">↕</span></th>
               <th class="sortable" data-col="day">Study Day<span class="sort-arrow">↕</span></th>
@@ -451,7 +451,7 @@
               <th>Quotes</th>
               <th>Clicks</th>
               <th>Polls</th>
-              <th>Last polled (UTC)</th>
+              <th>Last polled (PST)</th>
             </tr>
           </thead>
           <tbody id="byreply-tbody">
@@ -471,7 +471,7 @@
         <table class="data-table" id="bystander-table">
           <thead>
             <tr>
-              <th>Collected (UTC)</th>
+              <th>Collected (PST)</th>
               <th>From user</th>
               <th>Tone</th>
               <th>Likes</th>
@@ -520,7 +520,7 @@
               <th>Handle</th>
               <th>Tone</th>
               <th>X User ID</th>
-              <th>Registered (UTC)</th>
+              <th>Registered (PST)</th>
               <th>Notes</th>
             </tr>
           </thead>
@@ -569,7 +569,7 @@
 
   function fmtTime(iso) {
     if (!iso) return '—';
-    return iso.replace('T', ' ').replace(/\.\d+.*/, '').replace('+00:00', '');
+    return new Date(iso).toLocaleString('sv-SE', { timeZone: 'America/Los_Angeles' });
   }
 
   function outcomeChip(outcome) {
@@ -808,7 +808,7 @@
     { label: 'Handle',           get: p => p.author_username ? '@' + p.author_username : '' },
     { label: 'Tone',             get: p => p.tone || '' },
     { label: 'X User ID',        get: p => p.author_id || '' },
-    { label: 'Registered (UTC)', get: p => p.enrolled_at_utc || '' },
+    { label: 'Registered (PST)', get: p => p.enrolled_at_utc || '' },
     { label: 'Notes',            get: p => p.notes || '' },
   ];
 
@@ -888,10 +888,12 @@
 
   // ── Bot replies ────────────────────────────────────────────────────────────
   function fmtDay(iso) {
-    return (iso || '').slice(0, 10) || '—';
+    if (!iso) return '—';
+    return new Date(iso).toLocaleDateString('sv-SE', { timeZone: 'America/Los_Angeles' });
   }
   function fmtClock(iso) {
-    return (iso || '').slice(11, 19) || '—';
+    if (!iso) return '—';
+    return new Date(iso).toLocaleTimeString('sv-SE', { timeZone: 'America/Los_Angeles' });
   }
 
   let botRepliesData = [];
@@ -950,7 +952,7 @@
   }
 
   const BOT_CSV_COLS = [
-    { label: 'Time (UTC)',  get: r => r.received_at_utc || '' },
+    { label: 'Time (PST)',  get: r => r.received_at_utc || '' },
     { label: 'Study Day',   get: r => r.study_day ?? '' },
     { label: 'User',        get: r => r.author_username ? '@' + r.author_username : (r.author_id || '') },
     { label: 'Tone',        get: r => r.tone || '' },
@@ -1193,7 +1195,7 @@
     { label: 'Clicks (human)',   get: s => s.human_click_count ?? 0 },
     { label: 'Clicks (all)',     get: s => s.click_count ?? 0 },
     { label: 'Polls',            get: s => s.poll_count ?? 0 },
-    { label: 'Last polled (UTC)', get: s => s.last_polled_utc || '' },
+    { label: 'Last polled (PST)', get: s => s.last_polled_utc || '' },
     { label: 'Mention ID',       get: s => s.mention_id || '' },
   ];
   function exportByReply() { downloadCSV('engagement_by_reply.csv', toCSV(BYREPLY_CSV_COLS, byReplyData)); }
@@ -1239,7 +1241,7 @@
   function exportByCondition() { downloadCSV('engagement_by_condition.csv', toCSV(COND_CSV_COLS, byConditionData)); }
 
   const BYST_CSV_COLS = [
-    { label: 'Collected (UTC)', get: r => r.collected_at_utc || '' },
+    { label: 'Collected (PST)', get: r => r.collected_at_utc || '' },
     { label: 'From user',       get: r => r.author_username ? '@' + r.author_username : (r.author_id || '') },
     { label: 'Tone',            get: r => r.tone || '' },
     { label: 'Likes',           get: r => r.like_count ?? 0 },
