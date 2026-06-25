@@ -1,5 +1,8 @@
 """Stage 3: pool a tweet's notes per class, kernel-smooth at the two group centroids,
 derive net stance / consensus / polarity (spec §3.3-3.4, §4 Stage 3)."""
+import argparse
+import os
+
 import numpy as np
 import pandas as pd
 
@@ -71,3 +74,79 @@ def aggregate_tweets(rwf, x_A, x_B, bw=BW, somewhat=SOMEWHAT, source=None, defen
     out["polarity"] = net_A - net_B
     out.index.name = "tweetId"
     return out
+
+
+def aggregate_notes(rwf, x_A, x_B, note_factors, bw=BW, somewhat=SOMEWHAT):
+    """One row per note with per-group smoothed rate + note factor."""
+    df = rwf.copy()
+    df["h"] = remap_somewhat(df["helpfulNum"].to_numpy(), somewhat)
+    f = df["f_u"].to_numpy()
+    df["wA"] = gaussian_kernel(f - x_A, bw)
+    df["wB"] = gaussian_kernel(f - x_B, bw)
+    df["wAh"] = df["wA"] * df["h"]
+    df["wBh"] = df["wB"] * df["h"]
+    df["isA"] = (df["group"] == "A").astype(int)
+    df["isB"] = (df["group"] == "B").astype(int)
+    g = df.groupby(["noteId", "tweetId", "classification"], observed=True).agg(
+        wA=("wA", "sum"), wAh=("wAh", "sum"), wB=("wB", "sum"), wBh=("wBh", "sum"),
+        nA=("isA", "sum"), nB=("isB", "sum"),
+    ).reset_index()
+    g["mislead_A"] = g["wAh"] / g["wA"]
+    g["mislead_B"] = g["wBh"] / g["wB"]
+    g = g.merge(note_factors[["noteId", "f_n"]], on="noteId", how="left")
+    g = g.rename(columns={"f_n": "noteFactor_fn"})
+    return g[["noteId", "tweetId", "classification", "mislead_A", "mislead_B",
+              "nA", "nB", "noteFactor_fn"]]
+
+
+def attach_status(tweet_df, nsh, notes):
+    """Add communityFlagged = tweet has a misleading note that is CRH (public status)."""
+    merged = notes.merge(nsh[["noteId", "currentStatus"]], on="noteId", how="left")
+    crh_mis = merged[(merged["classification"] == MISLEADING) &
+                     (merged["currentStatus"] == "CURRENTLY_RATED_HELPFUL")]
+    flagged = set(crh_mis["tweetId"].unique())
+    out = tweet_df.copy()
+    out["communityFlagged"] = [t in flagged for t in out.index]
+    return out
+
+
+def write_outputs(tweet_df, note_df, out_dir, suffix=""):
+    os.makedirs(out_dir, exist_ok=True)
+    tname = f"tweet_lean{suffix}.tsv"
+    tweet_df.reset_index().to_csv(os.path.join(out_dir, tname), sep="\t", index=False)
+    if note_df is not None:
+        note_df.to_csv(os.path.join(out_dir, "note_lean.tsv"), sep="\t", index=False)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--rwf", required=True)
+    ap.add_argument("--note-factors", required=True)
+    ap.add_argument("--rater-factors", required=True)
+    ap.add_argument("--status", required=True)
+    ap.add_argument("--notes", required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--source", default=None)
+    ap.add_argument("--defense-tag", action="store_true")
+    args = ap.parse_args()
+
+    from .groups import eval_points
+    rwf = pd.read_parquet(args.rwf)
+    rater_factors = pd.read_parquet(args.rater_factors)
+    note_factors = pd.read_parquet(args.note_factors)
+    nsh = pd.read_csv(args.status, sep="\t", usecols=["noteId", "currentStatus"])
+    notes = pd.read_csv(args.notes, sep="\t", usecols=["noteId", "tweetId", "classification"])
+
+    x_A, x_B = eval_points(rater_factors)
+    tweet_df = aggregate_tweets(rwf, x_A, x_B, source=args.source, defense_tag=args.defense_tag)
+    tweet_df = attach_status(tweet_df, nsh, notes)
+    suffix = ".popsampled" if args.source == "POPULATION_SAMPLED" else ""
+    note_df = None if suffix else aggregate_notes(rwf, x_A, x_B, note_factors)
+    if note_df is not None:
+        note_df = note_df.merge(nsh, on="noteId", how="left")
+    write_outputs(tweet_df, note_df, args.out, suffix=suffix)
+    print(f"x_A={x_A:.4f} x_B={x_B:.4f} | tweets={len(tweet_df)} | wrote to {args.out}")
+
+
+if __name__ == "__main__":
+    main()

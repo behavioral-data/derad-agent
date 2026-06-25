@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import pytest
-from viewpoint.aggregate import aggregate_tweets
+from viewpoint.aggregate import aggregate_tweets, aggregate_notes, attach_status
 from viewpoint.constants import MISLEADING, NOT_MISLEADING
 
 X_A, X_B = 0.5, -0.5
@@ -73,3 +73,26 @@ def test_defense_tag_folds_note_not_needed_without_inflating_counts():
     assert out.loc[5, "defend_A"] == pytest.approx(1.0)     # the NoteNotNeeded vote folded in
     assert out.loc[5, "nNotMisleadingNotes"] == 0           # no genuine not-misleading notes
     assert out.loc[5, "nMisleadingNotes"] == 1
+
+
+def test_aggregate_notes_one_row_per_note_with_fn():
+    rows = [
+        _row(1, 10, MISLEADING, 0.5, "A", 1.0),
+        _row(1, 11, NOT_MISLEADING, -0.5, "B", 1.0),
+    ]
+    nf = pd.DataFrame({"noteId": [10, 11], "f_n": [0.12, -0.03]})
+    out = aggregate_notes(pd.DataFrame(rows), X_A, X_B, nf)
+    assert set(out["noteId"]) == {10, 11}
+    assert out.set_index("noteId").loc[10, "noteFactor_fn"] == pytest.approx(0.12)
+    assert out.set_index("noteId").loc[10, "classification"] == MISLEADING
+
+
+def test_attach_status_sets_community_flagged():
+    tweet_df = pd.DataFrame(index=pd.Index([1, 2], name="tweetId"))
+    notes = pd.DataFrame({"noteId": [10, 20], "tweetId": [1, 2],
+                          "classification": [MISLEADING, MISLEADING]})
+    nsh = pd.DataFrame({"noteId": [10, 20],
+                        "currentStatus": ["CURRENTLY_RATED_HELPFUL", "NEEDS_MORE_RATINGS"]})
+    out = attach_status(tweet_df, nsh, notes)
+    assert bool(out.loc[1, "communityFlagged"]) is True
+    assert bool(out.loc[2, "communityFlagged"]) is False
