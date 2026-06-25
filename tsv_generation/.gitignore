@@ -1,0 +1,6 @@
+cn_data/
+.venv-cn/
+communitynotes/
+*.parquet
+__pycache__/
+*.pyc
