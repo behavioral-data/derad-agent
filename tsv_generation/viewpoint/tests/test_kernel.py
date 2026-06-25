@@ -29,6 +29,11 @@ def test_smoothed_rate_empty_is_nan():
     assert np.isnan(smoothed_rate(np.array([]), np.array([]), x=0.0, bw=0.1))
 
 
+def test_smoothed_rate_zero_weight_is_nan():
+    # A rater very far from x: all kernel weight underflows to 0 -> nan.
+    assert np.isnan(smoothed_rate(np.array([100.0]), np.array([1.0]), x=0.0, bw=0.1))
+
+
 def test_remap_somewhat():
     out = remap_somewhat(np.array([0.0, 0.5, 1.0]), somewhat=0.7)
-    assert list(out) == [0.0, 0.7, 1.0]
+    assert out == pytest.approx([0.0, 0.7, 1.0])

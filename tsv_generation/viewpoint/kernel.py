@@ -20,7 +20,7 @@ def smoothed_rate(factors, helpful, x, bw=0.1):
         return float("nan")
     w = gaussian_kernel(factors - x, bw)
     denom = w.sum()
-    if denom == 0:
+    if denom <= 0:
         return float("nan")
     return float((w * helpful).sum() / denom)
 
