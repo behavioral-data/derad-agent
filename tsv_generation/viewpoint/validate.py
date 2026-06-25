@@ -1,5 +1,6 @@
 """Spec §9 sanity checks over a tweet_lean table."""
 import argparse
+import math
 import numpy as np
 import pandas as pd
 
@@ -16,7 +17,7 @@ def run_checks(tweet_df):
         "n_tweets": int(len(tweet_df)),
         "frac_flagged_high_consensus": frac_high,
         "frac_flagged_low_consensus": frac_low,
-        "flag_contrast_ratio": (frac_high / frac_low) if (frac_low and frac_low > 0) else float("nan"),
+        "flag_contrast_ratio": (frac_high / frac_low) if (not math.isnan(frac_low) and frac_low > 0) else float("nan"),
         "polarity_mean": float(pol.mean()) if len(pol) else float("nan"),
         "polarity_two_sided": bool((pol > 0).any() and (pol < 0).any()),
     }

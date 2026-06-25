@@ -37,3 +37,14 @@ def test_fn_sign_agreement():
     # Row 0: A > B, f_n > 0 -> agree
     # Row 1: B > A (A < B), f_n < 0 -> agree
     assert fn_sign_agreement(df) == pytest.approx(1.0)
+
+
+def test_fn_sign_agreement_empty_is_nan():
+    # All eligible notes filtered out (mislead_A == mislead_B) -> NaN.
+    df = pd.DataFrame({
+        "classification": [MISLEADING, MISLEADING],
+        "mislead_A": [0.5, 0.7],
+        "mislead_B": [0.5, 0.7],
+        "noteFactor_fn": [0.3, -0.2],
+    })
+    assert np.isnan(fn_sign_agreement(df))
