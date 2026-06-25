@@ -62,3 +62,14 @@ def test_population_sampled_filter():
     ]
     out = aggregate_tweets(pd.DataFrame(rows), X_A, X_B, source="POPULATION_SAMPLED")
     assert out.loc[4, "mislead_A"] == pytest.approx(0.0)   # only the sampled (h=0) row counts
+
+
+def test_defense_tag_folds_note_not_needed_without_inflating_counts():
+    rows = [
+        _row(5, 50, MISLEADING, 0.5, "A", 0.0, nn=1),   # A: not-helpful + "note not needed"
+        _row(5, 50, MISLEADING, -0.5, "B", 1.0),        # B finds the misleading note helpful
+    ]
+    out = aggregate_tweets(pd.DataFrame(rows), X_A, X_B, defense_tag=True)
+    assert out.loc[5, "defend_A"] == pytest.approx(1.0)     # the NoteNotNeeded vote folded in
+    assert out.loc[5, "nNotMisleadingNotes"] == 0           # no genuine not-misleading notes
+    assert out.loc[5, "nMisleadingNotes"] == 1

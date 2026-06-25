@@ -9,9 +9,9 @@ from .constants import BW, SOMEWHAT, MISLEADING, NOT_MISLEADING
 
 def _smoothed_by_tweet(df, x_A, x_B, bw):
     """Per-tweet kernel-weighted mean of df['h'] at x_A and x_B, plus raw A/B counts.
-    Returns a DataFrame indexed by tweetId with columns rate_A, rate_B, nA, nB, nNotes."""
+    Returns a DataFrame indexed by tweetId with columns rate_A, rate_B, nA, nB."""
     if len(df) == 0:
-        return pd.DataFrame(columns=["rate_A", "rate_B", "nA", "nB", "nNotes"])
+        return pd.DataFrame(columns=["rate_A", "rate_B", "nA", "nB"])
     f = df["f_u"].to_numpy()
     h = df["h"].to_numpy()
     wA = gaussian_kernel(f - x_A, bw)
@@ -23,7 +23,6 @@ def _smoothed_by_tweet(df, x_A, x_B, bw):
         "isA": (df["group"] == "A").to_numpy(dtype=int),
         "isB": (df["group"] == "B").to_numpy(dtype=int),
     })
-    notes = df.groupby("tweetId")["noteId"].nunique().rename("nNotes")
     g = tmp.groupby("tweetId").sum()
     out = pd.DataFrame({
         "rate_A": g["wAh"] / g["wA"],
@@ -31,7 +30,7 @@ def _smoothed_by_tweet(df, x_A, x_B, bw):
         "nA": g["isA"].astype(int),
         "nB": g["isB"].astype(int),
     })
-    return out.join(notes)
+    return out
 
 
 def aggregate_tweets(rwf, x_A, x_B, bw=BW, somewhat=SOMEWHAT, source=None, defense_tag=False):
@@ -57,8 +56,12 @@ def aggregate_tweets(rwf, x_A, x_B, bw=BW, somewhat=SOMEWHAT, source=None, defen
     out["defend_B"] = dfd["rate_B"].astype("float64")
     out["nA"] = mis["nA"].fillna(0).astype(int)
     out["nB"] = mis["nB"].fillna(0).astype(int)
-    out["nMisleadingNotes"] = mis["nNotes"].fillna(0).astype(int)
-    out["nNotMisleadingNotes"] = dfd["nNotes"].fillna(0).astype(int)
+    mis_n = df[df["classification"] == MISLEADING].groupby("tweetId")["noteId"].nunique()
+    notmis_n = df[df["classification"] == NOT_MISLEADING].groupby("tweetId")["noteId"].nunique()
+    out["nMisleadingNotes"] = mis_n.reindex(out.index)
+    out["nNotMisleadingNotes"] = notmis_n.reindex(out.index)
+    for col in ["nA", "nB", "nMisleadingNotes", "nNotMisleadingNotes"]:
+        out[col] = out[col].fillna(0).astype(int)
 
     net_A = out["mislead_A"].fillna(0.0) - out["defend_A"].fillna(0.0)
     net_B = out["mislead_B"].fillna(0.0) - out["defend_B"].fillna(0.0)
