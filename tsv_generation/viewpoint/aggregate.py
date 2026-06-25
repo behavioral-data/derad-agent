@@ -141,9 +141,9 @@ def main():
     tweet_df = aggregate_tweets(rwf, x_A, x_B, source=args.source, defense_tag=args.defense_tag)
     tweet_df = attach_status(tweet_df, nsh, notes)
     suffix = ".popsampled" if args.source == "POPULATION_SAMPLED" else ""
-    note_df = None if suffix else aggregate_notes(rwf, x_A, x_B, note_factors)
+    note_df = None if args.source == "POPULATION_SAMPLED" else aggregate_notes(rwf, x_A, x_B, note_factors)
     if note_df is not None:
-        note_df = note_df.merge(nsh, on="noteId", how="left")
+        note_df = note_df.merge(nsh[["noteId", "currentStatus"]], on="noteId", how="left")
     write_outputs(tweet_df, note_df, args.out, suffix=suffix)
     print(f"x_A={x_A:.4f} x_B={x_B:.4f} | tweets={len(tweet_df)} | wrote to {args.out}")
 
