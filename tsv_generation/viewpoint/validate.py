@@ -1,6 +1,5 @@
 """Spec §9 sanity checks over a tweet_lean table."""
 import argparse
-import numpy as np
 import pandas as pd
 
 
