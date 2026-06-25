@@ -23,3 +23,9 @@ def test_eval_points_are_group_means():
     x_A, x_B = eval_points(rf)
     assert x_A == pytest.approx(0.3)
     assert x_B == pytest.approx(-0.2)
+
+
+def test_eval_points_missing_group_raises():
+    rf = pd.DataFrame({"raterParticipantId": [1, 2], "f_u": [0.2, 0.4], "group": ["A", "A"]})
+    with pytest.raises(ValueError):
+        eval_points(rf)

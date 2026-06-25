@@ -9,17 +9,16 @@ def assign_group(f_u, moderate_threshold=0.0):
     arr = np.asarray(f_u, dtype=np.float64)
     scalar = arr.ndim == 0
     arr = np.atleast_1d(arr)
-    out = np.empty(arr.shape, dtype=object)
-    for i, v in enumerate(arr):
-        if moderate_threshold > 0 and abs(v) <= moderate_threshold:
-            out[i] = None
-        else:
-            out[i] = "A" if v >= 0 else "B"
+    out = np.where(arr >= 0, "A", "B").astype(object)
+    if moderate_threshold > 0:
+        out[np.abs(arr) <= moderate_threshold] = None
     return out[0] if scalar else out
 
 
 def eval_points(rater_factors):
-    """Return (x_A, x_B): mean f_u over Group A and Group B raters."""
-    x_A = float(rater_factors.loc[rater_factors["group"] == "A", "f_u"].mean())
-    x_B = float(rater_factors.loc[rater_factors["group"] == "B", "f_u"].mean())
-    return x_A, x_B
+    """Return (x_A, x_B): mean f_u over Group A and Group B raters. Raises if a group is empty."""
+    a = rater_factors.loc[rater_factors["group"] == "A", "f_u"]
+    b = rater_factors.loc[rater_factors["group"] == "B", "f_u"]
+    if len(a) == 0 or len(b) == 0:
+        raise ValueError(f"eval_points needs both groups; got |A|={len(a)}, |B|={len(b)}")
+    return float(a.mean()), float(b.mean())
