@@ -96,3 +96,16 @@ def test_attach_status_sets_community_flagged():
     out = attach_status(tweet_df, nsh, notes)
     assert bool(out.loc[1, "communityFlagged"]) is True
     assert bool(out.loc[2, "communityFlagged"]) is False
+
+
+def test_attach_status_robust_to_tweetid_dtype_mismatch():
+    # Reproduces the production bug: rwf-derived index is STRING tweetIds,
+    # while freshly-read notes carry INT tweetIds.
+    tweet_df = pd.DataFrame(index=pd.Index(["100", "200"], name="tweetId"))
+    notes = pd.DataFrame({"noteId": [10, 20], "tweetId": [100, 200],
+                          "classification": [MISLEADING, MISLEADING]})
+    nsh = pd.DataFrame({"noteId": [10, 20],
+                        "currentStatus": ["CURRENTLY_RATED_HELPFUL", "NEEDS_MORE_RATINGS"]})
+    out = attach_status(tweet_df, nsh, notes)
+    assert bool(out.loc["100", "communityFlagged"]) is True
+    assert bool(out.loc["200", "communityFlagged"]) is False

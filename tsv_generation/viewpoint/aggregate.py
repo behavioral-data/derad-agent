@@ -100,13 +100,17 @@ def aggregate_notes(rwf, x_A, x_B, note_factors, bw=BW, somewhat=SOMEWHAT):
 
 
 def attach_status(tweet_df, nsh, notes):
-    """Add communityFlagged = tweet has a misleading note that is CRH (public status)."""
+    """Add communityFlagged = tweet has a misleading note that is CRH (public status).
+
+    tweetId dtype can differ between the rwf-derived index (string) and the
+    freshly-read notes (int64), so compare as strings to be dtype-robust.
+    """
     merged = notes.merge(nsh[["noteId", "currentStatus"]], on="noteId", how="left")
     crh_mis = merged[(merged["classification"] == MISLEADING) &
                      (merged["currentStatus"] == "CURRENTLY_RATED_HELPFUL")]
-    flagged = set(crh_mis["tweetId"].unique())
+    flagged = set(crh_mis["tweetId"].astype(str))
     out = tweet_df.copy()
-    out["communityFlagged"] = [t in flagged for t in out.index]
+    out["communityFlagged"] = [str(t) in flagged for t in out.index]
     return out
 
 
