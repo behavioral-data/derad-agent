@@ -8,7 +8,6 @@ import argparse
 import os
 import sys
 
-import numpy as np
 import pandas as pd
 
 from .constants import SEED, SCORING_SRC, CN_DATA, OUT_DIR
