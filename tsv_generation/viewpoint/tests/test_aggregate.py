@@ -77,14 +77,18 @@ def test_defense_tag_folds_note_not_needed_without_inflating_counts():
 
 def test_aggregate_notes_one_row_per_note_with_fn():
     rows = [
-        _row(1, 10, MISLEADING, 0.5, "A", 1.0),
-        _row(1, 11, NOT_MISLEADING, -0.5, "B", 1.0),
+        {**_row(1, 10, MISLEADING, 0.5, "A", 1.0), "misleadingFactualError": 1},
+        {**_row(1, 11, NOT_MISLEADING, -0.5, "B", 1.0), "misleadingFactualError": 0},
     ]
     nf = pd.DataFrame({"noteId": [10, 11], "f_n": [0.12, -0.03]})
     out = aggregate_notes(pd.DataFrame(rows), X_A, X_B, nf)
     assert set(out["noteId"]) == {10, 11}
     assert out.set_index("noteId").loc[10, "noteFactor_fn"] == pytest.approx(0.12)
     assert out.set_index("noteId").loc[10, "classification"] == MISLEADING
+    # sub-tag column should be carried through
+    assert "misleadingFactualError" in out.columns
+    assert int(out.set_index("noteId").loc[10, "misleadingFactualError"]) == 1
+    assert int(out.set_index("noteId").loc[11, "misleadingFactualError"]) == 0
 
 
 def test_attach_status_sets_community_flagged():

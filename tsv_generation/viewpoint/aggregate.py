@@ -9,6 +9,10 @@ import pandas as pd
 from .kernel import gaussian_kernel, remap_somewhat
 from .constants import BW, SOMEWHAT, MISLEADING, NOT_MISLEADING
 
+_NOTE_SUBTAGS = ["misleadingFactualError", "misleadingMissingImportantContext",
+                 "misleadingManipulatedMedia", "misleadingUnverifiedClaimAsFact",
+                 "misleadingSatire", "misleadingOther"]
+
 
 def _smoothed_by_tweet(df, x_A, x_B, bw):
     """Per-tweet kernel-weighted mean of df['h'] at x_A and x_B, plus raw A/B counts.
@@ -77,7 +81,7 @@ def aggregate_tweets(rwf, x_A, x_B, bw=BW, somewhat=SOMEWHAT, source=None, defen
 
 
 def aggregate_notes(rwf, x_A, x_B, note_factors, bw=BW, somewhat=SOMEWHAT):
-    """One row per note with per-group smoothed rate + note factor."""
+    """One row per note with per-group smoothed rate + note factor + author sub-tags."""
     df = rwf.copy()
     df["h"] = remap_somewhat(df["helpfulNum"].to_numpy(), somewhat)
     f = df["f_u"].to_numpy()
@@ -87,16 +91,19 @@ def aggregate_notes(rwf, x_A, x_B, note_factors, bw=BW, somewhat=SOMEWHAT):
     df["wBh"] = df["wB"] * df["h"]
     df["isA"] = (df["group"] == "A").astype(int)
     df["isB"] = (df["group"] == "B").astype(int)
+    subtags = [s for s in _NOTE_SUBTAGS if s in df.columns]
+    subtag_agg = {s: (s, "first") for s in subtags}
     g = df.groupby(["noteId", "tweetId", "classification"], observed=True).agg(
         wA=("wA", "sum"), wAh=("wAh", "sum"), wB=("wB", "sum"), wBh=("wBh", "sum"),
         nA=("isA", "sum"), nB=("isB", "sum"),
+        **subtag_agg,
     ).reset_index()
     g["mislead_A"] = g["wAh"] / g["wA"]
     g["mislead_B"] = g["wBh"] / g["wB"]
     g = g.merge(note_factors[["noteId", "f_n"]], on="noteId", how="left")
     g = g.rename(columns={"f_n": "noteFactor_fn"})
     return g[["noteId", "tweetId", "classification", "mislead_A", "mislead_B",
-              "nA", "nB", "noteFactor_fn"]]
+              "nA", "nB", "noteFactor_fn"] + subtags]
 
 
 def attach_status(tweet_df, nsh, notes):

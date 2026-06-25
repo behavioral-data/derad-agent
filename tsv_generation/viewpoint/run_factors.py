@@ -74,8 +74,10 @@ def run(sample_ratings=0.0):
 
     n_pos = int((rater_factors["group"] == "A").sum())
     n_neg = int((rater_factors["group"] == "B").sum())
+    factored_ids = set(rater_factors["raterParticipantId"])
+    cov = float(ratings[c.raterParticipantIdKey].isin(factored_ids).mean())
     print(f"factored raters: {len(rater_factors)} (A={n_pos}, B={n_neg}); "
-          f"ratings_with_factors rows: {len(rwf)}")
+          f"ratings_with_factors rows: {len(rwf)} | rating-factor coverage: {cov:.3f}")
 
 
 def main():
