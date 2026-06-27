@@ -63,8 +63,6 @@ data/*
 !data/.gitkeep
 !data/manifest.json
 !data/checksums.sha256
-!data/samples/
-!data/samples/.gitkeep
 !data/samples/*.tsv
 !data/history/
 !data/history/.gitkeep
@@ -95,3 +93,7 @@ rating_matrix_plan.md
 # Screenshots
 Screenshot*.png
 keys.md
+
+# Data analysis
+*.csv
+*.tsv
