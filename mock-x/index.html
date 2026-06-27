@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mock X</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="layout">
+
+    <!-- Sidebar -->
+    <nav class="sidebar">
+      <div class="sidebar-logo">
+        <svg viewBox="0 0 24 24" aria-label="X"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.737-8.835L1.254 2.25H8.08l4.253 5.622L18.244 2.25zm-1.161 17.52h1.833L7.084 4.126H5.117L17.083 19.77z"/></svg>
+      </div>
+      <a class="nav-item active" href="#">
+        <svg viewBox="0 0 24 24"><path d="M12 1.696L.622 8.807l1.06 1.696L3 9.679V19.5C3 20.881 4.119 22 5.5 22h4a1 1 0 001-1v-4h3v4a1 1 0 001 1h4c1.381 0 2.5-1.119 2.5-2.5V9.679l1.318.824 1.06-1.696L12 1.696zM17 20h-3v-4a1 1 0 00-1-1h-2a1 1 0 00-1 1v4H7V8.429l5-3.125 5 3.125V20z"/></svg>
+        <span>Home</span>
+      </a>
+      <a class="nav-item" href="#">
+        <svg viewBox="0 0 24 24"><path d="M21 7.337h-3.93l.372-4.272-1.495-.13-.415 4.402H12l.351-4.272-1.498-.13-.418 4.402H6.045l-.127-1.5H2v1.5h2.789l1.5 16.5h11.423l1.5-16.5H21V7.337zm-4.657 15H7.657l-1.36-15H17.7l-1.357 15z"/></svg>
+        <span>Explore</span>
+      </a>
+      <a class="nav-item" href="#">
+        <svg viewBox="0 0 24 24"><path d="M19.993 9.042C19.48 5.017 16.054 2 11.996 2s-7.49 3.021-7.999 7.051L2.866 14H6v1c0 1.103.897 2 2 2h1v3h6v-3h1c1.103 0 2-.897 2-2v-1h3.137l-1.144-4.958zm-3.951 5.917L15 14.002V15h-2.004v3h-1.999v-3H9v-.998l-1.006-.042H7V12.5h2v-2h6.002v2h2v1.5l-.96-.041z"/></svg>
+        <span>Notifications</span>
+        <span class="notif">3</span>
+      </a>
+      <a class="nav-item" href="#">
+        <svg viewBox="0 0 24 24"><path d="M1.998 5.5c0-1.381 1.119-2.5 2.5-2.5h15c1.381 0 2.5 1.119 2.5 2.5v13c0 1.381-1.119 2.5-2.5 2.5h-15c-1.381 0-2.5-1.119-2.5-2.5v-13zm2.5-.5a.5.5 0 00-.5.5v2.086l8 4.801 8-4.801V5.5a.5.5 0 00-.5-.5h-15zm15.5 4.715l-7.341 4.404a1.5 1.5 0 01-1.317 0L4 9.715V18.5a.5.5 0 00.5.5h15a.5.5 0 00.5-.5V9.715z"/></svg>
+        <span>Messages</span>
+      </a>
+      <a class="nav-item" href="#">
+        <svg viewBox="0 0 24 24"><path d="M12 22.25C6.332 22.25 1.75 17.668 1.75 12S6.332 1.75 12 1.75 22.25 6.332 22.25 12 17.668 22.25 12 22.25zm0-18.5c-4.825 0-8.75 3.925-8.75 8.75s3.925 8.75 8.75 8.75 8.75-3.925 8.75-8.75S16.825 3.75 12 3.75zm.5 7.25h2.25l-3.75 4-3.75-4H9.5V7h3v4z"/></svg>
+        <span>Profile</span>
+      </a>
+
+      <button class="post-btn post-btn-full">Post</button>
+    </nav>
+
+    <!-- Main feed -->
+    <main class="main" id="main-content">
+      <!-- rendered by app.js -->
+    </main>
+
+    <!-- Right sidebar -->
+    <aside class="aside">
+      <input class="search-box" type="search" placeholder="Search">
+
+      <div style="margin-top:16px; background:#16181c; border-radius:16px; padding:16px;">
+        <div class="font-bold" style="font-size:20px; margin-bottom:12px">Study Info</div>
+        <div style="font-size:14px; color:var(--text-dim); line-height:1.6">
+          This is a mock X interface for the <strong style="color:var(--text)">derad-agent</strong> research study.<br><br>
+          Bots reply to political posts with different tones:
+          <div style="margin-top:8px; display:flex; flex-direction:column; gap:6px">
+            <span><span class="bot-badge agreeable">agreeable</span> aggie_bot ☺️</span>
+            <span><span class="bot-badge neutral">neutral</span> nellie_bot 🧐</span>
+            <span><span class="bot-badge satirical">satirical</span> eddie_bot 😎</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:16px; background:#16181c; border-radius:16px; padding:16px;">
+        <div class="font-bold" style="font-size:20px; margin-bottom:12px">Who to follow</div>
+
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px">
+          <div class="avatar bot-agreeable" style="width:40px;height:40px;font-size:13px">ag</div>
+          <div style="flex:1">
+            <div class="font-bold" style="font-size:15px">aggie_bot ☺️</div>
+            <div class="text-dim" style="font-size:14px">@aggie_bot</div>
+          </div>
+          <button style="background:var(--text);color:#000;border:none;border-radius:9999px;padding:6px 16px;font-size:14px;font-weight:700;cursor:pointer">Follow</button>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px">
+          <div class="avatar bot-neutral" style="width:40px;height:40px;font-size:13px">ne</div>
+          <div style="flex:1">
+            <div class="font-bold" style="font-size:15px">nellie_bot 🧐</div>
+            <div class="text-dim" style="font-size:14px">@nellie_bot</div>
+          </div>
+          <button style="background:var(--text);color:#000;border:none;border-radius:9999px;padding:6px 16px;font-size:14px;font-weight:700;cursor:pointer">Follow</button>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px">
+          <div class="avatar bot-satirical" style="width:40px;height:40px;font-size:13px">ed</div>
+          <div style="flex:1">
+            <div class="font-bold" style="font-size:15px">eddie_bot 😎</div>
+            <div class="text-dim" style="font-size:14px">@eddie_bot</div>
+          </div>
+          <button style="background:var(--text);color:#000;border:none;border-radius:9999px;padding:6px 16px;font-size:14px;font-weight:700;cursor:pointer">Follow</button>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+
+  <script src="api.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
