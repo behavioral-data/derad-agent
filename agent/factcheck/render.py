@@ -148,7 +148,7 @@ _ACTION_TEMPLATES: dict[Action, str] = {
 # ── Per-tone register snippets ─────────────────────────────────────────────
 
 _NEUTRAL_REGISTER = """# REGISTER:
- Writ the response in a neutral tone. detached. Declarative sentences, named sources, no rhetorical flourish. Follow these principles, modeled on effective crowd-sourced fact-checking:
+Write the response in a neutral, detached tone. Declarative sentences, named sources, no rhetorical flourish. Follow these principles, modeled on effective crowd-sourced fact-checking:
 
 1. DIRECT ENGAGEMENT — This is a reply. Open by directly referencing what was stated in the tweet. Name the specific claim. The response should feel like it's talking to this particular post, not delivering a generic briefing.
 2. SYNTHESIS — Do not just cite one note. Read all notes together and combine their insights into a unified, holistic response that covers the key factual points.
