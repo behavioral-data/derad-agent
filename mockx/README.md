@@ -2,7 +2,18 @@
 
 Renders a mock-X thread for one `(post_id, condition)`. Local-first; no cloud deps.
 
-## Build the database
+## Quick start (collaborators)
+
+The data artifacts are committed, so one command builds the DB (no network/creds):
+
+```bash
+bash mockx/setup_db.sh        # builds study.db + prints a verification summary
+```
+
+Use `bash mockx/setup_db.sh --full` only if the post set changed (re-runs the
+heavy `extract_notes` + `fetch_media` steps; those need the CN dumps / X creds).
+
+## Build the database (manual steps)
 
 ```bash
 # One-time heavy extract (scans the ~1.4 GB Community Notes dumps -> small CSV).
