@@ -107,3 +107,6 @@ keys.md
 
 # Internal project tracking — not for public consumption
 todo.md
+
+# mock-x study interface — generated, read-only DB artifact
+mockx/study.db
