@@ -72,10 +72,15 @@
     /* ── Refresh note ── */
     .refresh-note { font-size: 10px; color: var(--gray-500); font-family: var(--mono); }
 
-    /* ── Reply text cell ── */
-    .reply-text-cell {
+    /* ── Reply text cell ──
+       max-width on a <td> is ignored in an auto-layout table, so the clip
+       must live on an inner block element or the cell expands to its content
+       and blows out the table width. */
+    .reply-text-cell { font-size: 11px; }
+    .reply-text-cell > .clip {
+      display: block;
       max-width: 260px; overflow: hidden;
-      text-overflow: ellipsis; white-space: nowrap; font-size: 11px;
+      text-overflow: ellipsis; white-space: nowrap;
     }
 
     /* ── Add-participant form ── */
@@ -664,7 +669,7 @@
       <td>${esc(ev.study_day)}</td>
       <td>${ev.study_code ? `<code class="inline-code">${esc(ev.study_code)}</code>` : '—'}</td>
       <td>${esc(ev.pipeline_ms)}</td>
-      <td class="reply-text-cell" title="${esc(ev.reply_text)}">${esc(ev.reply_text)}</td>
+      <td class="reply-text-cell" title="${esc(ev.reply_text)}"><span class="clip">${esc(ev.reply_text)}</span></td>
     </tr>`;
   }
   function dropRowHtml(d) {
@@ -1059,7 +1064,7 @@
         <td><span class="bot-chip tone-${knownTone}">${botLabel}</span></td>
         <td>${esc(r.study_day)}</td>
         <td>${code}</td>
-        <td class="reply-text-cell" title="${esc(r.reply_text)}">${esc(r.reply_text)}</td>
+        <td class="reply-text-cell" title="${esc(r.reply_text)}"><span class="clip">${esc(r.reply_text)}</span></td>
         <td style="white-space:nowrap;">${link}</td>
       </tr>`;
     }
@@ -1190,7 +1195,7 @@
       <td>${user}</td>
       <td>${toneSpan(r.tone)}</td>
       <td>${esc(r.like_count)}</td>
-      <td class="reply-text-cell" title="${esc(r.text)}">${esc(r.text)}</td>
+      <td class="reply-text-cell" title="${esc(r.text)}"><span class="clip">${esc(r.text)}</span></td>
       <td>${link}</td>
     </tr>`;
   }
