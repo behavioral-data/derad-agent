@@ -414,3 +414,29 @@ body {
 .text-dim { color: var(--text-dim); }
 .font-bold { font-weight: 700; }
 .mt-1 { margin-top: 4px; }
+
+/* Community note — native "Readers added context" card (control condition) */
+.note-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  margin: 12px 0;
+  background: var(--bg);
+}
+.note-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+.note-card-header .note-icon { width: 18px; height: 18px; fill: var(--text); flex-shrink: 0; }
+.note-card-body {
+  font-size: 15px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.note-card-footer { margin-top: 10px; font-size: 13px; color: var(--text-dim); }
+.note-card-link { color: var(--text-dim); font-weight: 600; }

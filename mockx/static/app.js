@@ -92,9 +92,16 @@ function renderBotReply(iv) {
     </div>`;
 }
 
-// Placeholder until Task 7 implements the native note card.
 function renderNoteCard(iv) {
-  return `<div class="post-content text-dim">[community note]</div>`;
+  return `
+    <div class="note-card">
+      <div class="note-card-header">
+        <svg class="note-icon" viewBox="0 0 24 24"><path d="M12 1.75a10.25 10.25 0 100 20.5 10.25 10.25 0 000-20.5zM2.75 12a9.25 9.25 0 1118.5 0 9.25 9.25 0 01-18.5 0zM12 7a1.1 1.1 0 100 2.2A1.1 1.1 0 0012 7zm-1 4h2v6h-2v-6z" fill="currentColor"/></svg>
+        <span>Readers added context</span>
+      </div>
+      <div class="note-card-body">${escapeHtml(iv.body)}</div>
+      <div class="note-card-footer">Context is written by people who use X, and appears when rated helpful by others. <span class="note-card-link">Learn more</span></div>
+    </div>`;
 }
 
 function renderError(msg) {
