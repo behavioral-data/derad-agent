@@ -421,3 +421,38 @@ body {
 }
 .note-card-footer { margin-top: 10px; font-size: 13px; color: var(--text-dim); }
 .note-card-link { color: var(--text-dim); font-weight: 600; }
+
+/* Tweet media — X-style image grid (photos + video stills) */
+.media-grid {
+  display: grid;
+  gap: 2px;
+  margin-top: 12px;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.media-grid.n1 { grid-template-columns: 1fr; }
+.media-grid.n2 { grid-template-columns: 1fr 1fr; }
+.media-grid.n3 { grid-template-columns: 1fr 1fr; }
+.media-grid.n3 .media-item:first-child { grid-row: span 2; }
+.media-grid.n4 { grid-template-columns: 1fr 1fr; }
+.media-item { position: relative; background: #0a0a0a; min-height: 0; }
+.media-item img { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* A single image shows in full (no crop); grids crop to even cells. */
+.media-grid.n1 .media-item img { max-height: 510px; object-fit: contain; }
+.media-grid.n2 .media-item img,
+.media-grid.n3 .media-item img,
+.media-grid.n4 .media-item img { aspect-ratio: 1 / 1; }
+.media-grid.n3 .media-item:first-child img { aspect-ratio: 1 / 2; }
+.play-badge {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 50px; height: 50px;
+  border-radius: 9999px;
+  background: rgba(15, 20, 25, 0.75);
+  border: 3px solid rgba(255, 255, 255, 0.85);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; padding-left: 3px;
+}

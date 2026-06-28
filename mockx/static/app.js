@@ -39,6 +39,19 @@ function renderAvatar(text, extraClass = "") {
   return `<div class="avatar ${extraClass}">${escapeHtml(text)}</div>`;
 }
 
+// X-style media grid for attached photos / video stills. `media` is a list of
+// {type, src}; videos render their preview frame with a play badge.
+function renderMedia(media) {
+  if (!Array.isArray(media) || media.length === 0) return "";
+  const shown = media.slice(0, 4);
+  const items = shown.map((m) => `
+    <div class="media-item">
+      <img src="${escapeHtml(m.src)}" alt="" loading="lazy">
+      ${m.type === "video" ? '<span class="play-badge">▶</span>' : ""}
+    </div>`).join("");
+  return `<div class="media-grid n${shown.length}">${items}</div>`;
+}
+
 // noteHtml is "" for bot conditions; the control card (Task 7) for control.
 function renderPost(post, noteHtml = "") {
   const icons = actionIcons();
@@ -52,6 +65,7 @@ function renderPost(post, noteHtml = "") {
         </div>
       </div>
       <div class="post-content">${escapeHtml(post.content)}</div>
+      ${renderMedia(post.media)}
       ${noteHtml}
       <div class="post-time-full text-dim">${formatTimeFullDate(post.created_at)}</div>
       <div class="stats-row">
