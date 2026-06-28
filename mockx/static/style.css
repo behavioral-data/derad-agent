@@ -8,9 +8,6 @@
   --text-dim: #71767b;
   --accent: #1d9bf0;
   --accent-hover: #1a8cd8;
-  --bot-satirical: #f4212e;
-  --bot-agreeable: #00ba7c;
-  --bot-neutral: #1d9bf0;
   --hover-bg: rgba(255,255,255,0.03);
   --reply-line: #2f3336;
 }
@@ -153,9 +150,6 @@ body {
   flex-shrink: 0;
   background: #536471;
 }
-.avatar.bot-satirical { background: var(--bot-satirical); }
-.avatar.bot-agreeable { background: var(--bot-agreeable); }
-.avatar.bot-neutral   { background: var(--bot-neutral); }
 
 /* thread line below avatar */
 .thread-line {
@@ -186,19 +180,6 @@ body {
 }
 .post-dot { color: var(--text-dim); }
 .post-time { color: var(--text-dim); font-size: 15px; }
-
-.bot-badge {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: 9999px;
-  margin-left: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.bot-badge.satirical { background: rgba(244,33,46,0.15); color: var(--bot-satirical); }
-.bot-badge.agreeable { background: rgba(0,186,124,0.15); color: var(--bot-agreeable); }
-.bot-badge.neutral   { background: rgba(29,155,240,0.15); color: var(--bot-neutral); }
 
 .post-content {
   margin-top: 4px;
