@@ -2,16 +2,20 @@
 """Batch-generate bot replies for tweets listed in a CSV.
 
 For each post, runs the fact-check pipeline once, renders all three tone
-conditions, and writes a CSV with columns: id, neutral, satirical, agreeable.
-Each cell contains the reply text plus a "Sources & reasoning:" block with
-the cited reference URLs (same sources across tones, matching the live bot).
+conditions, writes a CSV (id, neutral, satirical, agreeable), and updates
+the matching bot_reply rows in mockx/study.db (body + is_stub=0).
+
+Each reply cell contains the reply text plus a "Sources & reasoning:" block
+with the cited reference URLs (same sources across tones, matching the live bot).
 
 Usage:
     .venv/bin/python scripts/batch_generate_replies.py /path/to/posts.csv
     .venv/bin/python scripts/batch_generate_replies.py posts.csv -o replies.csv -n 5
+    .venv/bin/python scripts/batch_generate_replies.py posts.csv --no-db   # CSV only
 
 One-time setup (from repo root):
     python3.13 -m venv .venv && .venv/bin/pip install -e . -r requirements.txt
+    python -m mockx.build_db   # creates mockx/study.db with stub interventions
 
 Requires Azure Claude credentials in agent/llm/.env (same as the live bot).
 Does not post to X — generation only.
@@ -27,6 +31,7 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
+DEFAULT_DB = _REPO_ROOT / "mockx" / "study.db"
 
 
 def _check_runtime_deps() -> None:
@@ -62,6 +67,7 @@ from agent.app.utils import _APP_TO_FACTCHECK_TONE
 from agent.factcheck.freeze import view_for_renderer
 from agent.factcheck.pipeline import run_pipeline
 from agent.factcheck.render import render
+from mockx.db import connect_writable, update_bot_replies
 
 # Output column order (fixed per user request).
 OUTPUT_TONES = ("neutral", "satirical", "agreeable")
@@ -184,43 +190,66 @@ def process_batch(
     *,
     limit: int | None = None,
     include_sources: bool = True,
+    db_path: Path | None = None,
 ) -> int:
-    """Load posts, generate replies, write output CSV. Returns rows written."""
+    """Load posts, generate replies, write CSV and optionally study.db. Returns rows written."""
     posts = load_posts(input_path, limit=limit)
     if not posts:
         logging.warning("No posts to process in %s", input_path)
         return 0
 
     logging.info(
-        "Processing %d post(s) from %s → %s",
+        "Processing %d post(s) from %s → %s%s",
         len(posts), input_path, output_path,
+        f" + {db_path}" if db_path else "",
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    written = 0
-    with output_path.open("w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(
-            fh,
-            fieldnames=OUTPUT_FIELDNAMES,
-            quoting=csv.QUOTE_MINIMAL,
-        )
-        write_output_header(writer, fh)
-
-        for idx, post in enumerate(posts, start=1):
-            logging.info("[%d/%d] id=%s", idx, len(posts), post.id)
-            replies = generate_all_tones(
-                post.text, post.id, include_sources=include_sources,
+    conn = None
+    if db_path is not None:
+        if not db_path.is_file():
+            raise FileNotFoundError(
+                f"study.db not found at {db_path} — run: python -m mockx.build_db"
             )
-            write_output_row(writer, fh, post.id, replies)
-            written += 1
+        conn = connect_writable(str(db_path))
+
+    written = 0
+    db_updates = 0
+    try:
+        with output_path.open("w", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(
+                fh,
+                fieldnames=OUTPUT_FIELDNAMES,
+                quoting=csv.QUOTE_MINIMAL,
+            )
+            write_output_header(writer, fh)
+
+            for idx, post in enumerate(posts, start=1):
+                logging.info("[%d/%d] id=%s", idx, len(posts), post.id)
+                replies = generate_all_tones(
+                    post.text, post.id, include_sources=include_sources,
+                )
+                write_output_row(writer, fh, post.id, replies)
+                written += 1
+
+                if conn is not None:
+                    n = update_bot_replies(conn, post.id, replies)
+                    db_updates += n
+                    conn.commit()
+                    logging.info("id=%s — updated %d intervention row(s) in study.db", post.id, n)
+    finally:
+        if conn is not None:
+            conn.close()
 
     logging.info("Wrote %d row(s) to %s", written, output_path)
+    if db_path is not None:
+        logging.info("Updated %d intervention row(s) in %s", db_updates, db_path)
     return written
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Generate neutral/satirical/agreeable bot replies for CSV posts.",
+        description="Generate bot replies for CSV posts; write CSV and update study.db.",
     )
     parser.add_argument(
         "input_csv",
@@ -239,6 +268,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="N",
         help="Process only the first N posts (default: all)",
+    )
+    parser.add_argument(
+        "--db",
+        type=Path,
+        default=DEFAULT_DB,
+        help=f"study.db path to update (default: {DEFAULT_DB.relative_to(_REPO_ROOT)})",
+    )
+    parser.add_argument(
+        "--no-db",
+        action="store_true",
+        help="Skip study.db updates (CSV only)",
     )
     parser.add_argument(
         "-v", "--verbose",
@@ -276,6 +316,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.output is not None
         else default_output_path(input_path)
     )
+    db_path = None if args.no_db else args.db.expanduser().resolve()
 
     if args.limit is not None and args.limit < 1:
         print("ERROR: --limit must be a positive integer", file=sys.stderr)
@@ -287,14 +328,24 @@ def main(argv: list[str] | None = None) -> int:
             output_path,
             limit=args.limit,
             include_sources=not args.no_sources,
+            db_path=db_path,
         )
+    except FileNotFoundError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    except LookupError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
     except Exception:
         logging.exception("Batch failed")
         return 1
 
     if written == 0:
         return 1
-    print(f"Done — {written} row(s) written to {output_path}")
+    msg = f"Done — {written} row(s) written to {output_path}"
+    if db_path is not None:
+        msg += f"; study.db updated at {db_path}"
+    print(msg)
     return 0
 
 
