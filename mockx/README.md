@@ -9,6 +9,11 @@ Renders a mock-X thread for one `(post_id, condition)`. Local-first; no cloud de
 # Already committed as mockx/data/notes_selected.csv; re-run only if posts change.
 python -m mockx.extract_notes
 
+# One-time media fetch (downloads attached tweet images/video stills via the X
+# API into static/media/, writes media_index.csv). Both are committed, so this
+# only needs re-running if the post set changes. Requires X creds in agent/llm/.env.
+python -m mockx.fetch_media
+
 # Fast: build the read-only study.db (170 posts x 4 conditions = 680 rows).
 python -m mockx.build_db
 ```
@@ -24,6 +29,8 @@ where `<c>` ∈ `neutral | agreeable | satirical | control`.
 
 - `neutral|agreeable|satirical` → one bot reply from **@eddiexbot** (stub text until Part-1 generation).
 - `control` → the post's real community note as a "Readers added context" card.
+- Posts with attached media (97 of 170) render an X-style image grid (videos/GIFs show
+  their preview frame with a play badge); images are served locally from `static/media/`.
 
 ## Test
 
