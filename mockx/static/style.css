@@ -215,8 +215,8 @@ body {
 .action-btn.like:hover { color: #f91880; background: rgba(249,24,128,0.1); }
 .action-btn.repost:hover { color: #00ba7c; background: rgba(0,186,124,0.1); }
 .action-btn.liked { color: #f91880; }
-.action-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.75; }
-.action-btn.liked svg { fill: #f91880; stroke: #f91880; }
+.action-btn svg { width: 18px; height: 18px; fill: currentColor; stroke: none; }
+.action-btn.liked svg { fill: #f91880; }
 
 /* Reply nesting */
 .replies-section { border-left: none; }
