@@ -1,6 +1,7 @@
 """Read-only access to study.db."""
 from __future__ import annotations
 
+import json
 import sqlite3
 
 CONDITIONS = ("neutral", "agreeable", "satirical", "control")
@@ -14,7 +15,12 @@ def connect(db_path):
 
 def get_post(conn, post_id):
     row = conn.execute("SELECT * FROM posts WHERE post_id = ?", (post_id,)).fetchone()
-    return dict(row) if row else None
+    if row is None:
+        return None
+    post = dict(row)
+    # Expose attached media as a parsed list; drop the raw JSON string.
+    post["media"] = json.loads(post.pop("media_json", None) or "[]")
+    return post
 
 
 def get_intervention(conn, post_id, condition):
