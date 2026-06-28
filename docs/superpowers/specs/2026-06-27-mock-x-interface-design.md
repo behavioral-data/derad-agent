@@ -133,15 +133,42 @@ Idempotent build script (drop + recreate). Steps:
 
 ## Deployment (Azure)
 
-- Containerize `mock-x` (Flask + gunicorn) via a `Dockerfile`; `study.db` is **built into the
-  image** (read-only) so no runtime DB provisioning is needed.
-- Build/push to the existing **ACR**, run on its **own App Service (Linux)** separate from the
-  production agent app, reusing the same resource group / ACR. Deploy per the existing runbook:
-  `az acr build` then `az webapp restart` (note: `azd deploy` does **not** rebuild the image).
-- **Part-1 caveat (documented, not built here):** participant *writes* must NOT go to the
-  bundled SQLite — App Service container FS is ephemeral and SQLite on the `/home` Azure Files
-  mount is flaky under concurrent writes. Part-1 logging will target a real store (Azure Table
-  Storage / Postgres / blob append).
+Modeled on the live bot's proven deployment (`azure.yaml` + `infra/main.bicep` + multi-stage
+`Dockerfile`), but **isolated**: mock-X gets its own azd project + Bicep + App Service (+plan)
+and only **shares the existing ACR**. A mock-X `azd up`/deploy never touches the production bot.
+
+**Reused from the live-bot deployment:**
+- azd + Bicep + ACR **remote build** flow (`remoteBuild: true`).
+- Multi-stage, **non-root**, slim `python:3.11-slim` Dockerfile with gunicorn + a Docker
+  `HEALTHCHECK` on `/healthz`.
+- **Bake the data artifact into the image**: `study.db` ships read-only inside the image (same
+  pattern as the bot baking in its notes index), so there's no runtime DB to provision.
+- App Service settings: `WEBSITES_PORT`, `WEBSITES_ENABLE_APP_SERVICE_STORAGE=false`,
+  `alwaysOn`, `httpsOnly`, `healthCheckPath=/healthz`.
+- **User-assigned managed identity** granted `AcrPull` on the shared ACR (the ACR is referenced
+  as an `existing` resource in the mock-X Bicep). No ACR admin creds.
+
+**Changed for mock-X (do NOT copy from the bot):**
+- gunicorn runs **multiple workers** — mock-X is stateless and read-only. The bot's
+  `--workers 1` is specific to its per-process 1.2 GB embedding matrix and does not apply.
+- **No Key Vault / secrets** for Part 2 — read-only, no X API, no LLM calls.
+- Plan sized for **concurrent Prolific load**, not shared with the live bot's plan.
+
+**Server additions to support this:** `server.py` exposes `GET /healthz`.
+
+**Operational runbook:** deploy via `az acr build -r <acr> -t mock-x:latest .` then
+`az webapp restart` — `azd deploy` does **not** rebuild the image (confirmed by the
+`linuxFxVersion` note in `infra/main.bicep` and the existing runbook).
+
+## Part-1 logging (documented, not built here)
+
+Participant *writes* must NOT go to the bundled read-only SQLite (App Service container FS is
+ephemeral; SQLite on the `/home` Azure Files mount is flaky under concurrent writes). The live
+bot already solves this: append-only **Azure Storage Tables** written via managed identity with
+`azure-data-tables` (`MentionEvents`, `Participants`, `EngagementSnapshots` in
+`infra/main.bicep`). **Part 1 should add a `StudyEvents` table to that same pattern** — no new
+database technology, just an additional table + a Table Data Contributor role assignment for
+the mock-X identity.
 
 ## Decisions locked
 
@@ -152,7 +179,8 @@ Idempotent build script (drop + recreate). Steps:
 - **Synthetic anonymized authors** (IRB/ethics: never real handles).
 - Bot persona = single account **@eddiexbot** across all three tones.
 - Rendering = **approach A** (JSON API + client renderer).
-- Host on **Azure App Service** via container + ACR.
+- Host on **Azure App Service** via container, modeled on the live-bot azd+Bicep deployment but
+  **isolated** (own azd project/Bicep/App Service), sharing only the existing **ACR**.
 
 ## Out of scope (Part 1)
 
