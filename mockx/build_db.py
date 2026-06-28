@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import json
 import os
 import sqlite3
 import sys
@@ -15,6 +16,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
 DEFAULT_SELECTED = os.path.join(_ROOT, "tsv_generation", "selected_posts.csv")
 DEFAULT_NOTES_CSV = os.path.join(_HERE, "data", "notes_selected.csv")
+DEFAULT_MEDIA_CSV = os.path.join(_HERE, "data", "media_index.csv")
 DEFAULT_DB = os.path.join(_HERE, "study.db")
 
 csv.field_size_limit(10_000_000)
@@ -98,9 +100,26 @@ def _load_notes(notes_csv):
         return {r["tweetId"]: r for r in csv.DictReader(f)}
 
 
-def build(selected_csv, notes_csv, out_db):
+def _load_media(media_csv):
+    """tweetId -> ordered list of {"type", "src"} from media_index.csv.
+
+    Returns {} when no media_csv is given or the file is absent (e.g. tests
+    that don't exercise media). `src` is the runtime URL under /static/.
+    """
+    by_tweet = {}
+    if not media_csv or not os.path.exists(media_csv):
+        return by_tweet
+    with open(media_csv, newline="") as f:
+        for r in csv.DictReader(f):
+            by_tweet.setdefault(r["tweetId"], []).append(
+                (int(r["ordinal"]), {"type": r["type"], "src": "/static/" + r["path"]}))
+    return {tid: [m for _, m in sorted(items)] for tid, items in by_tweet.items()}
+
+
+def build(selected_csv, notes_csv, out_db, media_csv=None):
     posts = load_posts(selected_csv)
     notes = _load_notes(notes_csv)
+    media = _load_media(media_csv)
 
     if os.path.exists(out_db):
         os.remove(out_db)
@@ -110,7 +129,7 @@ def build(selected_csv, notes_csv, out_db):
             post_id TEXT PRIMARY KEY, content TEXT, created_at TEXT,
             author_name TEXT, author_handle TEXT, author_verified INTEGER,
             likes INTEGER, reposts INTEGER, views INTEGER,
-            polarity_condition TEXT, topic_condition TEXT)""")
+            polarity_condition TEXT, topic_condition TEXT, media_json TEXT)""")
     conn.execute("""
         CREATE TABLE interventions (
             post_id TEXT, condition TEXT, kind TEXT, body TEXT,
@@ -121,10 +140,11 @@ def build(selected_csv, notes_csv, out_db):
 
     n_iv = 0
     for p in posts:
+        p["media_json"] = json.dumps(media.get(p["post_id"], []))
         conn.execute(
             "INSERT INTO posts VALUES (:post_id,:content,:created_at,:author_name,"
             ":author_handle,:author_verified,:likes,:reposts,:views,"
-            ":polarity_condition,:topic_condition)", p)
+            ":polarity_condition,:topic_condition,:media_json)", p)
 
         re = synth_engagement(p["post_id"], "reply")   # identical across tones
         for tone in TONES:
@@ -154,9 +174,10 @@ def main():
     ap = argparse.ArgumentParser(description="Build the mock-X study.db.")
     ap.add_argument("--selected", default=DEFAULT_SELECTED)
     ap.add_argument("--notes", default=DEFAULT_NOTES_CSV)
+    ap.add_argument("--media", default=DEFAULT_MEDIA_CSV)
     ap.add_argument("--db", default=DEFAULT_DB)
     args = ap.parse_args()
-    n_posts, n_iv = build(args.selected, args.notes, args.db)
+    n_posts, n_iv = build(args.selected, args.notes, args.db, media_csv=args.media)
     print(f"Wrote {n_posts} posts, {n_iv} interventions to {args.db}", file=sys.stderr)
 
 

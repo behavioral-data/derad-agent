@@ -1,6 +1,7 @@
 """Tests for mockx.build_db — synthesis helpers + study.db build."""
 from __future__ import annotations
 
+import json
 import sqlite3
 
 from mockx.build_db import build, synth_author, synth_engagement
@@ -69,3 +70,38 @@ def test_bot_reply_engagement_identical_across_tones(tmp_path):
         "select reply_likes, reply_views from interventions "
         "where post_id='t1' and kind='bot_reply'").fetchall()
     assert len({(r["reply_likes"], r["reply_views"]) for r in rows}) == 1
+
+
+def test_build_attaches_ordered_media_json(tmp_path):
+    sel = tmp_path / "sel.csv"; sel.write_text(MOCKX_SELECTED_CSV)
+    notes = tmp_path / "notes.csv"; notes.write_text(MOCKX_NOTES_CSV)
+    media = tmp_path / "media.csv"
+    media.write_text(
+        "tweetId,ordinal,type,path\n"
+        "t1,1,photo,media/t1/1.jpg\n"   # deliberately out of order
+        "t1,0,video,media/t1/0.jpg\n"
+    )
+    db = tmp_path / "study.db"
+    build(str(sel), str(notes), str(db), media_csv=str(media))
+
+    conn = sqlite3.connect(str(db)); conn.row_factory = sqlite3.Row
+    m1 = json.loads(conn.execute(
+        "select media_json from posts where post_id='t1'").fetchone()[0])
+    assert m1 == [
+        {"type": "video", "src": "/static/media/t1/0.jpg"},  # ordinal 0 first
+        {"type": "photo", "src": "/static/media/t1/1.jpg"},
+    ]
+    # post with no media -> empty list
+    m2 = json.loads(conn.execute(
+        "select media_json from posts where post_id='t2'").fetchone()[0])
+    assert m2 == []
+
+
+def test_build_without_media_csv_leaves_empty_media(tmp_path):
+    sel = tmp_path / "sel.csv"; sel.write_text(MOCKX_SELECTED_CSV)
+    notes = tmp_path / "notes.csv"; notes.write_text(MOCKX_NOTES_CSV)
+    db = tmp_path / "study.db"
+    build(str(sel), str(notes), str(db))  # no media_csv
+    conn = sqlite3.connect(str(db))
+    assert conn.execute(
+        "select media_json from posts where post_id='t1'").fetchone()[0] == "[]"
