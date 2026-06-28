@@ -103,7 +103,9 @@ Expected: prints `ok`; `ls` shows `api.js  app.js  index.html  style.css`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A
+# Scope the add to mockx + .gitignore only — do NOT use `git add -A`; the
+# working tree carries unrelated pre-existing WIP that must stay uncommitted.
+git add mockx .gitignore
 git commit -m "refactor(mockx): rename mock-x -> mockx package; assets into static/"
 ```
 
