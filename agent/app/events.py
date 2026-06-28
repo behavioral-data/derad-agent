@@ -444,9 +444,17 @@ class TablesEventsStore:
         self._info_views = self._service.get_table_client(info_views_table)
 
     def write_event(self, ev: MentionEvent) -> None:
+        from azure.data.tables import UpdateMode
+
         entity = self._event_entity(ev)
         try:
-            self._events.create_entity(entity)
+            # Upsert (REPLACE), not create: a re-processed/replayed mention with
+            # the same RowKey (received_at + mention_id) should cleanly overwrite
+            # the prior row (e.g. a stale pipeline_error → replied) rather than
+            # fail with EntityAlreadyExists and lose the outcome. Live mentions
+            # are deduped upstream, so this never silently merges two distinct
+            # invocations.
+            self._events.upsert_entity(entity, mode=UpdateMode.REPLACE)
             logger.info("Wrote event to tables (mention=%s outcome=%s)", ev.mention_id, ev.outcome)
         except Exception:
             logger.exception("write_event failed for mention %s; continuing", ev.mention_id)
