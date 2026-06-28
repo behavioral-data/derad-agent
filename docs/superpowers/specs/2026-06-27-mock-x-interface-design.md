@@ -5,6 +5,12 @@
 **Scope:** Part 2 of 2. Part 1 (study infra: participant flow, condition assignment, event
 logging, Prolific handshake) is explicitly **out of scope** here and deferred.
 
+**Build target: local-first.** This part is built and verified to run **entirely locally**
+(Flask dev server + a local `study.db` file). **All containerization and Azure deployment are
+deferred** until the full local end-to-end build works — no `Dockerfile`, Bicep, or `azd` work
+is part of this implementation. The "Azure deployment" section below is **reference for later**,
+not a build step.
+
 ## Context
 
 We are evaluating the fact-check intervention in a controlled experiment with Prolific
@@ -131,7 +137,10 @@ Idempotent build script (drop + recreate). Steps:
   leak the manipulation). Keep inert chrome (sidebar, search) for realism. Remove tone
   badges/colors and emoji-in-name styling.
 
-## Deployment (Azure)
+## Deployment (Azure) — DEFERRED (reference for later, not built now)
+
+> Build and verify the full interface locally first. Everything in this section is parked until
+> the local end-to-end build is complete; none of it is part of this implementation plan.
 
 Modeled on the live bot's proven deployment (`azure.yaml` + `infra/main.bicep` + multi-stage
 `Dockerfile`), but **isolated**: mock-X gets its own azd project + Bicep + App Service (+plan)
@@ -179,7 +188,8 @@ the mock-X identity.
 - **Synthetic anonymized authors** (IRB/ethics: never real handles).
 - Bot persona = single account **@eddiexbot** across all three tones.
 - Rendering = **approach A** (JSON API + client renderer).
-- Host on **Azure App Service** via container, modeled on the live-bot azd+Bicep deployment but
+- **Build & verify locally first; defer all deployment.** When deployment happens (later): host
+  on **Azure App Service** via container, modeled on the live-bot azd+Bicep deployment but
   **isolated** (own azd project/Bicep/App Service), sharing only the existing **ACR**.
 
 ## Out of scope (Part 1)
