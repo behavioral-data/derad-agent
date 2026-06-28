@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 """Batch-generate bot replies for tweets listed in a CSV.
 
-For each post, runs the fact-check pipeline once per tone condition and
-writes a new CSV with columns: id, neutral, satirical, agreeable.
+For each post, runs the fact-check pipeline once, renders all three tone
+conditions, and writes a CSV with columns: id, neutral, satirical, agreeable.
+Each cell contains the reply text plus a "Sources & reasoning:" block with
+the cited reference URLs (same sources across tones, matching the live bot).
 
 Usage:
     .venv/bin/python scripts/batch_generate_replies.py /path/to/posts.csv
@@ -56,12 +58,16 @@ from dotenv import load_dotenv
 
 load_dotenv(_REPO_ROOT / "agent" / "llm" / ".env")
 
-from agent.app.participants import VALID_TONES
-from agent.app.utils import generate_reply
+from agent.app.utils import _APP_TO_FACTCHECK_TONE
+from agent.factcheck.freeze import view_for_renderer
+from agent.factcheck.pipeline import run_pipeline
+from agent.factcheck.render import render
 
 # Output column order (fixed per user request).
 OUTPUT_TONES = ("neutral", "satirical", "agreeable")
 OUTPUT_FIELDNAMES = ("id", *OUTPUT_TONES)
+MAX_SOURCES = 5
+SOURCES_HEADER = "Sources & reasoning:"
 
 
 @dataclass(frozen=True)
@@ -97,36 +103,66 @@ def load_posts(input_path: Path, *, limit: int | None = None) -> list[Post]:
     return posts
 
 
-def generate_reply_for_tone(
+def format_reply_with_sources(text: str, sources: list[str] | None) -> str:
+    """Append cited reference URLs below the reply body."""
+    body = (text or "").strip()
+    urls = [u.strip() for u in (sources or []) if u and u.strip()]
+    if not urls:
+        return body
+    links = "\n".join(urls)
+    if body:
+        return f"{body}\n\n{SOURCES_HEADER}\n{links}"
+    return f"{SOURCES_HEADER}\n{links}"
+
+
+def _primary_source_urls(frozen) -> list[str]:
+    return [
+        s.url for s in frozen.presentation_payload.primary_sources_to_cite
+    ][:MAX_SOURCES]
+
+
+def generate_all_tones(
     statement: str,
-    *,
     tweet_id: str,
-    tone: str,
-) -> str:
-    """Run the pipeline for one tone and return reply text (empty on failure)."""
-    if tone not in VALID_TONES:
-        raise ValueError(f"Unknown tone {tone!r}; expected one of {VALID_TONES}")
+    *,
+    include_sources: bool = True,
+) -> dict[str, str]:
+    """Run the pipeline once, render each tone, optionally append source links."""
+    logging.info("id=%s — running pipeline", tweet_id)
+    try:
+        frozen = run_pipeline(
+            statement,
+            target_tweet_id=tweet_id,
+            image_urls=None,
+            tweet_context=None,
+            invoker_instruction="",
+        )
+    except Exception:
+        logging.exception("id=%s — pipeline failed", tweet_id)
+        return {tone: "" for tone in OUTPUT_TONES}
 
-    result = generate_reply(
-        statement=statement,
-        tone=tone,
-        exclude_tweet_id=tweet_id,
-    )
-    return (result.get("text") or "").strip()
-
-
-def generate_all_tones(statement: str, tweet_id: str) -> dict[str, str]:
-    """Generate neutral, satirical, and agreeable replies for one post."""
+    view = view_for_renderer(frozen, parent_post_text=statement)
+    sources = _primary_source_urls(frozen) if include_sources else None
     replies: dict[str, str] = {}
+
     for tone in OUTPUT_TONES:
-        logging.info("id=%s tone=%s — running pipeline", tweet_id, tone)
+        factcheck_tone = _APP_TO_FACTCHECK_TONE.get(tone, tone)
+        logging.info("id=%s tone=%s — rendering", tweet_id, tone)
         try:
-            replies[tone] = generate_reply_for_tone(
-                statement, tweet_id=tweet_id, tone=tone,
+            text = render(view, factcheck_tone)
+            replies[tone] = (
+                format_reply_with_sources(text, sources)
+                if include_sources
+                else (text or "").strip()
             )
         except Exception:
-            logging.exception("id=%s tone=%s — pipeline failed", tweet_id, tone)
-            replies[tone] = ""
+            logging.exception("id=%s tone=%s — render failed", tweet_id, tone)
+            replies[tone] = (
+                format_reply_with_sources("", sources)
+                if include_sources
+                else ""
+            )
+
     return replies
 
 
@@ -147,6 +183,7 @@ def process_batch(
     output_path: Path,
     *,
     limit: int | None = None,
+    include_sources: bool = True,
 ) -> int:
     """Load posts, generate replies, write output CSV. Returns rows written."""
     posts = load_posts(input_path, limit=limit)
@@ -171,7 +208,9 @@ def process_batch(
 
         for idx, post in enumerate(posts, start=1):
             logging.info("[%d/%d] id=%s", idx, len(posts), post.id)
-            replies = generate_all_tones(post.text, post.id)
+            replies = generate_all_tones(
+                post.text, post.id, include_sources=include_sources,
+            )
             write_output_row(writer, fh, post.id, replies)
             written += 1
 
@@ -206,6 +245,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable INFO logging (pipeline stage progress)",
     )
+    parser.add_argument(
+        "--no-sources",
+        action="store_true",
+        help="Omit the Sources & reasoning block from reply cells",
+    )
     return parser
 
 
@@ -238,7 +282,12 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        written = process_batch(input_path, output_path, limit=args.limit)
+        written = process_batch(
+            input_path,
+            output_path,
+            limit=args.limit,
+            include_sources=not args.no_sources,
+        )
     except Exception:
         logging.exception("Batch failed")
         return 1
