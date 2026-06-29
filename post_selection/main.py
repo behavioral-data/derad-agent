@@ -1,14 +1,13 @@
-from pathlib import Path
 from cache import *
 from utils import *
 from keywords import KEYWORDS
 
 INPUT_FILEPATH = "tweet-group-misleadingness-dataset/tweet_lean.tsv"
-OUTPUT_FILEPATH = "output/output.csv"
+OUTPUT_FILEPATH = "output/output-20.csv"
 NOTES_DIRECTORY = "notes-dataset"
 CACHE_DIRECTORY = "cache"
-CACHE_SIZE_PER_POLARITY = 10000
-NUM_TWEETS_PER_CONDITION = 10
+CACHE_SIZE_PER_POLARITY = 15000
+NUM_TWEETS_PER_CONDITION = 20
 
 
 # Read community notes output tsv
