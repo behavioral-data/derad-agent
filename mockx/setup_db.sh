@@ -62,12 +62,13 @@ posts = c.execute("select count(*) from posts").fetchone()[0]
 iv = c.execute("select count(*) from interventions").fetchone()[0]
 notes = c.execute("select count(*) from interventions where condition='control' and body!=''").fetchone()[0]
 media = c.execute("select count(*) from posts where media_json!='[]'").fetchone()[0]
+real = c.execute("select count(*) from interventions where kind='bot_reply' and is_stub=0").fetchone()[0]
 stubs = c.execute("select count(*) from interventions where kind='bot_reply' and is_stub=1").fetchone()[0]
 print(f"  posts ................ {posts}")
 print(f"  interventions ........ {iv}  (= posts x 4 conditions)")
 print(f"  control notes (real) . {notes}")
 print(f"  posts with media ..... {media}")
-print(f"  bot replies (STUB) ... {stubs}   <- placeholders; real replies are Part 1")
+print(f"  bot replies .......... {real} real, {stubs} stub")
 PYEOF
 
 cat <<EOF
@@ -80,6 +81,8 @@ Run the interface:
 Open a thread:
     http://127.0.0.1:8000/?post_id=<tweetId>&condition=<neutral|agreeable|satirical|control>
 
-Note: the three bot tones are stub text until the Part-1 reply generator
-(scripts/batch_generate_replies.py, on the response-generation branch) is run.
+Note: bot replies are ingested from tsv_generation/selected_posts_replies.csv
+(committed). Any post without a generated reply falls back to stub text.
+Regenerate replies with:
+    python scripts/batch_generate_replies.py tsv_generation/selected_posts.csv
 EOF

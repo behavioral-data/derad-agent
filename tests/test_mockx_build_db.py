@@ -105,3 +105,41 @@ def test_build_without_media_csv_leaves_empty_media(tmp_path):
     conn = sqlite3.connect(str(db))
     assert conn.execute(
         "select media_json from posts where post_id='t1'").fetchone()[0] == "[]"
+
+
+def test_build_ingests_generated_replies(tmp_path):
+    sel = tmp_path / "sel.csv"; sel.write_text(MOCKX_SELECTED_CSV)
+    notes = tmp_path / "notes.csv"; notes.write_text(MOCKX_NOTES_CSV)
+    replies = tmp_path / "replies.csv"
+    replies.write_text(
+        "id,neutral,satirical,agreeable\n"
+        "t1,real neutral,real satire,real agree\n"   # t1 generated; t2 absent
+    )
+    db = tmp_path / "study.db"
+    build(str(sel), str(notes), str(db), replies_csv=str(replies))
+
+    conn = sqlite3.connect(str(db)); conn.row_factory = sqlite3.Row
+    rows = {r["condition"]: r for r in conn.execute(
+        "select condition, body, is_stub from interventions "
+        "where post_id='t1' and kind='bot_reply'")}
+    assert (rows["neutral"]["body"], rows["neutral"]["is_stub"]) == ("real neutral", 0)
+    assert (rows["agreeable"]["body"], rows["agreeable"]["is_stub"]) == ("real agree", 0)
+    assert (rows["satirical"]["body"], rows["satirical"]["is_stub"]) == ("real satire", 0)
+
+    # t2 has no generated reply -> stays a stub
+    t2 = conn.execute(
+        "select body, is_stub from interventions "
+        "where post_id='t2' and condition='neutral'").fetchone()
+    assert t2["is_stub"] == 1 and "STUB" in t2["body"]
+
+
+def test_build_without_replies_csv_leaves_stubs(tmp_path):
+    sel = tmp_path / "sel.csv"; sel.write_text(MOCKX_SELECTED_CSV)
+    notes = tmp_path / "notes.csv"; notes.write_text(MOCKX_NOTES_CSV)
+    db = tmp_path / "study.db"
+    build(str(sel), str(notes), str(db))  # no replies_csv
+    conn = sqlite3.connect(str(db))
+    row = conn.execute(
+        "select body, is_stub from interventions "
+        "where post_id='t1' and condition='neutral'").fetchone()
+    assert row[1] == 1 and "STUB" in row[0]

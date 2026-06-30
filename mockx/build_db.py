@@ -17,6 +17,7 @@ _ROOT = os.path.dirname(_HERE)
 DEFAULT_SELECTED = os.path.join(_ROOT, "tsv_generation", "selected_posts.csv")
 DEFAULT_NOTES_CSV = os.path.join(_HERE, "data", "notes_selected.csv")
 DEFAULT_MEDIA_CSV = os.path.join(_HERE, "data", "media_index.csv")
+DEFAULT_REPLIES_CSV = os.path.join(_ROOT, "tsv_generation", "selected_posts_replies.csv")
 DEFAULT_DB = os.path.join(_HERE, "study.db")
 
 csv.field_size_limit(10_000_000)
@@ -116,10 +117,28 @@ def _load_media(media_csv):
     return {tid: [m for _, m in sorted(items)] for tid, items in by_tweet.items()}
 
 
-def build(selected_csv, notes_csv, out_db, media_csv=None):
+def _load_replies(replies_csv):
+    """post_id -> {tone: reply_body} from selected_posts_replies.csv (cols: id,<tones>).
+
+    Returns {} when no file is given/present (e.g. tests, or before generation),
+    in which case bot replies fall back to stub text.
+    """
+    by_post = {}
+    if not replies_csv or not os.path.exists(replies_csv):
+        return by_post
+    with open(replies_csv, newline="") as f:
+        for r in csv.DictReader(f):
+            pid = (r.get("id") or r.get("tweetId") or "").strip()
+            if pid:
+                by_post[pid] = {t: (r.get(t) or "").strip() for t in TONES}
+    return by_post
+
+
+def build(selected_csv, notes_csv, out_db, media_csv=None, replies_csv=None):
     posts = load_posts(selected_csv)
     notes = _load_notes(notes_csv)
     media = _load_media(media_csv)
+    replies = _load_replies(replies_csv)
 
     if os.path.exists(out_db):
         os.remove(out_db)
@@ -147,12 +166,15 @@ def build(selected_csv, notes_csv, out_db, media_csv=None):
             ":polarity_condition,:topic_condition,:media_json)", p)
 
         re = synth_engagement(p["post_id"], "reply")   # identical across tones
+        post_replies = replies.get(p["post_id"], {})
         for tone in TONES:
+            real = post_replies.get(tone)
+            body = real if real else f"[STUB — {tone} reply pending generation]"
+            is_stub = 0 if real else 1
             conn.execute("INSERT INTO interventions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", (
-                p["post_id"], tone, "bot_reply",
-                f"[STUB — {tone} reply pending generation]",
+                p["post_id"], tone, "bot_reply", body,
                 BOT_NAME, BOT_HANDLE, BOT_AVATAR, None, None,
-                re["likes"], re["reposts"], re["views"], 1))
+                re["likes"], re["reposts"], re["views"], is_stub))
             n_iv += 1
 
         note = notes.get(p["post_id"])
@@ -175,9 +197,11 @@ def main():
     ap.add_argument("--selected", default=DEFAULT_SELECTED)
     ap.add_argument("--notes", default=DEFAULT_NOTES_CSV)
     ap.add_argument("--media", default=DEFAULT_MEDIA_CSV)
+    ap.add_argument("--replies", default=DEFAULT_REPLIES_CSV)
     ap.add_argument("--db", default=DEFAULT_DB)
     args = ap.parse_args()
-    n_posts, n_iv = build(args.selected, args.notes, args.db, media_csv=args.media)
+    n_posts, n_iv = build(args.selected, args.notes, args.db,
+                          media_csv=args.media, replies_csv=args.replies)
     print(f"Wrote {n_posts} posts, {n_iv} interventions to {args.db}", file=sys.stderr)
 
 
