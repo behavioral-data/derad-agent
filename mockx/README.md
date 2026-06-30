@@ -25,7 +25,7 @@ python -m mockx.extract_notes
 # only needs re-running if the post set changes. Requires X creds in agent/llm/.env.
 python -m mockx.fetch_media
 
-# Fast: build the read-only study.db (170 posts x 4 conditions = 680 rows).
+# Fast: build the read-only study.db (71 posts x 4 conditions = 284 rows).
 python -m mockx.build_db
 ```
 
@@ -40,7 +40,7 @@ where `<c>` ∈ `neutral | agreeable | satirical | control`.
 
 - `neutral|agreeable|satirical` → one bot reply from **@eddiexbot** (stub text until Part-1 generation).
 - `control` → the post's real community note as a "Readers added context" card.
-- Posts with attached media (97 of 170) render an X-style image grid (videos/GIFs show
+- Posts with attached media (42 of 71) render an X-style image grid (videos/GIFs show
   their preview frame with a play badge); images are served locally from `static/media/`.
 
 ## Test
