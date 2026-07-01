@@ -1,5 +1,5 @@
 # Participant data
-data_analysis/input
+study/data_analysis/input
 
 # Python cache files
 __pycache__/
@@ -109,4 +109,4 @@ keys.md
 todo.md
 
 # mock-x study interface — generated, read-only DB artifact
-mockx/study.db
+study/interface/study.db
