@@ -242,39 +242,74 @@ def _info_payload_from_frozen(frozen) -> dict:
     }
 
 
-def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5,
-                   image_urls=None, tweet_context=None, invoker_instruction=""):
-    """Run the fact-check pipeline and render a reply in the requested tone.
+def build_tweet_context(snap):
+    """Assemble the fact-checking ``tweet_context`` dict from a TweetSnapshot.
 
-    The rendered text contains NO URLs — sources + reasoning live on the
-    /info page reached via the short link appended downstream. Returns
-    `{text, sources, info_payload, verdict_label, action, action_outcome, queries}`.
-
-    `info_payload` carries everything the /info page renders: action +
-    outcome + counterpoints / perspectives / context_note + every cited
-    source + the source-quality table.
+    Single source of truth shared by the live streamer (``process_mention``)
+    and the batch reply generator, so both feed the pipeline identical context.
     """
-    from agent.factcheck.freeze import view_for_renderer
-    from agent.factcheck.pipeline import run_pipeline
-    from agent.factcheck.render import render
+    return {
+        "author_username": snap.author_username,
+        "author_verified": snap.author_verified,
+        "author_verified_type": snap.author_verified_type,
+        "author_description": snap.author_description,
+        "author_created_at": snap.author_created_at,
+        "author_followers_count": snap.author_followers_count,
+        "posted_at": snap.created_at,
+        "lang": snap.lang,
+        "possibly_sensitive": snap.possibly_sensitive,
+        "expanded_urls": snap.expanded_urls or [],
+        "referenced_tweets": snap.referenced_tweets or [],
+        "public_metrics": {
+            "like_count": snap.like_count,
+            "retweet_count": snap.retweet_count,
+            "reply_count": snap.reply_count,
+            "quote_count": snap.quote_count,
+        },
+    }
 
-    factcheck_tone = _APP_TO_FACTCHECK_TONE.get(tone)
-    if factcheck_tone is None:
-        logger.warning("generate_reply: unknown tone %r — defaulting to neutral", tone)
-        factcheck_tone = "neutral"
+
+def run_factcheck(statement, *, exclude_tweet_id=None, image_urls=None,
+                  tweet_context=None, invoker_instruction=""):
+    """Run the fact-check pipeline once and return the frozen verdict.
+
+    Identical pipeline inputs to the live bot. Callers render one or more tones
+    from the returned verdict via ``render_reply`` — the live bot renders one
+    tone per invocation; the study batch generator renders all three from a
+    single verdict so evidence is held fixed across a post's conditions.
+    """
+    from agent.factcheck.pipeline import run_pipeline
 
     target_tweet_id = str(exclude_tweet_id) if exclude_tweet_id is not None else ""
 
-    # Let pipeline + render exceptions propagate. The streamer's
-    # process_mention wraps the whole flow in try/except and emits
-    # `pipeline_error` — that's the outcome we want for telemetry.
-    frozen = run_pipeline(
+    # Let pipeline exceptions propagate. The streamer's process_mention wraps
+    # the whole flow in try/except and emits `pipeline_error` — that's the
+    # outcome we want for telemetry.
+    return run_pipeline(
         statement,
         target_tweet_id=target_tweet_id,
         image_urls=list(image_urls) if image_urls else None,
         tweet_context=tweet_context or None,
         invoker_instruction=invoker_instruction or "",
     )
+
+
+def render_reply(frozen, statement, tone, max_sources=5):
+    """Render one tone from a frozen verdict and assemble the reply payload.
+
+    Returns ``{text, sources, info_payload, verdict_label, action,
+    action_outcome, queries}``. The rendered text contains NO URLs — sources +
+    reasoning live on the /info page reached via the short link appended
+    downstream. ``info_payload`` carries everything the /info page renders.
+    """
+    from agent.factcheck.freeze import view_for_renderer
+    from agent.factcheck.render import render
+
+    factcheck_tone = _APP_TO_FACTCHECK_TONE.get(tone)
+    if factcheck_tone is None:
+        logger.warning("render_reply: unknown tone %r — defaulting to neutral", tone)
+        factcheck_tone = "neutral"
+
     text = render(
         view_for_renderer(frozen, parent_post_text=statement), factcheck_tone
     )
@@ -297,6 +332,23 @@ def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5,
         "action_outcome": frozen.action_outcome,
         "queries": [statement],
     }
+
+
+def generate_reply(statement, tone, exclude_tweet_id=None, max_sources=5,
+                   image_urls=None, tweet_context=None, invoker_instruction=""):
+    """Run the fact-check pipeline and render a reply in the requested tone.
+
+    Thin composition of ``run_factcheck`` + ``render_reply`` (one run, one
+    render) — the exact path the live bot uses per invocation.
+    """
+    frozen = run_factcheck(
+        statement,
+        exclude_tweet_id=exclude_tweet_id,
+        image_urls=image_urls,
+        tweet_context=tweet_context,
+        invoker_instruction=invoker_instruction,
+    )
+    return render_reply(frozen, statement, tone, max_sources=max_sources)
 
 
 def post_reply(parent_id, reply_text) -> Optional[str]:

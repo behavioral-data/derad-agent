@@ -26,6 +26,7 @@ from agent.app.events import (
 from agent.app import participants as _participants
 from agent.app.participants import VALID_TONES
 from agent.app.utils import (
+    build_tweet_context,
     fetch_tweet,
     generate_reply,
     post_reply,
@@ -636,25 +637,7 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
             mention_id, snap.author_username or "?", len(statement), len(parent_image_urls),
             invoker_instruction[:60],
         )
-        tweet_context = {
-            "author_username": snap.author_username,
-            "author_verified": snap.author_verified,
-            "author_verified_type": snap.author_verified_type,
-            "author_description": snap.author_description,
-            "author_created_at": snap.author_created_at,
-            "author_followers_count": snap.author_followers_count,
-            "posted_at": snap.created_at,
-            "lang": snap.lang,
-            "possibly_sensitive": snap.possibly_sensitive,
-            "expanded_urls": snap.expanded_urls or [],
-            "referenced_tweets": snap.referenced_tweets or [],
-            "public_metrics": {
-                "like_count": snap.like_count,
-                "retweet_count": snap.retweet_count,
-                "reply_count": snap.reply_count,
-                "quote_count": snap.quote_count,
-            },
-        }
+        tweet_context = build_tweet_context(snap)
         reply = generate_reply(
             statement=statement,
             exclude_tweet_id=parent_id,
