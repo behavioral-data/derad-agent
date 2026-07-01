@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-from mockx import db as dbmod
+from study.interface import db as dbmod
 
 
 def test_conditions_constant():
@@ -13,7 +13,7 @@ def test_conditions_constant():
 
 
 def test_get_post_exposes_media_list(tmp_path):
-    from mockx.build_db import build
+    from study.interface.build_db import build
     from tests.conftest import MOCKX_NOTES_CSV, MOCKX_SELECTED_CSV
     sel = tmp_path / "sel.csv"; sel.write_text(MOCKX_SELECTED_CSV)
     notes = tmp_path / "notes.csv"; notes.write_text(MOCKX_NOTES_CSV)

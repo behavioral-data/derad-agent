@@ -1,7 +1,7 @@
 """Tests for mockx.fetch_media pure helpers (parse_media, index_media)."""
 from __future__ import annotations
 
-from mockx.fetch_media import index_media, parse_media
+from study.interface.fetch_media import index_media, parse_media
 
 
 def test_index_media_keys_by_media_key():

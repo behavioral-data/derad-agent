@@ -5,8 +5,8 @@ import sqlite3
 
 import pytest
 
-from mockx.build_db import build
-from mockx.db import update_bot_replies
+from study.interface.build_db import build
+from study.interface.db import update_bot_replies
 from tests.conftest import MOCKX_NOTES_CSV, MOCKX_SELECTED_CSV
 
 

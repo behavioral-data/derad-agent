@@ -28,7 +28,7 @@ MOCKX_NOTES_CSV = (
 @pytest.fixture
 def mockx_db(tmp_path):
     """Build a tiny study.db from inline fixtures; return its path."""
-    from mockx.build_db import build
+    from study.interface.build_db import build
     sel = tmp_path / "selected.csv"
     sel.write_text(MOCKX_SELECTED_CSV)
     notes = tmp_path / "notes_selected.csv"

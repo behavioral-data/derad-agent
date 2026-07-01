@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import csv
 
-from mockx.extract_notes import extract, select_shown_note
+from study.interface.extract_notes import extract, select_shown_note
 
 
 def test_prefers_currently_rated_helpful():

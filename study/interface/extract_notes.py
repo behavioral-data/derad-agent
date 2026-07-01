@@ -12,9 +12,10 @@ import html
 import os
 import sys
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_ROOT = os.path.dirname(_HERE)
-DEFAULT_SELECTED = os.path.join(_ROOT, "tsv_generation", "selected_posts.csv")
+_HERE = os.path.dirname(os.path.abspath(__file__))          # .../study/interface
+_STUDY = os.path.dirname(_HERE)                              # .../study
+_ROOT = os.path.dirname(_STUDY)                              # repo root
+DEFAULT_SELECTED = os.path.join(_STUDY, "posts", "selected_posts.csv")
 DEFAULT_NOTES = os.path.join(_ROOT, "tsv_generation", "cn_data", "notes-00000.tsv")
 DEFAULT_STATUS = os.path.join(_ROOT, "tsv_generation", "cn_data", "noteStatusHistory-00000.tsv")
 DEFAULT_OUT = os.path.join(_HERE, "data", "notes_selected.csv")

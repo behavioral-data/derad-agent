@@ -12,12 +12,13 @@ import os
 import sqlite3
 import sys
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_ROOT = os.path.dirname(_HERE)
-DEFAULT_SELECTED = os.path.join(_ROOT, "tsv_generation", "selected_posts.csv")
+_HERE = os.path.dirname(os.path.abspath(__file__))          # .../study/interface
+_STUDY = os.path.dirname(_HERE)                              # .../study
+_ROOT = os.path.dirname(_STUDY)                              # repo root
+DEFAULT_SELECTED = os.path.join(_STUDY, "posts", "selected_posts.csv")
 DEFAULT_NOTES_CSV = os.path.join(_HERE, "data", "notes_selected.csv")
 DEFAULT_MEDIA_CSV = os.path.join(_HERE, "data", "media_index.csv")
-DEFAULT_REPLIES_CSV = os.path.join(_ROOT, "tsv_generation", "selected_posts_replies.csv")
+DEFAULT_REPLIES_CSV = os.path.join(_STUDY, "posts", "selected_posts_replies.csv")
 DEFAULT_DB = os.path.join(_HERE, "study.db")
 
 csv.field_size_limit(10_000_000)

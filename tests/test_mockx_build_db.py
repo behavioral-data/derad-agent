@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from mockx.build_db import build, synth_author, synth_engagement
+from study.interface.build_db import build, synth_author, synth_engagement
 from tests.conftest import MOCKX_NOTES_CSV, MOCKX_SELECTED_CSV
 
 

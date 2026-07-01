@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from mockx.server import create_app
+from study.interface.server import create_app
 
 
 @pytest.fixture

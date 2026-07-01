@@ -8,7 +8,7 @@ import random
 import pytest
 
 # post_selection/ is not a package; load the module directly from its path.
-_MOD = pathlib.Path(__file__).resolve().parent.parent / "post_selection" / "post_assignment.py"
+_MOD = pathlib.Path(__file__).resolve().parent.parent / "study" / "post_selection" / "post_assignment.py"
 _spec = importlib.util.spec_from_file_location("post_assignment", _MOD)
 post_assignment = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(post_assignment)
