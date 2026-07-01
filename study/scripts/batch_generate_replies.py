@@ -3,7 +3,7 @@
 
 For each post, runs the fact-check pipeline once, renders all three tone
 conditions, writes a CSV (id, neutral, satirical, agreeable), and updates
-the matching bot_reply rows in mockx/study.db (body + is_stub=0).
+the matching bot_reply rows in study/interface/study.db (body + is_stub=0).
 
 Each reply cell contains the reply text plus a "Sources & reasoning:" block
 with the cited reference URLs (same sources across tones, matching the live bot).
@@ -15,7 +15,7 @@ Usage:
 
 One-time setup (from repo root):
     python3.13 -m venv .venv && .venv/bin/pip install -e . -r requirements.txt
-    python -m mockx.build_db   # creates mockx/study.db with stub interventions
+    python -m study.interface.build_db   # creates study/interface/study.db with stub interventions
 
 Requires Azure Claude credentials in agent/llm/.env (same as the live bot).
 Does not post to X — generation only.
@@ -29,9 +29,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
-DEFAULT_DB = _REPO_ROOT / "mockx" / "study.db"
+DEFAULT_DB = _REPO_ROOT / "study" / "interface" / "study.db"
 
 
 def _check_runtime_deps() -> None:
@@ -67,7 +67,7 @@ from agent.app.utils import _APP_TO_FACTCHECK_TONE
 from agent.factcheck.freeze import view_for_renderer
 from agent.factcheck.pipeline import run_pipeline
 from agent.factcheck.render import render
-from mockx.db import connect_writable, update_bot_replies
+from study.interface.db import connect_writable, update_bot_replies
 
 # Output column order (fixed per user request).
 OUTPUT_TONES = ("neutral", "satirical", "agreeable")
@@ -209,7 +209,7 @@ def process_batch(
     if db_path is not None:
         if not db_path.is_file():
             raise FileNotFoundError(
-                f"study.db not found at {db_path} — run: python -m mockx.build_db"
+                f"study.db not found at {db_path} — run: python -m study.interface.build_db"
             )
         conn = connect_writable(str(db_path))
 

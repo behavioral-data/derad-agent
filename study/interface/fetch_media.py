@@ -1,8 +1,8 @@
 """One-time: download the media attached to each study tweet from X.
 
 Uses the project's X client (OAuth1, creds in agent/llm/.env) to resolve media
-for the study tweetIds, downloads the image bytes into mockx/static/media/, and
-writes a small committed index (mockx/data/media_index.csv) consumed by build_db.
+for the study tweetIds, downloads the image bytes into study/interface/static/media/,
+and writes a small committed index (study/interface/data/media_index.csv) consumed by build_db.
 
 Photos download their full image; videos/animated_gifs download their preview
 frame (still). Run once; the downloaded files + index are committed so the
@@ -18,9 +18,10 @@ import urllib.parse
 
 import requests
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_ROOT = os.path.dirname(_HERE)
-DEFAULT_SELECTED = os.path.join(_ROOT, "tsv_generation", "selected_posts.csv")
+_HERE = os.path.dirname(os.path.abspath(__file__))          # .../study/interface
+_STUDY = os.path.dirname(_HERE)                              # .../study
+_ROOT = os.path.dirname(_STUDY)                              # repo root
+DEFAULT_SELECTED = os.path.join(_STUDY, "posts", "selected_posts.csv")
 DEFAULT_MEDIA_DIR = os.path.join(_HERE, "static", "media")
 DEFAULT_OUT = os.path.join(_HERE, "data", "media_index.csv")
 
