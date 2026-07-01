@@ -37,6 +37,11 @@ def create_app(db_path=None):
             conn.close()
         if thread is None:
             return jsonify({"error": "post not found"}), 404
+        # Strip fields that would reveal study-design details in the browser Network tab.
+        for field in ("condition", "is_stub", "note_classification", "source_note_id"):
+            thread["intervention"].pop(field, None)
+        for field in ("polarity_condition", "topic_condition"):
+            thread["post"].pop(field, None)
         return jsonify(thread)
 
     return app

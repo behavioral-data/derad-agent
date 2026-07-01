@@ -100,31 +100,6 @@ body {
   padding: 14px;
 }
 
-/* Header */
-.feed-header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: rgba(0,0,0,0.8);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--border);
-  padding: 14px 16px;
-  font-size: 20px;
-  font-weight: 700;
-}
-
-/* Post card */
-.post-card {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-  cursor: pointer;
-  transition: background 0.1s;
-  position: relative;
-}
-.post-card:hover { background: var(--hover-bg); }
-.post-card.expanded { cursor: default; background: transparent; }
-.post-card.expanded:hover { background: transparent; }
-
 .post-inner {
   display: flex;
   gap: 12px;
@@ -151,15 +126,6 @@ body {
   background: #536471;
 }
 
-/* thread line below avatar */
-.thread-line {
-  width: 2px;
-  flex: 1;
-  min-height: 8px;
-  background: var(--reply-line);
-  margin-top: 4px;
-}
-
 .post-body { flex: 1; min-width: 0; }
 
 .post-meta {
@@ -178,9 +144,6 @@ body {
   font-size: 15px;
   white-space: nowrap;
 }
-.post-dot { color: var(--text-dim); }
-.post-time { color: var(--text-dim); font-size: 15px; }
-
 .post-content {
   margin-top: 4px;
   font-size: 15px;
@@ -218,61 +181,12 @@ body {
 .action-btn svg { width: 18px; height: 18px; fill: currentColor; stroke: none; }
 .action-btn.liked svg { fill: #f91880; }
 
-/* Reply nesting */
-.replies-section { border-left: none; }
-
 .reply-card {
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   transition: background 0.1s;
 }
 .reply-card:hover { background: var(--hover-bg); }
-
-.nested-replies {
-  margin-left: 0;
-}
-
-.nested-reply-card {
-  padding: 12px 16px 12px 68px; /* indent for depth */
-  border-bottom: 1px solid var(--border);
-  transition: background 0.1s;
-}
-.nested-reply-card:hover { background: var(--hover-bg); }
-
-/* Reply input */
-.reply-box {
-  display: flex;
-  gap: 12px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-}
-.reply-input {
-  flex: 1;
-  background: transparent;
-  border: none;
-  outline: none;
-  color: var(--text);
-  font-size: 20px;
-  font-family: inherit;
-  resize: none;
-  min-height: 52px;
-}
-.reply-input::placeholder { color: var(--text-dim); }
-.reply-submit {
-  align-self: flex-end;
-  background: var(--accent);
-  color: #fff;
-  border: none;
-  border-radius: 9999px;
-  padding: 8px 18px;
-  font-size: 15px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: background 0.15s;
-  white-space: nowrap;
-}
-.reply-submit:hover { background: var(--accent-hover); }
-.reply-submit:disabled { opacity: 0.5; cursor: default; }
 
 /* Thread view */
 .thread-header {
@@ -287,20 +201,6 @@ body {
   backdrop-filter: blur(12px);
   z-index: 10;
 }
-.back-btn {
-  background: none;
-  border: none;
-  color: var(--text);
-  cursor: pointer;
-  padding: 8px;
-  border-radius: 9999px;
-  display: flex;
-  align-items: center;
-  transition: background 0.1s;
-}
-.back-btn:hover { background: var(--hover-bg); }
-.back-btn svg { width: 20px; height: 20px; fill: currentColor; }
-
 /* Expanded post (thread view top) */
 .post-expanded {
   padding: 16px;
@@ -335,25 +235,6 @@ body {
   margin-top: 12px;
 }
 
-/* View selector */
-.view-tabs {
-  display: flex;
-  border-bottom: 1px solid var(--border);
-}
-.view-tab {
-  flex: 1;
-  padding: 16px;
-  text-align: center;
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--text-dim);
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  transition: color 0.1s, border-color 0.1s;
-}
-.view-tab:hover { background: var(--hover-bg); color: var(--text); }
-.view-tab.active { color: var(--text); font-weight: 700; border-bottom-color: var(--accent); }
-
 /* Search box (sidebar) */
 .search-box {
   background: #202327;
@@ -381,7 +262,7 @@ body {
 .font-bold { font-weight: 700; }
 .mt-1 { margin-top: 4px; }
 
-/* Community note — native "Readers added context" card (control condition) */
+/* "Readers added context" card */
 .note-card {
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -406,6 +287,45 @@ body {
 }
 .note-card-footer { margin-top: 10px; font-size: 13px; color: var(--text-dim); }
 .note-card-link { color: var(--text-dim); font-weight: 600; }
+
+/* Verified account badge */
+.verified-badge {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  margin-left: 2px;
+}
+.verified-badge svg { width: 18px; height: 18px; }
+
+/* Bot reply sources block */
+.bot-sources {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.bot-sources-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.bot-sources-list {
+  list-style: none;
+  margin: 4px 0 0;
+}
+.bot-source-link {
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+  word-break: break-all;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.bot-source-link:hover { text-decoration: underline; }
 
 /* Tweet media — X-style image grid (photos + video stills) */
 .media-grid {

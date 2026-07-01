@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import html
 import os
 import sys
 
@@ -49,7 +50,7 @@ def extract(selected_csv, notes_tsv, status_tsv, out_csv):
                 continue
             by_tweet.setdefault(tid, []).append({
                 "noteId": r["noteId"],
-                "summary": r["summary"],
+                "summary": html.unescape(r["summary"]),
                 "classification": r["classification"],
             })
             note_ids.add(r["noteId"])

@@ -1,4 +1,4 @@
-// Mock X — data layer. Fetches a single (post, intervention) thread.
+// Data layer. Fetches a single post thread from the server.
 const MockXAPI = {
   async getThread(postId, condition) {
     const r = await fetch(

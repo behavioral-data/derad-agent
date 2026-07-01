@@ -140,9 +140,10 @@ def build(selected_csv, notes_csv, out_db, media_csv=None, replies_csv=None):
     media = _load_media(media_csv)
     replies = _load_replies(replies_csv)
 
-    if os.path.exists(out_db):
-        os.remove(out_db)
-    conn = sqlite3.connect(out_db)
+    tmp_db = out_db + ".tmp"
+    if os.path.exists(tmp_db):
+        os.remove(tmp_db)
+    conn = sqlite3.connect(tmp_db)
     conn.execute("""
         CREATE TABLE posts (
             post_id TEXT PRIMARY KEY, content TEXT, created_at TEXT,
@@ -189,6 +190,7 @@ def build(selected_csv, notes_csv, out_db, media_csv=None, replies_csv=None):
 
     conn.commit()
     conn.close()
+    os.replace(tmp_db, out_db)
     return len(posts), n_iv
 
 

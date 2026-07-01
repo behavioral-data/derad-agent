@@ -1,6 +1,5 @@
-// Mock X — study renderer. Renders one post + one intervention by URL params
-// (?post_id=&condition=). Bot reply -> reply card (no tone label);
-// community note -> native "Readers added context" card (Task 7).
+// X thread renderer. Renders one post + one reply card or context card
+// based on URL params (?post_id=&condition=).
 
 function escapeHtml(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => (
@@ -49,13 +48,13 @@ function renderMedia(media) {
   const shown = media.slice(0, 4);
   const items = shown.map((m) => `
     <div class="media-item">
-      <img src="${escapeHtml(m.src)}" alt="" loading="lazy">
-      ${m.type === "video" ? '<span class="play-badge">▶</span>' : ""}
+      <img src="${escapeHtml(m.src)}" alt="${m.type === "video" ? "Video preview" : "Image attached to the post"}" loading="lazy">
+      ${m.type === "video" ? '<span class="play-badge" aria-hidden="true">▶</span>' : ""}
     </div>`).join("");
   return `<div class="media-grid n${shown.length}">${items}</div>`;
 }
 
-// noteHtml is "" for bot conditions; the control card (Task 7) for control.
+// noteHtml is "" when there is no context card; populated for community notes.
 function renderPost(post, noteHtml = "") {
   const icons = actionIcons();
   return `
@@ -63,7 +62,7 @@ function renderPost(post, noteHtml = "") {
       <div class="post-meta-row">
         ${renderAvatar(initials(post.author_name))}
         <div>
-          <div class="font-bold">${escapeHtml(post.author_name)} ${post.author_verified ? "✓" : ""}</div>
+          <div class="font-bold">${escapeHtml(post.author_name)} ${post.author_verified ? '<span class="verified-badge" aria-label="Verified account"><svg viewBox="0 0 22 22" aria-hidden="true"><path d="M20.396 11c-.018-.646-.215-1.275-.57-1.816-.354-.54-.852-.972-1.438-1.246.223-.607.27-1.264.14-1.897-.131-.634-.437-1.218-.882-1.687-.47-.445-1.053-.75-1.687-.882-.633-.13-1.29-.083-1.897.14-.273-.587-.704-1.086-1.245-1.44S11.647 1.62 11 1.604c-.646.017-1.273.213-1.813.568s-.969.854-1.24 1.44c-.608-.223-1.267-.272-1.902-.14-.635.13-1.22.436-1.69.882-.445.47-.749 1.055-.878 1.688-.13.633-.08 1.29.144 1.896-.587.274-1.087.705-1.443 1.245-.356.54-.555 1.17-.574 1.817.02.647.218 1.276.574 1.817.356.54.856.972 1.443 1.245-.224.606-.274 1.263-.144 1.896.13.634.433 1.218.877 1.688.47.443 1.054.747 1.687.878.633.132 1.29.084 1.897-.136.274.586.705 1.084 1.246 1.439.54.354 1.17.551 1.816.569.647-.016 1.276-.213 1.817-.567s.972-.854 1.245-1.44c.604.239 1.266.296 1.903.164.636-.132 1.22-.447 1.68-.907.46-.46.477-1.054.597-1.686.122-.632.086-1.283-.106-1.882.604-.274 1.118-.724 1.472-1.282.354-.559.54-1.195.54-1.84z" fill="#1d9bf0"/><path d="M9.662 14.97L6.25 11.56l1.414-1.414 2 2 5-5 1.414 1.414z" fill="#fff"/></svg></span>' : ""}</div>
           <div class="text-dim">@${escapeHtml(post.author_handle)}</div>
         </div>
       </div>
@@ -77,16 +76,36 @@ function renderPost(post, noteHtml = "") {
         <span><strong>${fmtNum(post.views)}</strong> Views</span>
       </div>
       <div class="post-actions" style="max-width:none; justify-content:space-around">
-        <button class="action-btn">${icons.reply}</button>
-        <button class="action-btn repost">${icons.repost}</button>
-        <button class="action-btn like">${icons.like}</button>
-        <button class="action-btn share">${icons.share}</button>
+        <button class="action-btn" aria-label="Reply">${icons.reply}</button>
+        <button class="action-btn repost" aria-label="Repost">${icons.repost}</button>
+        <button class="action-btn like" aria-label="Like">${icons.like}</button>
+        <button class="action-btn share" aria-label="Share">${icons.share}</button>
       </div>
     </div>`;
 }
 
+// Parse the bot body into main text and an optional sources block.
+// Bot bodies may end with "\nSources & reasoning:\n<url>\n<url>..."
+function parseBotBody(body) {
+  const marker = "Sources & reasoning:";
+  const idx = body.indexOf(marker);
+  if (idx === -1) return { mainText: body, sources: [] };
+  const mainText = body.slice(0, idx).trimEnd();
+  const sourceBlock = body.slice(idx + marker.length).trim();
+  const sources = sourceBlock.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+  return { mainText, sources };
+}
+
 function renderBotReply(iv) {
   const icons = actionIcons();
+  const { mainText, sources } = parseBotBody(iv.body || "");
+  const sourcesHtml = sources.length > 0 ? `
+    <div class="bot-sources">
+      <span class="bot-sources-label">Sources</span>
+      <ul class="bot-sources-list">${sources.map((url) =>
+        `<li><a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="bot-source-link">${escapeHtml(url)}</a></li>`
+      ).join("")}</ul>
+    </div>` : "";
   return `
     <div class="reply-card">
       <div class="post-inner">
@@ -96,13 +115,14 @@ function renderBotReply(iv) {
             <span class="author-name">${escapeHtml(iv.bot_name)}</span>
             <span class="author-handle text-dim">@${escapeHtml(iv.bot_handle)}</span>
           </div>
-          <div class="post-content">${escapeHtml(iv.body)}</div>
+          <div class="post-content">${escapeHtml(mainText)}</div>
+          ${sourcesHtml}
           <div class="post-actions">
-            <button class="action-btn">${icons.reply}</button>
-            <button class="action-btn repost">${icons.repost}<span>${fmtNum(iv.reply_reposts || 0)}</span></button>
-            <button class="action-btn like">${icons.like}<span>${fmtNum(iv.reply_likes || 0)}</span></button>
-            <button class="action-btn views">${icons.views}<span>${fmtNum(iv.reply_views || 0)}</span></button>
-            <button class="action-btn share">${icons.share}</button>
+            <button class="action-btn" aria-label="Reply">${icons.reply}</button>
+            <button class="action-btn repost" aria-label="Repost">${icons.repost}<span>${fmtNum(iv.reply_reposts || 0)}</span></button>
+            <button class="action-btn like" aria-label="Like">${icons.like}<span>${fmtNum(iv.reply_likes || 0)}</span></button>
+            <button class="action-btn views" aria-label="Views">${icons.views}<span>${fmtNum(iv.reply_views || 0)}</span></button>
+            <button class="action-btn share" aria-label="Share">${icons.share}</button>
           </div>
         </div>
       </div>
@@ -135,6 +155,7 @@ function renderThread(data) {
     <div class="thread-header"><span class="font-bold" style="font-size:20px">Post</span></div>
     ${renderPost(post, noteHtml)}
     ${replyHtml}`;
+  document.title = `${post.author_name} on X`;
 }
 
 (async () => {
