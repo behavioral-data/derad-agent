@@ -17,6 +17,12 @@ class TweetSnapshot:
     text: str
     author_id: Optional[str] = None
     author_username: Optional[str] = None
+    # X's conversation_id — the thread ROOT tweet id, distinct from this
+    # tweet's own id and from whatever it replies to. Every tweet in a thread
+    # reports the same conversation_id, so collect_replies uses this (rather
+    # than the immediately-replied-to parent_id) to search the whole thread
+    # for bystander replies to the bot's reply.
+    conversation_id: Optional[str] = None
     like_count: Optional[int] = None
     retweet_count: Optional[int] = None
     reply_count: Optional[int] = None
@@ -64,7 +70,7 @@ def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
                 tweet_fields=[
                     "text", "author_id", "public_metrics", "attachments",
                     "created_at", "lang", "possibly_sensitive", "entities",
-                    "referenced_tweets",
+                    "referenced_tweets", "conversation_id",
                 ],
                 expansions=["author_id", "attachments.media_keys"],
                 user_fields=[
@@ -167,10 +173,13 @@ def fetch_tweet(tweet_id) -> Optional[TweetSnapshot]:
         if isinstance(ref, dict) and ref.get("type") and ref.get("id"):
             referenced_tweets.append({"type": ref["type"], "id": str(ref["id"])})
 
+    conversation_id = data.get("conversation_id") if isinstance(data, dict) else None
+
     return TweetSnapshot(
         text=text,
         author_id=str(author_id) if author_id is not None else None,
         author_username=author_username,
+        conversation_id=str(conversation_id) if conversation_id is not None else None,
         like_count=public_metrics.get("like_count"),
         retweet_count=public_metrics.get("retweet_count"),
         reply_count=public_metrics.get("reply_count"),

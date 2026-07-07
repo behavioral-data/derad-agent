@@ -105,6 +105,12 @@ class MentionEvent:
     parent_retweet_count: Optional[int] = None
     parent_reply_count: Optional[int] = None
     parent_quote_count: Optional[int] = None
+    # X's conversation_id — the thread ROOT tweet id. Distinct from parent_id
+    # (the tweet immediately replied to) once a claim is fact-checked
+    # mid-thread. collect_replies searches on THIS, not parent_id, to find
+    # bystander replies across the whole thread. None on legacy rows written
+    # before this field existed.
+    conversation_id: Optional[str] = None
 
     # Pipeline output
     queries: list[str] = field(default_factory=list)
@@ -223,6 +229,7 @@ class EventsStore(Protocol):
     def write_reply_reply(self, reply: BotReplyReply) -> None: ...
     def write_info_view(self, view: InfoView) -> None: ...
     def iter_reply_ids(self) -> list[tuple[str, str, datetime | None, str | None, str | None, str | None]]: ...
+    def conversation_ids_by_reply(self) -> dict[str, str]: ...
     def snapshotted_reply_ids(self) -> set[str]: ...
     def latest_snapshot_times(self) -> dict[str, datetime]: ...
     def collected_reply_ids(self) -> set[str]: ...
@@ -273,6 +280,20 @@ class InMemoryEventsStore:
                 for ev in self.events
                 if ev.reply_id
             ]
+
+    def conversation_ids_by_reply(self) -> dict[str, str]:
+        """reply_id → conversation_id, for events that captured one.
+
+        Kept as a separate accessor (rather than a new element on
+        ``iter_reply_ids``'s tuple) so existing positional-unpacking callers
+        of that method don't break on arity.
+        """
+        with self._lock:
+            return {
+                ev.reply_id: ev.conversation_id
+                for ev in self.events
+                if ev.reply_id and ev.conversation_id
+            }
 
     def snapshotted_reply_ids(self) -> set[str]:
         with self._lock:
@@ -479,6 +500,7 @@ class TablesEventsStore:
             "RowKey": f"{received_at.isoformat()}_{ev.mention_id}",
             "mention_id": ev.mention_id,
             "parent_id": ev.parent_id,
+            "conversation_id": ev.conversation_id,
             "author_id": ev.author_id,
             "author_username": ev.author_username,
             "tone": ev.tone,
@@ -610,6 +632,24 @@ class TablesEventsStore:
                     result.append((rid, tone, posted_at, mention_id, parent_id, link_reply_id))
         except Exception:
             logger.exception("iter_reply_ids failed")
+        return result
+
+    def conversation_ids_by_reply(self) -> dict[str, str]:
+        """reply_id → conversation_id, for events that captured one.
+
+        Kept as a separate accessor (rather than a new element on
+        ``iter_reply_ids``'s tuple) so existing positional-unpacking callers
+        of that method don't break on arity.
+        """
+        result: dict[str, str] = {}
+        try:
+            for entity in self._events.list_entities(select=["reply_id", "conversation_id"]):
+                rid = entity.get("reply_id")
+                cid = entity.get("conversation_id")
+                if rid and cid:
+                    result[rid] = cid
+        except Exception:
+            logger.exception("conversation_ids_by_reply failed")
         return result
 
     def snapshotted_reply_ids(self) -> set[str]:

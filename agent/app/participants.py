@@ -86,10 +86,11 @@ class TablesParticipantsStore:
     """
 
     def __init__(self, endpoint: str, *, credential=None) -> None:
-        from azure.core.exceptions import ResourceExistsError
+        from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
         from azure.data.tables import TableServiceClient
         from azure.identity import DefaultAzureCredential
 
+        self._ResourceNotFoundError = ResourceNotFoundError
         cred = credential or DefaultAzureCredential()
         svc = TableServiceClient(
             endpoint=endpoint,
@@ -125,9 +126,9 @@ class TablesParticipantsStore:
     def get(self, author_id: str) -> Optional[Participant]:
         try:
             ent = self._tbl.get_entity(_PARTITION, author_id)
-            return _entity_to_participant(ent)
-        except Exception:
+        except self._ResourceNotFoundError:
             return None
+        return _entity_to_participant(ent)
 
     def list_all(self) -> list[Participant]:
         try:

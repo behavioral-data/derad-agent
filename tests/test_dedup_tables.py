@@ -213,6 +213,54 @@ def test_tables_hit_and_count_prune_failure_does_not_break_rate_check(monkeypatc
     assert n == 1
 
 
+# ─── InMemoryStore.hit_and_count ─────────────────────────────────────────────
+#
+# Regression coverage for a bug where every call pruned *all* keys using the
+# *current* call's window as the cutoff. A per-second check (window=1) would
+# then gut a daily-cap key's timestamps (window=86400), so USER_DAILY_CAP was
+# never enforced on the in-memory backend.
+
+
+def test_hit_and_count_daily_cap_unaffected_by_interleaved_per_second_checks(monkeypatch):
+    from agent.app import dedup as dedup_module
+
+    store = dedup_module.InMemoryStore()
+    day_key = "author_day:42:2026-07-07"
+    sec_key = "author:42"
+
+    fake_now = [0.0]
+    monkeypatch.setattr(dedup_module.time, "time", lambda: fake_now[0])
+
+    # First daily-cap hit at t=0s.
+    assert store.hit_and_count(day_key, 86400) == 1
+
+    # Two seconds later, a per-second rate check comes in (window=1s), as
+    # happens on every mention.
+    fake_now[0] = 2.0
+    store.hit_and_count(sec_key, 1)
+
+    # The daily-cap key must still remember the t=0 hit alongside this new
+    # one — i.e. count grows to 2. Before the fix, the per-second call swept
+    # *every* key (including day_key) using its own 1-second cutoff, which
+    # discarded the t=0 timestamp and reset the daily count back to 1 on the
+    # next daily check — meaning USER_DAILY_CAP could never be reached.
+    assert store.hit_and_count(day_key, 86400) == 2
+
+
+def test_hit_and_count_prunes_only_the_queried_key():
+    from agent.app.dedup import InMemoryStore
+
+    store = InMemoryStore()
+    # Seed a long-lived key with an old timestamp directly.
+    old_key = "author_day:1:2026-07-01"
+    store._hits[old_key] = [0.0]  # far in the past
+
+    # A hit on an unrelated key with a short window must not prune old_key.
+    store.hit_and_count("author:2", 1)
+
+    assert store._hits[old_key] == [0.0]
+
+
 def test_tables_store_creates_tables_idempotently(monkeypatch):
     """First boot creates tables; subsequent boots tolerate ResourceExistsError."""
     fake_dedup_client = MagicMock()

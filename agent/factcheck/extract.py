@@ -24,6 +24,7 @@ import json
 import logging
 from typing import Optional
 
+import anthropic
 from pydantic import BaseModel, Field, model_validator
 
 from .context import PipelineContext
@@ -212,9 +213,11 @@ def extract_claims(claim_text: str, ctx: PipelineContext) -> ExtractionOutput:
             max_tokens=2048,
             timeout=45.0,
         )
-    except (ValueError, TimeoutError) as exc:
-        # Parse/schema failure or wall-clock timeout — degrade to fallback so
-        # the pipeline still produces a reply. Unexpected exceptions propagate.
+    except (ValueError, TimeoutError, anthropic.APIConnectionError) as exc:
+        # Parse/schema failure, wall-clock timeout, or an Anthropic-SDK
+        # timeout/connection error (anthropic.APITimeoutError does NOT
+        # subclass TimeoutError) — degrade to fallback so the pipeline still
+        # produces a reply. Unexpected exceptions propagate.
         logger.warning("extract_claims: degrading to whole-tweet fallback (%s)", exc)
         return _fallback(claim_text)
 

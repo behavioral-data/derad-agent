@@ -17,6 +17,7 @@ import json
 import logging
 from typing import Optional
 
+import anthropic
 from pydantic import BaseModel
 
 from .context import PipelineContext
@@ -230,9 +231,13 @@ def reconcile(
             max_tokens=8192,
             timeout=90.0,
         )
-    except (ValueError, TimeoutError) as exc:
-        # Refusal/parse failure or stage timeout. Degrade to a "could not
-        # reason" output — central claim lands in unaddressed_propositions,
+    except (ValueError, TimeoutError, anthropic.APIConnectionError) as exc:
+        # Refusal/parse failure, wall-clock timeout, or an Anthropic-SDK
+        # timeout/connection error (anthropic.APITimeoutError does NOT
+        # subclass TimeoutError — it subclasses APIConnectionError — so it
+        # must be caught explicitly here to hit the same degrade path
+        # instead of propagating and killing the whole mention). Degrade to
+        # a "could not reason" output — central claim lands in unaddressed_propositions,
         # no source citations. The renderer's state becomes "no_sources"
         # and produces a tone-aware reply via the model. Pipeline keeps
         # going; mention gets a real reply.
@@ -275,4 +280,19 @@ def reconcile(
         while len(stances) < len(evidence):
             stances.append("neutral")
         output.evidence_stances = stances
+    # consolidated_findings.perspectives and presentation_payload.perspectives
+    # are emitted as two separate copies of the same data (see the
+    # surface_perspectives section of the system prompt above). Only
+    # presentation_payload.perspectives is read by the Stage-5 audit shape
+    # check and the Stage-7 renderer — consolidated_findings.perspectives is
+    # what `derive_action_outcome`/`_perspectives_outcome` reads. When the
+    # model under-populates one copy relative to the other the two stages
+    # disagree (e.g. the outcome collapses to perspectives_insufficient even
+    # though ≥2 well-cited perspectives were actually rendered). Treat
+    # presentation_payload as authoritative and mirror it into
+    # consolidated_findings so the two can never diverge downstream.
+    if output.consolidated_findings.perspectives != output.presentation_payload.perspectives:
+        output.consolidated_findings = output.consolidated_findings.model_copy(
+            update={"perspectives": output.presentation_payload.perspectives}
+        )
     return output

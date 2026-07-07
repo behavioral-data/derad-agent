@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timezone
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -100,3 +102,62 @@ class TestEntityToParticipant:
         assert p.author_username == ""
         assert p.tone == ""
         assert p.notes == ""
+
+
+# ── TablesParticipantsStore.get() ────────────────────────────────────────────
+#
+# Regression coverage for a bug where get() caught *all* exceptions and
+# returned None, making a transient Tables timeout/throttle/auth error
+# indistinguishable from a genuine not-found — the caller would then assign
+# a random tone instead of surfacing the failure.
+
+
+class _FakeResourceNotFoundError(Exception):
+    pass
+
+
+class _FakeResourceExistsError(Exception):
+    pass
+
+
+class _FakeHttpResponseError(Exception):
+    """Stand-in for a generic/transient azure.core.exceptions.HttpResponseError."""
+
+
+def _make_tables_participants_store(monkeypatch):
+    from agent.app.participants import TablesParticipantsStore
+
+    fake_table_client = MagicMock()
+    fake_service = MagicMock()
+    fake_service.create_table = MagicMock()
+    fake_service.get_table_client = MagicMock(return_value=fake_table_client)
+
+    fake_tables_mod = MagicMock()
+    fake_tables_mod.TableServiceClient = MagicMock(return_value=fake_service)
+    fake_identity_mod = MagicMock()
+    fake_identity_mod.DefaultAzureCredential = MagicMock(return_value=MagicMock())
+    fake_exc_mod = MagicMock()
+    fake_exc_mod.ResourceExistsError = _FakeResourceExistsError
+    fake_exc_mod.ResourceNotFoundError = _FakeResourceNotFoundError
+
+    monkeypatch.setitem(sys.modules, "azure.data.tables", fake_tables_mod)
+    monkeypatch.setitem(sys.modules, "azure.identity", fake_identity_mod)
+    monkeypatch.setitem(sys.modules, "azure.core.exceptions", fake_exc_mod)
+
+    store = TablesParticipantsStore("https://example.table.core.windows.net")
+    return store, fake_table_client
+
+
+class TestTablesParticipantsStoreGet:
+    def test_not_found_returns_none(self, monkeypatch):
+        store, fake_table_client = _make_tables_participants_store(monkeypatch)
+        fake_table_client.get_entity = MagicMock(side_effect=_FakeResourceNotFoundError())
+
+        assert store.get("does-not-exist") is None
+
+    def test_transient_error_propagates(self, monkeypatch):
+        store, fake_table_client = _make_tables_participants_store(monkeypatch)
+        fake_table_client.get_entity = MagicMock(side_effect=_FakeHttpResponseError("throttled"))
+
+        with pytest.raises(_FakeHttpResponseError):
+            store.get("42")

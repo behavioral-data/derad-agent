@@ -7,9 +7,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agent.app.events import BotReplyReply, InMemoryEventsStore
+from agent.app.events import BotReplyReply, MentionEvent, InMemoryEventsStore
 from agent.app import events as events_module
-from agent.cli.collect_replies import _collect_one, main
+from agent.cli.collect_replies import (
+    SEARCH_RECENT_HORIZON,
+    _collect_one,
+    _select_candidates,
+    main,
+)
 
 
 def _utc(days_ago=0, **kwargs):
@@ -177,6 +182,93 @@ class TestCollectOne:
 
         _collect_one("bot99", "neutral", mention_id=None, parent_id="parent123")
         assert captured[0] == "conversation_id:parent123"
+
+    def test_uses_conversation_id_over_parent_id_when_present(self, monkeypatch):
+        """A mid-thread claim's conversation_id (the true thread root) differs
+        from parent_id (the immediately-replied-to tweet). Searching on
+        parent_id there hits the wrong (sub-)conversation and silently
+        collects zero bystander replies."""
+        captured: list[str] = []
+
+        fake_client = MagicMock()
+        fake_client.posts.search_recent.side_effect = lambda **kw: (
+            captured.append(kw.get("query", "")) or _make_pages([])
+        )
+        monkeypatch.setattr(
+            "agent.cli.collect_replies.get_x_client",
+            lambda: fake_client,
+        )
+
+        _collect_one(
+            "bot99", "neutral", mention_id=None,
+            parent_id="immediate_parent", conversation_id="thread_root",
+        )
+        assert captured[0] == "conversation_id:thread_root"
+
+
+class TestSelectCandidates:
+    """Coverage for the candidate filter used by main(): conversation_id
+    round-trips through to collect_one, legacy rows without one fall back to
+    parent_id (handled by _collect_one itself), and replies whose capture
+    window has aged past search_recent's ~7-day horizon are dropped and
+    logged instead of being retried forever."""
+
+    def _event(self, **overrides):
+        base = dict(
+            mention_id="m1", parent_id="p1", author_id="a1", tone="neutral",
+            received_at_utc=_utc(days_ago=20),
+            reply_posted_utc=_utc(days_ago=20),
+            reply_id="r1",
+        )
+        base.update(overrides)
+        return MentionEvent(**base)
+
+    def test_conversation_id_flows_through_to_candidate(self, fresh_events_store):
+        fresh_events_store.write_event(self._event(
+            reply_id="r1", conversation_id="c1", reply_posted_utc=_utc(days_ago=4),
+        ))
+        candidates = _select_candidates(fresh_events_store, _utc(days_ago=0))
+        assert len(candidates) == 1
+        reply_id, _tone, _mention_id, _parent_id, _link_reply_id, conversation_id = candidates[0]
+        assert reply_id == "r1"
+        assert conversation_id == "c1"
+
+    def test_legacy_row_without_conversation_id_yields_none(self, fresh_events_store):
+        fresh_events_store.write_event(self._event(
+            reply_id="r2", conversation_id=None, reply_posted_utc=_utc(days_ago=4),
+        ))
+        candidates = _select_candidates(fresh_events_store, _utc(days_ago=0))
+        assert len(candidates) == 1
+        assert candidates[0][0] == "r2"
+        assert candidates[0][5] is None  # _collect_one falls back to parent_id itself
+
+    def test_reply_aged_past_search_horizon_is_dropped_and_logged(self, fresh_events_store, caplog):
+        fresh_events_store.write_event(self._event(
+            reply_id="stale1", reply_posted_utc=_utc(days_ago=10),
+        ))
+        with caplog.at_level("WARNING", logger="agent.cli.collect_replies"):
+            candidates = _select_candidates(fresh_events_store, _utc(days_ago=0))
+        assert candidates == []
+        assert "stale1" in caplog.text
+        assert "aged out" in caplog.text
+
+    def test_reply_within_horizon_is_returned(self, fresh_events_store):
+        fresh_events_store.write_event(self._event(
+            reply_id="fresh1", reply_posted_utc=_utc(days_ago=4),
+        ))
+        candidates = _select_candidates(fresh_events_store, _utc(days_ago=0))
+        assert [c[0] for c in candidates] == ["fresh1"]
+
+    def test_reply_exactly_at_horizon_boundary_is_dropped(self, fresh_events_store):
+        """age >= SEARCH_RECENT_HORIZON must be excluded, not just age > horizon —
+        at exactly the boundary search_recent's window no longer covers the
+        reply's post time."""
+        fresh_events_store.write_event(self._event(
+            reply_id="boundary1",
+            reply_posted_utc=_utc(days_ago=0) - SEARCH_RECENT_HORIZON,
+        ))
+        candidates = _select_candidates(fresh_events_store, _utc(days_ago=0))
+        assert candidates == []
 
 
 class TestCollectRepliesMain:

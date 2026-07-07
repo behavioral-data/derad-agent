@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
+import anthropic
+
 from agent.shared.text import canonicalize_url
 
 from .schema import SourceQualityEntry, SourceTier, TierSource
@@ -313,7 +315,10 @@ def _classify_via_model_batch(domains: list[str]) -> dict[str, tuple[SourceTier,
             max_tokens=2048,
             timeout=30.0,
         )
-    except (ValueError, TimeoutError):
+    except (ValueError, TimeoutError, anthropic.APIConnectionError):
+        # anthropic.APITimeoutError does NOT subclass TimeoutError — it
+        # subclasses APIConnectionError — so it must be caught explicitly
+        # here to degrade gracefully instead of propagating.
         logger.warning(
             "Model-prior classification failed; %d domains stay unknown.",
             len(still_unknown), exc_info=True,

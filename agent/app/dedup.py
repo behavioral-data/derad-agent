@@ -62,15 +62,16 @@ class InMemoryStore:
         now = time.time()
         cutoff = now - window_seconds
         with self._lock:
-            # Sweep all keys: prune expired timestamps and drop empty entries.
-            # Bounded by active-author count, runs once per hit — keeps memory
-            # from leaking when authors stop sending mentions.
-            for k in list(self._hits.keys()):
-                self._hits[k] = [t for t in self._hits[k] if t >= cutoff]
-                if not self._hits[k]:
-                    del self._hits[k]
-            timestamps = self._hits.setdefault(key, [])
+            # Prune only this key's own timestamps against its own window.
+            # Different callers hit this method with different windows for
+            # different keys (e.g. a 1s per-second check and an 86400s daily
+            # cap) — sweeping every key with whichever window happened to be
+            # passed in would prune long-lived keys against a short window
+            # and wipe out counts that should persist (e.g. gutting a daily
+            # cap's history on every per-second check).
+            timestamps = [t for t in self._hits.get(key, []) if t >= cutoff]
             timestamps.append(now)
+            self._hits[key] = timestamps
             return len(timestamps)
 
     def _evict_dedup(self, now: float) -> None:

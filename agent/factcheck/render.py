@@ -30,6 +30,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+import anthropic
 from pydantic import BaseModel
 
 from agent.shared.text import URL_RE, X_TWEET_LIMIT, x_weighted_length
@@ -397,7 +398,12 @@ def render(view: RendererView, tone: Tone, *, max_invariance_retries: int = 3) -
                 max_tokens=8192,
                 timeout=30.0,
             )
-        except ValueError as exc:
+        except (ValueError, anthropic.APIConnectionError) as exc:
+            # anthropic.APIConnectionError (parent of APITimeoutError, which
+            # does NOT subclass TimeoutError/ValueError) must be caught here
+            # too — otherwise a transient Claude timeout on pass 1 escapes
+            # render() entirely and skips the pass-2 refusal-nudge retry,
+            # dropping an already-computed reply.
             logger.warning(
                 "render[%s/%s]: pass-1 call_claude_json failed (%s) — escalating to refusal nudge",
                 view.action, tone, exc,

@@ -81,6 +81,27 @@ class TestEngagementClicks:
         assert by_tone["neutral"]["total_human_clicks"] == 1
         assert by_tone["agreeable"]["total_clicks"] == 1
 
+    def test_by_tone_totals_align_with_headline_when_a_view_lacks_reply_id(self, store, client):
+        """Views without reply_id (e.g. a dossier token opened in the brief
+        window before the reply's id was recorded) must be excluded from BOTH
+        the headline total and the per-tone breakdown. Counting such a view
+        only in the per-tone side makes the per-condition columns sum to more
+        than the headline total.
+        """
+        _view(store, "R1", "neutral", is_bot=False)
+        _view(store, "R1", "neutral", is_bot=False)
+        _view(store, "R2", "agreeable", is_bot=False)
+        # No reply_id yet — must not be counted anywhere.
+        store.write_info_view(events_module.InfoView(
+            token="tok-early", viewed_at_utc=_TS, reply_id=None, tone="neutral", is_bot=False,
+        ))
+
+        data = client.get("/api/engagement").get_json()
+        totals = data["totals"]
+        by_tone_sum = sum(t["total_clicks"] for t in data["by_tone"])
+        assert by_tone_sum == totals["total_clicks"]
+        assert totals["total_clicks"] == 3
+
     def test_no_views_yields_zero_clicks(self, store, client):
         store.write_engagement(events_module.EngagementSnapshot(
             reply_id="R1", tone="neutral", polled_at_utc=_TS, like_count=1))

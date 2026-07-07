@@ -35,8 +35,14 @@ def _require_env(var: str) -> str:
     return value
 
 
+_TRUTHY_ENV_VALUES = {"true", "1", "yes", "on", "y", "t"}
+
+
 def _parse_bool_env(var: str, default: bool = False) -> bool:
-    return os.getenv(var, str(default).lower()).lower() == "true"
+    raw = os.getenv(var)
+    if raw is None:
+        return default
+    return raw.strip().lower() in _TRUTHY_ENV_VALUES
 
 
 # Map reasoning_effort → Anthropic extended-thinking budget_tokens.

@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import random
+import re
 import secrets
 import threading
 import time
@@ -90,7 +91,14 @@ _FINALIZE_TIMEOUT_S = float(os.getenv("DERAD_FINALIZE_TIMEOUT_S", "15"))
 # cache (lines below). No eager preload — every gunicorn worker would
 # otherwise repeat the same Tables scan at fork.
 _participants_store = _participants.get_store()
-_PARTICIPANTS_BY_ID: dict[str, _participants.Participant] = {}
+# Cache value is (participant, cached_at_monotonic). A short TTL means a tone
+# correction (re-registering a participant with a corrected tone) self-heals
+# on OTHER gunicorn workers within the TTL, instead of those workers serving
+# the stale tone from this dict for the rest of the process lifetime — only
+# the worker that handled the POST /api/participants request updates its
+# cache immediately (see api_participants_create).
+_PARTICIPANTS_BY_ID: dict[str, tuple[_participants.Participant, float]] = {}
+_PARTICIPANTS_CACHE_TTL_S = float(os.getenv("DERAD_PARTICIPANTS_CACHE_TTL_S", "300"))
 
 
 def _warm_search_backend() -> None:
@@ -420,15 +428,23 @@ def _is_bot_thread_continuation(parent_author_id: str | None, parent_text: str) 
     participants — so a reply inside a bot thread silently mentions the bot
     and arrives as a "mention" we'd otherwise act on:
       • parent authored by the bot — someone replied to the bot's own tweet;
+        this is the authoritative signal and is checked first;
       • parent text mentions the bot — someone replied to an invocation (which
-        itself tags the bot) before we posted our reply.
+        itself tags the bot) before we posted our reply. This must be a
+        whole-token, exact match on the handle (``@handle`` as its own word,
+        case-insensitive) — a substring check would also fire on a *different*
+        handle that merely starts with ours (e.g. text mentioning
+        ``@eddiexbot2`` would substring-match handle ``eddiexbot``), silently
+        dropping a legitimate invocation on a third-party post.
     A genuine invocation replies to a third-party post that neither is the
     bot's nor mentions it, so this stays False for real invocations.
     """
     if BOT_USER_ID and parent_author_id == BOT_USER_ID:
         return True
-    if f"@{BOT_HANDLE}".lower() in (parent_text or "").lower():
-        return True
+    if BOT_HANDLE:
+        handle_pattern = re.compile(rf"\B@{re.escape(BOT_HANDLE)}\b", re.IGNORECASE)
+        if handle_pattern.search(parent_text or ""):
+            return True
     return False
 
 
@@ -442,20 +458,25 @@ if not BOT_USER_ID:
 
 
 def _lookup_participant(author_id: str) -> "_participants.Participant | None":
-    """Look up a participant with a write-through cache.
+    """Look up a participant with a short-TTL write-through cache.
 
-    Checks the in-process dict first; on a miss, falls back to the persistent
-    store (catches participants registered by CLI tools or other workers) and
-    populates the cache for subsequent calls.
+    Checks the in-process dict first; a cache hit older than
+    _PARTICIPANTS_CACHE_TTL_S is treated as a miss so a tone correction made
+    against the persistent store (e.g. by another worker, or by a CLI tool)
+    self-heals here within the TTL instead of staying stale for the life of
+    the process. On a miss (absent or expired), falls back to the persistent
+    store and repopulates the cache with a fresh timestamp.
     """
     if not author_id:
         return None
-    p = _PARTICIPANTS_BY_ID.get(author_id)
-    if p is not None:
-        return p
+    cached = _PARTICIPANTS_BY_ID.get(author_id)
+    if cached is not None:
+        p, cached_at = cached
+        if time.monotonic() - cached_at < _PARTICIPANTS_CACHE_TTL_S:
+            return p
     p = _participants_store.get(author_id)
     if p is not None:
-        _PARTICIPANTS_BY_ID[author_id] = p
+        _PARTICIPANTS_BY_ID[author_id] = (p, time.monotonic())
     return p
 
 
@@ -530,9 +551,10 @@ def _process_mention_throttled(tone: str, tweet: dict, received_at_utc: datetime
         )
         try:
             log_mention_drop(MentionDrop(
+                drop_reason="pipeline_queue_timeout",
                 received_at_utc=received_at_utc,
-                tweet_id=str(mention_id),
-                reason="pipeline_queue_timeout",
+                mention_id=str(mention_id),
+                tone=tone,
             ))
         except Exception:
             logger.exception("Failed to write drop event for queue-timeout mention %s", mention_id)
@@ -608,6 +630,12 @@ def process_mention(tone: str, tweet: dict, received_at_utc: datetime) -> None:
         ev.parent_retweet_count = snap.retweet_count
         ev.parent_reply_count = snap.reply_count
         ev.parent_quote_count = snap.quote_count
+        # X's conversation_id is the true thread ROOT, distinct from parent_id
+        # (the immediately-replied-to tweet) once a claim is fact-checked
+        # mid-thread. Any tweet in the thread reports the same conversation_id,
+        # so the one on the fetched parent is exactly what collect_replies
+        # needs to search the whole thread for bystander replies.
+        ev.conversation_id = snap.conversation_id
 
         # Don't act on continuations of an existing bot thread. If the post we'd
         # fact-check is the bot's own tweet (a reply TO the bot) or itself
@@ -1055,13 +1083,19 @@ def api_engagement():
     tone_clicks_human: dict[str, int] = defaultdict(int)
     for v in info_views:
         rid = v.get("reply_id")
+        # Same reply_id-required rule the headline totals use below — a view
+        # with no reply_id yet (e.g. the dossier link clicked in the brief
+        # window before the reply post finished and its id was recorded)
+        # must be excluded from BOTH headline and per-tone counts. Counting
+        # it only in the per-tone breakdown makes the per-condition columns
+        # sum to more than the headline total.
+        if not rid:
+            continue
         is_bot = bool(v.get("is_bot"))
         ct = _participants.canonical_tone(v.get("tone") or "unknown")
         tone_clicks_all[ct] += 1
         if not is_bot:
             tone_clicks_human[ct] += 1
-        if not rid:
-            continue
         clicks_all[rid] += 1
         if not is_bot:
             clicks_human[rid] += 1
@@ -1324,7 +1358,7 @@ def api_participants_create():
         notes=notes,
     )
     _participants.get_store().register(p)
-    _PARTICIPANTS_BY_ID[author_id] = p
+    _PARTICIPANTS_BY_ID[author_id] = (p, time.monotonic())
     logger.info(
         "Registered participant via dashboard: @%s id=%s tone=%s",
         clean_username, author_id, tone_raw,
