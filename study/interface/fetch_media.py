@@ -1,8 +1,8 @@
 """One-time: download the media attached to each study tweet from X.
 
 Uses the project's X client (OAuth1, creds in agent/llm/.env) to resolve media
-for the study tweetIds, downloads the image bytes into study/interface/static/media/,
-and writes a small committed index (study/interface/data/media_index.csv) consumed by build_db.
+for the study tweetIds, downloads the image bytes into study/data/media/,
+and writes a small committed index (study/data/media_index.csv) consumed by build_db.
 
 Photos download their full image; videos/animated_gifs download their preview
 frame (still). Run once; the downloaded files + index are committed so the
@@ -21,9 +21,9 @@ import requests
 _HERE = os.path.dirname(os.path.abspath(__file__))          # .../study/interface
 _STUDY = os.path.dirname(_HERE)                              # .../study
 _ROOT = os.path.dirname(_STUDY)                              # repo root
-DEFAULT_SELECTED = os.path.join(_STUDY, "posts", "selected_posts.csv")
-DEFAULT_MEDIA_DIR = os.path.join(_HERE, "static", "media")
-DEFAULT_OUT = os.path.join(_HERE, "data", "media_index.csv")
+DEFAULT_SELECTED = os.path.join(_STUDY, "data", "posts.csv")
+DEFAULT_MEDIA_DIR = os.path.join(_STUDY, "data", "media")
+DEFAULT_OUT = os.path.join(_STUDY, "data", "media_index.csv")
 
 csv.field_size_limit(10_000_000)
 _PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
@@ -102,7 +102,7 @@ def fetch_all(selected_csv, media_dir, out_csv, client=None):
             tid = str(tweet.get("id"))
             for ordinal, media in enumerate(parse_media(tweet, mbk)):
                 ext = _ext_for(media["url"])
-                rel = os.path.join("media", tid, f"{ordinal}{ext}")
+                rel = os.path.join(tid, f"{ordinal}{ext}")
                 dest = os.path.join(media_dir, tid, f"{ordinal}{ext}")
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 try:

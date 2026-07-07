@@ -78,8 +78,8 @@ def test_build_attaches_ordered_media_json(tmp_path):
     media = tmp_path / "media.csv"
     media.write_text(
         "tweetId,ordinal,type,path\n"
-        "t1,1,photo,media/t1/1.jpg\n"   # deliberately out of order
-        "t1,0,video,media/t1/0.jpg\n"
+        "t1,1,photo,t1/1.jpg\n"   # deliberately out of order
+        "t1,0,video,t1/0.jpg\n"
     )
     db = tmp_path / "study.db"
     build(str(sel), str(notes), str(db), media_csv=str(media))
@@ -88,8 +88,8 @@ def test_build_attaches_ordered_media_json(tmp_path):
     m1 = json.loads(conn.execute(
         "select media_json from posts where post_id='t1'").fetchone()[0])
     assert m1 == [
-        {"type": "video", "src": "/static/media/t1/0.jpg"},  # ordinal 0 first
-        {"type": "photo", "src": "/static/media/t1/1.jpg"},
+        {"type": "video", "src": "/media/t1/0.jpg"},  # ordinal 0 first
+        {"type": "photo", "src": "/media/t1/1.jpg"},
     ]
     # post with no media -> empty list
     m2 = json.loads(conn.execute(

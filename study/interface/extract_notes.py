@@ -2,7 +2,7 @@
 note per study post. Writes a small, committable CSV consumed by build_db.
 
 Heavy step: the notes/status TSVs are ~1.4 GB / ~800 MB. Run once; the output
-(data/notes_selected.csv) is committed so build_db stays fast.
+(study/data/notes.csv) is committed so build_db stays fast.
 """
 from __future__ import annotations
 
@@ -15,10 +15,10 @@ import sys
 _HERE = os.path.dirname(os.path.abspath(__file__))          # .../study/interface
 _STUDY = os.path.dirname(_HERE)                              # .../study
 _ROOT = os.path.dirname(_STUDY)                              # repo root
-DEFAULT_SELECTED = os.path.join(_STUDY, "posts", "selected_posts.csv")
-DEFAULT_NOTES = os.path.join(_ROOT, "tsv_generation", "cn_data", "notes-00000.tsv")
-DEFAULT_STATUS = os.path.join(_ROOT, "tsv_generation", "cn_data", "noteStatusHistory-00000.tsv")
-DEFAULT_OUT = os.path.join(_HERE, "data", "notes_selected.csv")
+DEFAULT_SELECTED = os.path.join(_STUDY, "data", "posts.csv")
+DEFAULT_NOTES = os.path.join(_ROOT, "tsv_generation", "cn_data_20260630", "notes-00000.tsv")
+DEFAULT_STATUS = os.path.join(_ROOT, "tsv_generation", "cn_data_20260630", "noteStatusHistory-00000.tsv")
+DEFAULT_OUT = os.path.join(_STUDY, "data", "notes.csv")
 
 csv.field_size_limit(10_000_000)  # note summaries can be long
 

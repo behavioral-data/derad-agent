@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import os
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 
 from . import db as dbmod
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_DEFAULT_DB = os.path.join(_HERE, "study.db")
+_STUDY = os.path.dirname(_HERE)
+_MEDIA_DIR = os.path.join(_STUDY, "data", "media")
+_DEFAULT_DB = os.path.join(_STUDY, "data", "study.db")
 
 
 def create_app(db_path=None):
@@ -23,6 +25,10 @@ def create_app(db_path=None):
     @app.get("/")
     def index():
         return app.send_static_file("index.html")
+
+    @app.get("/media/<path:filename>")
+    def media(filename):
+        return send_from_directory(_MEDIA_DIR, filename)
 
     @app.get("/api/thread")
     def api_thread():

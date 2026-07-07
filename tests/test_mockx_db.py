@@ -18,13 +18,13 @@ def test_get_post_exposes_media_list(tmp_path):
     sel = tmp_path / "sel.csv"; sel.write_text(MOCKX_SELECTED_CSV)
     notes = tmp_path / "notes.csv"; notes.write_text(MOCKX_NOTES_CSV)
     media = tmp_path / "media.csv"
-    media.write_text("tweetId,ordinal,type,path\nt1,0,photo,media/t1/0.jpg\n")
+    media.write_text("tweetId,ordinal,type,path\nt1,0,photo,t1/0.jpg\n")
     out = tmp_path / "study.db"
     build(str(sel), str(notes), str(out), media_csv=str(media))
 
     conn = dbmod.connect(str(out))
     post = dbmod.get_post(conn, "t1")
-    assert post["media"] == [{"type": "photo", "src": "/static/media/t1/0.jpg"}]
+    assert post["media"] == [{"type": "photo", "src": "/media/t1/0.jpg"}]
     assert "media_json" not in post                 # raw JSON string dropped
     assert dbmod.get_post(conn, "t2")["media"] == []  # no media -> empty list
 

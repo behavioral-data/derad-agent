@@ -6,7 +6,7 @@ attached images + author/metadata context via fetch_tweet), runs the
 fact-check pipeline once on those identical inputs, renders all three tone
 conditions from that single verdict, writes a CSV (id, neutral, satirical,
 agreeable), and updates the matching bot_reply rows in
-study/interface/study.db (body + is_stub=0).
+study/data/study.db (body + is_stub=0).
 
 Each reply cell contains the reply text plus a "Sources & reasoning:" block
 with the cited reference URLs (same sources across tones, matching the live bot).
@@ -18,7 +18,7 @@ Usage:
 
 One-time setup (from repo root):
     python3.13 -m venv .venv && .venv/bin/pip install -e . -r requirements.txt
-    python -m study.interface.build_db   # creates study/interface/study.db with stub interventions
+    python -m study.interface.build_db   # creates study/data/study.db with stub interventions
 
 Requires Azure Claude credentials in agent/llm/.env (same as the live bot).
 Does not post to X — generation only.
@@ -34,7 +34,7 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
-DEFAULT_DB = _REPO_ROOT / "study" / "interface" / "study.db"
+DEFAULT_DB = _REPO_ROOT / "study" / "data" / "study.db"
 
 
 def _check_runtime_deps() -> None:

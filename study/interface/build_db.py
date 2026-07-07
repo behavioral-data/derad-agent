@@ -1,4 +1,4 @@
-"""Build the read-only study.db from selected_posts.csv + notes_selected.csv.
+"""Build the read-only study.db from study/data/posts.csv + study/data/notes.csv.
 
 Fast (stdlib only). Re-runnable: drops and recreates both tables.
 """
@@ -15,11 +15,11 @@ import sys
 _HERE = os.path.dirname(os.path.abspath(__file__))          # .../study/interface
 _STUDY = os.path.dirname(_HERE)                              # .../study
 _ROOT = os.path.dirname(_STUDY)                              # repo root
-DEFAULT_SELECTED = os.path.join(_STUDY, "posts", "selected_posts.csv")
-DEFAULT_NOTES_CSV = os.path.join(_HERE, "data", "notes_selected.csv")
-DEFAULT_MEDIA_CSV = os.path.join(_HERE, "data", "media_index.csv")
-DEFAULT_REPLIES_CSV = os.path.join(_STUDY, "posts", "selected_posts_replies.csv")
-DEFAULT_DB = os.path.join(_HERE, "study.db")
+DEFAULT_SELECTED = os.path.join(_STUDY, "data", "posts.csv")
+DEFAULT_NOTES_CSV = os.path.join(_STUDY, "data", "notes.csv")
+DEFAULT_MEDIA_CSV = os.path.join(_STUDY, "data", "media_index.csv")
+DEFAULT_REPLIES_CSV = os.path.join(_STUDY, "data", "replies.csv")
+DEFAULT_DB = os.path.join(_STUDY, "data", "study.db")
 
 csv.field_size_limit(10_000_000)
 
@@ -106,7 +106,7 @@ def _load_media(media_csv):
     """tweetId -> ordered list of {"type", "src"} from media_index.csv.
 
     Returns {} when no media_csv is given or the file is absent (e.g. tests
-    that don't exercise media). `src` is the runtime URL under /static/.
+    that don't exercise media). `src` is the runtime URL under /media/.
     """
     by_tweet = {}
     if not media_csv or not os.path.exists(media_csv):
@@ -114,12 +114,12 @@ def _load_media(media_csv):
     with open(media_csv, newline="") as f:
         for r in csv.DictReader(f):
             by_tweet.setdefault(r["tweetId"], []).append(
-                (int(r["ordinal"]), {"type": r["type"], "src": "/static/" + r["path"]}))
+                (int(r["ordinal"]), {"type": r["type"], "src": "/media/" + r["path"]}))
     return {tid: [m for _, m in sorted(items)] for tid, items in by_tweet.items()}
 
 
 def _load_replies(replies_csv):
-    """post_id -> {tone: reply_body} from selected_posts_replies.csv (cols: id,<tones>).
+    """post_id -> {tone: reply_body} from study/data/replies.csv (cols: id,<tones>).
 
     Returns {} when no file is given/present (e.g. tests, or before generation),
     in which case bot replies fall back to stub text.

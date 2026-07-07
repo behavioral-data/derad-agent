@@ -109,4 +109,4 @@ keys.md
 todo.md
 
 # mock-x study interface — generated, read-only DB artifact
-study/interface/study.db
+study/data/study.db
