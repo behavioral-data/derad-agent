@@ -132,11 +132,6 @@ except Exception:
     _SOURCE_LISTS_PROVENANCE = {"error": "source_lists.json not loaded"}
 
 
-def source_lists_provenance() -> dict:
-    """Full provenance of the curated lists (URLs, commit, revids, notes)."""
-    return _SOURCE_LISTS_PROVENANCE
-
-
 def source_lists_version() -> dict:
     """Compact, pinnable identifiers for the curated lists — embedded in every
     frozen verdict's source_reliability_lists_version so a result can be tied
@@ -385,32 +380,6 @@ def _lookup_curated(host: str) -> tuple[SourceTier, TierSource, str] | None:
         if parent in _TIER_BY_DOMAIN:
             return _TIER_BY_DOMAIN[parent]
     return None
-
-
-def classify_url(url: str) -> SourceQualityEntry:
-    """Classify a single URL. Equivalent to build_quality_table([url])[0] but
-    skips the batch optimization — prefer the batch entrypoint for multiple URLs."""
-    canonical = canonicalize_url(url)
-    host = _registered_domain(_normalize_domain(canonical))
-    if not host:
-        return SourceQualityEntry(
-            url=canonical, tier="unknown", tier_source="model-prior",
-            rationale="URL has no parseable host.",
-        )
-    hit = _lookup_curated(host)
-    if hit:
-        tier, tier_source, rationale = hit
-        return SourceQualityEntry(url=canonical, tier=tier, tier_source=tier_source, rationale=rationale)
-    classified = _classify_via_model_batch([host])
-    if host in classified:
-        tier, rationale = classified[host]
-        return SourceQualityEntry(
-            url=canonical, tier=tier, tier_source="model-prior", rationale=rationale,
-        )
-    return SourceQualityEntry(
-        url=canonical, tier="unknown", tier_source="model-prior",
-        rationale=f"No entry for {host!r}; model fallback also returned unknown.",
-    )
 
 
 def build_quality_table(urls: list[str]) -> list[SourceQualityEntry]:

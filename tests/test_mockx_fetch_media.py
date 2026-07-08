@@ -22,8 +22,8 @@ def test_parse_media_photo_uses_url_in_order():
     tweet = {"attachments": {"media_keys": ["k1", "k2"]}}
     out = parse_media(tweet, mbk)
     assert out == [
-        {"type": "photo", "url": "https://x/a.jpg"},
-        {"type": "photo", "url": "https://x/b.jpg"},
+        {"type": "photo", "url": "https://x/a.jpg", "video_url": None},
+        {"type": "photo", "url": "https://x/b.jpg", "video_url": None},
     ]
 
 
@@ -32,7 +32,23 @@ def test_parse_media_video_uses_preview_frame():
                   "preview_image_url": "https://x/prev.jpg"}}
     tweet = {"attachments": {"media_keys": ["k1"]}}
     out = parse_media(tweet, mbk)
-    assert out == [{"type": "video", "url": "https://x/prev.jpg"}]
+    # no variants → poster only, no playable mp4
+    assert out == [{"type": "video", "url": "https://x/prev.jpg", "video_url": None}]
+
+
+def test_parse_media_video_picks_best_mp4_variant():
+    mbk = {"k1": {"media_key": "k1", "type": "video",
+                  "preview_image_url": "https://x/prev.jpg",
+                  "variants": [
+                      {"content_type": "application/x-mpegURL", "url": "https://x/hls.m3u8"},
+                      {"content_type": "video/mp4", "bit_rate": 256000, "url": "https://x/low.mp4"},
+                      {"content_type": "video/mp4", "bit_rate": 832000, "url": "https://x/mid.mp4"},
+                      {"content_type": "video/mp4", "bit_rate": 2176000, "url": "https://x/high.mp4"},
+                  ]}}
+    tweet = {"attachments": {"media_keys": ["k1"]}}
+    out = parse_media(tweet, mbk)
+    # highest-bitrate mp4 at or below the 1 Mbps cap → the 832k variant
+    assert out == [{"type": "video", "url": "https://x/prev.jpg", "video_url": "https://x/mid.mp4"}]
 
 
 def test_parse_media_skips_media_without_usable_url():

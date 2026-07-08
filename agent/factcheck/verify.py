@@ -111,7 +111,6 @@ _SEED_QUERIES_BY_ACTION: dict[Action, list[str]] = {
         "{claim} debate",
         "{claim} different perspectives",
     ],
-    "decline": [],                         # never gets here — pipeline short-circuits
 }
 
 
@@ -129,7 +128,6 @@ _DEFAULT_MAX_QUESTIONS: dict[Action, int] = {
     "provide_context": 6,         # 2 seeds + 4 controller steps
     "challenge_opinion": 6,
     "surface_perspectives": 6,
-    "decline": 0,
 }
 
 

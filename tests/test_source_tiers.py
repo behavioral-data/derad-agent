@@ -14,7 +14,6 @@ import pytest
 from agent.factcheck import sources
 from agent.factcheck.sources import (
     build_quality_table,
-    classify_url,
     is_non_evidence_domain,
     source_lists_version,
 )
@@ -91,11 +90,11 @@ def test_rsp_never_classifies_a_domain_both_ways():
     assert not (set(dom["reputable-news"]) & set(dom["low-quality"]))
 
 
-# ── End-to-end classify_url with subdomain fallback ─────────────────────────
-def test_classify_url_subdomain_fallback():
-    e = classify_url("https://www.snopes.com/fact-check/x")
+# ── End-to-end subdomain fallback (via the production batch entrypoint) ──────
+def test_subdomain_fallback():
+    e = build_quality_table(["https://www.snopes.com/fact-check/x"])[0]
     assert e.tier == "fact-checker" and e.tier_source == "ifcn"
-    e = classify_url("http://sub.who.int/page")
+    e = build_quality_table(["http://sub.who.int/page"])[0]
     assert e.tier == "primary-source"
 
 

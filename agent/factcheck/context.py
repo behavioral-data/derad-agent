@@ -26,10 +26,6 @@ class PipelineContext:
     invoker_instruction: str = ""
 
     @property
-    def image_evidence_or_none(self) -> Optional[list[ImageEvidence]]:
-        return self.image_evidence or None
-
-    @property
     def image_summaries(self) -> Optional[list[dict]]:
         if not self.image_evidence:
             return None
