@@ -87,7 +87,7 @@ function stripTrailingMediaLink(content, hasMedia) {
 function actionIcons() {
   return {
     reply: `<svg viewBox="0 0 24 24"><path d="M1.751 10c0-4.42 3.584-8 8.005-8h4.366c4.49 0 8.129 3.64 8.129 8.13 0 2.96-1.607 5.68-4.196 7.11l-8.054 4.46v-3.69h-.067c-4.49.1-8.183-3.51-8.183-8.01zm8.005-6c-3.317 0-6.005 2.69-6.005 6 0 3.37 2.77 6.08 6.138 6.01l.351-.01h1.761v2.3l5.087-2.81c1.951-1.08 3.163-3.13 3.163-5.36 0-3.39-2.744-6.13-6.129-6.13H9.756z"/></svg>`,
-    repost: `<svg viewBox="0 0 24 24"><path d="M4.5 3.88l4.432 4.14-1.364 1.46L6 7.13v8.37c0 1.105.895 2 2 2h6.13v-2H8c-.276 0-.5-.224-.5-.5V7.13l1.068 1.35 1.364-1.46L4.5 3.88zM19.5 16.87V8.5c0-1.105-.895-2-2-2h-6.13v2H17.5c.276 0 .5.224.5.5v8.37l-1.068-1.35-1.364 1.46 4.432 4.14 4.432-4.14-1.364-1.46L19.5 16.87z"/></svg>`,
+    repost: `<svg viewBox="0 0 24 24"><path d="M4.75 3.79l4.603 4.3-1.706 1.82L6 8.38v7.37c0 .97.784 1.75 1.75 1.75H13V20H7.75c-2.347 0-4.25-1.9-4.25-4.25V8.38L1.853 9.91.147 8.09l4.603-4.3zm11.5 2.71H11V4h5.25c2.347 0 4.25 1.9 4.25 4.25v7.37l1.647-1.53 1.706 1.82-4.603 4.3-4.603-4.3 1.706-1.82L18 15.62V8.25c0-.97-.784-1.75-1.75-1.75z"/></svg>`,
     like: `<svg viewBox="0 0 24 24"><path d="M16.697 5.5c-1.222-.06-2.679.51-3.89 2.16l-.805 1.09-.806-1.09C9.984 6.01 8.526 5.44 7.304 5.5c-1.243.07-2.349.78-2.91 1.91-.552 1.12-.633 2.78.479 4.82 1.074 1.97 3.257 4.27 7.129 6.61 3.87-2.34 6.052-4.64 7.126-6.61 1.111-2.04 1.03-3.7.477-4.82-.561-1.13-1.666-1.84-2.908-1.91zm4.187 7.69c-1.351 2.48-4.001 4.928-8.087 7.44l-.797.49-.796-.49C7.108 18.118 4.458 15.67 3.107 13.19c-1.376-2.525-1.46-4.97-.578-6.71.882-1.74 2.736-2.916 4.846-3.066 1.643-.12 3.301.4 4.625 1.66 1.324-1.26 2.982-1.78 4.625-1.66 2.11.15 3.964 1.326 4.846 3.066.882 1.74.798 4.185-.578 6.71z"/></svg>`,
     views: `<svg viewBox="0 0 24 24"><path d="M8.75 21V3h2v18h-2zM18 21V8.5h2V21h-2zM4 21l.004-10h2L6 21H4zm9.248 0v-7h2v7h-2z"/></svg>`,
     bookmark: `<svg viewBox="0 0 24 24"><path d="M4 4.5C4 3.12 5.119 2 6.5 2h11C18.881 2 20 3.12 20 4.5v18.44l-8-5.71-8 5.71V4.5zM6.5 4c-.276 0-.5.22-.5.5v14.56l6-4.29 6 4.29V4.5c0-.28-.224-.5-.5-.5h-11z"/></svg>`,
@@ -117,11 +117,25 @@ function renderAvatar(name, seed, extraClass = "") {
 function renderMedia(media) {
   if (!Array.isArray(media) || media.length === 0) return "";
   const shown = media.slice(0, 4);
-  const items = shown.map((m) => `
+  const items = shown.map((m) => {
+    const isMovie = m.type === "video" || m.type === "animated_gif";
+    // Playable video/gif → X-style autoplay, muted, looping (poster shows until it loads).
+    if (isMovie && m.video) {
+      const gifBadge = m.type === "animated_gif"
+        ? `<span class="gif-badge" aria-hidden="true">GIF</span>` : "";
+      return `
+    <div class="media-item">
+      <video src="${escapeHtml(m.video)}" poster="${escapeHtml(m.src)}" autoplay muted loop playsinline preload="metadata"></video>
+      ${gifBadge}
+    </div>`;
+    }
+    // Photo, or a video with no downloadable file → poster still (+ play badge for video).
+    return `
     <div class="media-item">
       <img src="${escapeHtml(m.src)}" alt="${m.type === "video" ? "Video preview" : "Image attached to the post"}" loading="lazy">
       ${m.type === "video" ? `<span class="play-badge" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></span>` : ""}
-    </div>`).join("");
+    </div>`;
+  }).join("");
   return `<div class="media-grid n${shown.length}">${items}</div>`;
 }
 

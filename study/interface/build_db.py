@@ -131,8 +131,11 @@ def _load_media(media_csv):
         return by_tweet
     with open(media_csv, newline="") as f:
         for r in csv.DictReader(f):
-            by_tweet.setdefault(r["tweetId"], []).append(
-                (int(r["ordinal"]), {"type": r["type"], "src": "/media/" + r["path"]}))
+            m = {"type": r["type"], "src": "/media/" + r["path"]}
+            vp = (r.get("video_path") or "").strip()
+            if vp:
+                m["video"] = "/media/" + vp
+            by_tweet.setdefault(r["tweetId"], []).append((int(r["ordinal"]), m))
     return {tid: [m for _, m in sorted(items)] for tid, items in by_tweet.items()}
 
 
