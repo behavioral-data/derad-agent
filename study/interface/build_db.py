@@ -7,8 +7,10 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import html
 import json
 import os
+import re
 import sqlite3
 import sys
 
@@ -60,6 +62,22 @@ def synth_engagement(post_id, salt):
     return {"likes": likes, "reposts": reposts, "views": views}
 
 
+def clean_tweet_text(s):
+    """Decode X-API HTML entities so '&amp;' renders as '&' (the browser re-escapes
+    once for safe display). Whitespace/newlines are preserved as authored."""
+    return html.unescape(s or "")
+
+
+def clean_note_text(s):
+    """Decode entities and restore paragraph/link breaks. Community-note source text
+    arrives with the author's newlines flattened to runs of spaces (before each
+    sentence and each URL); convert runs of 2+ spaces back to single line breaks."""
+    s = html.unescape(s or "")
+    s = re.sub(r"[ \t]{2,}", "\n", s)      # flattened separators -> line breaks
+    s = re.sub(r"\n{3,}", "\n\n", s)       # cap blank runs
+    return s.strip()
+
+
 def load_posts(selected_csv):
     """Dedupe by tweetId; merge topic_condition across duplicate rows."""
     order, rows = [], {}
@@ -68,7 +86,7 @@ def load_posts(selected_csv):
             tid = r["tweetId"]
             if tid not in rows:
                 rows[tid] = {
-                    "content": r["text"],
+                    "content": clean_tweet_text(r["text"]),
                     "created_at": r["created_at"],
                     "polarity_condition": r.get("polarity_condition", ""),
                     "topics": set(),
@@ -180,7 +198,7 @@ def build(selected_csv, notes_csv, out_db, media_csv=None, replies_csv=None):
             n_iv += 1
 
         note = notes.get(p["post_id"])
-        body = note["summary"] if note else ""
+        body = clean_note_text(note["summary"]) if note else ""
         conn.execute("INSERT INTO interventions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", (
             p["post_id"], "control", "community_note", body,
             None, None, None,
