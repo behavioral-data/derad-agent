@@ -303,13 +303,16 @@ def run_factcheck(statement, *, exclude_tweet_id=None, image_urls=None,
     )
 
 
-def render_reply(frozen, statement, tone, max_sources=5):
+def render_reply(frozen, statement, tone, max_sources=5, length_key=None):
     """Render one tone from a frozen verdict and assemble the reply payload.
 
     Returns ``{text, sources, info_payload, verdict_label, action,
     action_outcome, queries}``. The rendered text contains NO URLs — sources +
     reasoning live on the /info page reached via the short link appended
     downstream. ``info_payload`` carries everything the /info page renders.
+
+    ``length_key`` selects the renderer's length profile; omit to use the
+    renderer's default.
     """
     from agent.factcheck.freeze import view_for_renderer
     from agent.factcheck.render import render
@@ -319,8 +322,10 @@ def render_reply(frozen, statement, tone, max_sources=5):
         logger.warning("render_reply: unknown tone %r — defaulting to neutral", tone)
         factcheck_tone = "neutral"
 
+    render_kwargs = {"length_key": length_key} if length_key else {}
     text = render(
-        view_for_renderer(frozen, parent_post_text=statement), factcheck_tone
+        view_for_renderer(frozen, parent_post_text=statement), factcheck_tone,
+        **render_kwargs,
     )
 
     sources = [

@@ -182,6 +182,8 @@ It sounds like you're worried about a link between vaccines and autism — a con
 _SATIRICAL_REGISTER = """# REGISTER:
 Write the reply in a satirical tone. Act like a staff writer for a satirical publication like The Onion or a late night TV show like Last Week Tonight with John Oliver.
 
+The action instructions above tell you WHAT to convey (the finding / context / counterpoint / perspective) — they do NOT govern your VOICE. Ignore any "plainly" / "state it directly" / "explain the mechanism" phrasing from them: in this register the satire IS the delivery, not an earnest explanation with a joke bolted on.
+
 # STRICT BOUNDARY:
 - NO profanity. NO slurs.
 - NO attack on identity, appearance, demographics, gender, race, religion, nationality, accent, age, body, or personal traits.
@@ -230,6 +232,17 @@ _TONE_REGISTERS: dict[Tone, str] = {
 }
 
 
+# ── Length profiles (tunable: prompt guidance + enforced ceiling in chars) ───
+# The ceiling is enforced in _enforce_invariance (capped at X_TWEET_LIMIT); the
+# guidance line steers the model toward the target before the ceiling bites.
+_LENGTH_PROFILES: dict[str, tuple[str, int]] = {
+    "tight":  ("- LENGTH: 1–2 sentences, ~40 words. Make the single most important point, name the source once, stop. No second paragraph, no recap, no throat-clearing.", 320),
+    "short":  ("- LENGTH: one short paragraph — 2–4 sentences, ~65 words. Make the key point, name the source, stop. No recap, no restating the verdict, no padding.", 520),
+    "medium": ("- LENGTH: 1–2 short paragraphs, ~110 words max. Explain the one key mechanism, name the source, stop. Don't pad, don't repeat the verdict.", 900),
+}
+_DEFAULT_LENGTH = "short"
+
+
 # ── Hard constraints ───────────────────────────────────────────────────────
 
 _PIVOT_ASKED_LABEL: dict[Action, str] = {
@@ -242,10 +255,17 @@ _PIVOT_ASKED_LABEL: dict[Action, str] = {
 
 
 def _hard_constraints_for(
-    action: Action, state: _RenderState, pivoted: bool
+    action: Action, state: _RenderState, pivoted: bool, tone: Tone, length_key: str
 ) -> str:
-    """Action-aware hard constraints. Renderer output that violates these is
-    rejected and retried with the failure as feedback."""
+    """Action-, tone-, and length-aware hard constraints. Renderer output that
+    violates these is rejected and retried with the failure as feedback.
+
+    The earnest "lead with the verdict / explain the mechanism" reinforcements
+    are applied for neutral & agreeable only; satirical gets a satire-discipline
+    constraint instead, so the comedic voice isn't fighting an explanatory
+    skeleton it can't carry.
+    """
+    length_line = _LENGTH_PROFILES.get(length_key, _LENGTH_PROFILES[_DEFAULT_LENGTH])[0]
     base = [
         "HARD CONSTRAINTS (violations are rejected and retried):",
         "- Communicate the headline_finding faithfully.",
@@ -253,7 +273,7 @@ def _hard_constraints_for(
         "- ZERO URLs in your reply body. The runtime appends a separate /info short link that carries all source URLs + structured reasoning. Name sources by their display_name (e.g. \"Snopes\", \"AP News\") in your text — never as a link.",
         "- Facts in your reply come ONLY from presentation_payload + tone_neutral_justification. `reply_target` (the post you're replying to) and `invoker_ask` are provided so your phrasing can be responsive — do NOT quote reply_target verbatim, do NOT treat its claims as evidence, and do NOT introduce names / numbers / dates that appear in it but not in presentation_payload or tone_neutral_justification. This holds even when you restate what the claim asserts: characterize the claim only at the level of detail in presentation_payload / tone_neutral_justification. Do NOT import incidental specifics from reply_target (hospitals, cities, named officials, hashtags, dollar figures) into your restatement — repeating a fabricated specific amplifies it.",
         "- No emojis, no hashtags, no @-mentions.",
-        "- LENGTH: aim for 1–2 short paragraphs, plus a few extra lines only if the argument genuinely needs them. Hard ceiling: under 1000 words — and that is a ceiling, NOT a target, so do not write to fill it. Be substantive but tight: explain the key mechanism once, name the source, and stop. Don't pad, don't repeat the verdict, don't add throat-clearing.",
+        length_line,
         '- Output a JSON object with a single "text" field. No preamble, no prose around the JSON.',
     ]
     if pivoted:
@@ -261,7 +281,19 @@ def _hard_constraints_for(
             "- The invoker asked for one action and the pipeline took a different one (see `pivoted_from` in the prompt). Weave a brief, natural pivot clarification into your reply — e.g. \"this is actually verifiable, so:\" — within the same char budget. Don't apologize or use stiff disclosure language; just acknowledge the shift and move on."
         )
 
-    # Action-specific reinforcements
+    if tone == "satirical":
+        base.append(
+            "- SATIRE DISCIPLINE: the comedic angle IS the delivery. Open on the absurdity or a wry "
+            "observation — never a \"Yes/No/Partly\" verdict header or a \"here's the context\" preamble. "
+            "Land exactly ONE load-bearing fact and name the source once, woven into the bit — do NOT "
+            "append an earnest explanatory paragraph after the joke. If the claim is actually TRUE, or the "
+            "evidence is thin/absent, aim the satire at the FRAMING or the source's self-certainty, not at "
+            "a fact that gives you nothing to work with. Commit to the voice the whole way through — no "
+            "reverting to a straight fact-check for the second half."
+        )
+        return "\n".join(base)
+
+    # Earnest (neutral / agreeable) action-specific reinforcements
     if action == "verify" and state == "actionable":
         base.append("- Lead with headline_finding (the verdict). When `invoker_ask` poses a yes/no question (e.g. \"is this true?\"), open with a one-word verdict — Yes / No / Partly / Unclear — before the explanation. Then explain: what is the claim asserting, what does the evidence specifically show about that assertion, and what should the reader update? Quoting load_bearing_evidence_snippet inside quotes is encouraged when it makes the argument concrete.")
     if action == "provide_context" and state == "actionable":
@@ -277,11 +309,11 @@ def _hard_constraints_for(
 # ── Composition ────────────────────────────────────────────────────────────
 
 def _system_prompt_for(
-    action: Action, tone: Tone, state: _RenderState, pivoted: bool
+    action: Action, tone: Tone, state: _RenderState, pivoted: bool, length_key: str
 ) -> str:
     template = _ACTION_TEMPLATES.get(action, _VERIFY_TEMPLATE)
     register = _TONE_REGISTERS.get(tone, _NEUTRAL_REGISTER)
-    constraints = _hard_constraints_for(action, state, pivoted)
+    constraints = _hard_constraints_for(action, state, pivoted, tone, length_key)
     return f"{template}\n\n{register}\n\n{constraints}"
 
 
@@ -326,16 +358,19 @@ def _looks_like_refusal(text: str) -> bool:
 
 # ── Invariance check ───────────────────────────────────────────────────────
 
-def _enforce_invariance(text: str, view: RendererView, state: _RenderState) -> None:
+def _enforce_invariance(
+    text: str, view: RendererView, state: _RenderState, max_chars: int = X_TWEET_LIMIT
+) -> None:
     """Invariance check.
 
     All URLs are forbidden in the body — sources live on the /info page,
     which is reached via the short link the runtime appends after the
     rendered text. The body talks about sources by their display_name only.
 
-    Always: non-empty, not a refusal, body ≤ X_TWEET_LIMIT X-weighted chars.
-    Pivot disclosure (when applicable) is part of the body — the model owns
-    the whole envelope, no mechanical prefix.
+    Always: non-empty, not a refusal, body ≤ `max_chars` X-weighted chars
+    (the length-profile ceiling, itself never above X_TWEET_LIMIT). Pivot
+    disclosure (when applicable) is part of the body — the model owns the
+    whole envelope, no mechanical prefix.
     """
     if not text:
         raise ValueError("Renderer returned empty text.")
@@ -348,41 +383,52 @@ def _enforce_invariance(text: str, view: RendererView, state: _RenderState) -> N
             f"Renderer emitted URL(s) in the body — sources belong on /info, not in the tweet: {sorted(set(urls_in_reply))}"
         )
 
-    if x_weighted_length(text) > X_TWEET_LIMIT:
+    if x_weighted_length(text) > max_chars:
         raise ValueError(
-            f"Rendered reply body is {x_weighted_length(text)} X-weighted chars (body limit {X_TWEET_LIMIT})."
+            f"Rendered reply body is {x_weighted_length(text)} X-weighted chars (body limit {max_chars})."
         )
 
 
 # ── Public entry point ─────────────────────────────────────────────────────
 
-def render(view: RendererView, tone: Tone, *, max_invariance_retries: int = 3) -> str:
+def render(
+    view: RendererView, tone: Tone, *,
+    max_invariance_retries: int = 3, length_key: str = _DEFAULT_LENGTH,
+) -> str:
     """Compose system = action_template + tone_register + hard_constraints,
     call Claude, enforce invariance with retries, fall back to refusal nudge
-    on call_claude_json failure, raise on second failure."""
+    on call_claude_json failure, raise on second failure.
+
+    `length_key` selects a length profile (prompt guidance + enforced char
+    ceiling). Satirical renders run with a reasoning budget so the register's
+    multi-step comedic reasoning can actually execute before it commits."""
     if tone not in _TONE_REGISTERS:
         raise ValueError(f"Unknown tone {tone!r}")
     if view.action not in _ACTION_TEMPLATES:
         raise ValueError(f"Unknown action {view.action!r}")
 
+    max_chars = min(_LENGTH_PROFILES.get(length_key, _LENGTH_PROFILES[_DEFAULT_LENGTH])[1], X_TWEET_LIMIT)
+    effort = "medium" if tone == "satirical" else None
+    render_timeout = 60.0 if effort else 30.0
     state = _state_for(view)
     pivoted = bool(view.pivoted_from and view.pivoted_from != view.action)
-    system_prompt = _system_prompt_for(view.action, tone, state, pivoted)
+    system_prompt = _system_prompt_for(view.action, tone, state, pivoted, length_key)
     base_prompt = _build_prompt(view, state)
     last_error: Exception | None = None
 
     # Pass 1 — normal prompt, invariance-feedback retries
     last_text: Optional[str] = None
+    best_over: Optional[str] = None   # shortest attempt that failed ONLY the length cap
     for attempt in range(max_invariance_retries + 1):
         prompt = base_prompt
         if last_error is not None and isinstance(last_error, ValueError):
             err_msg = str(last_error)
             extra = ""
             if last_text is not None and ("body limit" in err_msg or "X-weighted chars" in err_msg):
-                excess = x_weighted_length(last_text) - X_TWEET_LIMIT
+                excess = x_weighted_length(last_text) - max_chars
                 extra = (
                     f" Your last attempt was {x_weighted_length(last_text)} chars; the cap is "
-                    f"{X_TWEET_LIMIT}. You must cut at least {excess + 100} chars. Trim redundant "
+                    f"{max_chars}. You must cut at least {excess + 40} chars. Trim redundant "
                     f"sentences and repetition — keep the substance.\n\nYour previous attempt was:\n{last_text!r}\n"
                 )
             prompt += (
@@ -394,9 +440,9 @@ def render(view: RendererView, tone: Tone, *, max_invariance_retries: int = 3) -
                 prompt=prompt,
                 schema=RenderedReply,
                 system=system_prompt,
-                reasoning_effort=None,
+                reasoning_effort=effort,
                 max_tokens=8192,
-                timeout=30.0,
+                timeout=render_timeout,
             )
         except (ValueError, anthropic.APIConnectionError) as exc:
             # anthropic.APIConnectionError (parent of APITimeoutError, which
@@ -412,11 +458,15 @@ def render(view: RendererView, tone: Tone, *, max_invariance_retries: int = 3) -
             break
         text = reply.text.strip()
         try:
-            _enforce_invariance(text, view, state)
+            _enforce_invariance(text, view, state, max_chars)
             return text
         except ValueError as exc:
             last_error = exc
             last_text = text
+            if "body limit" in str(exc) and (
+                best_over is None or x_weighted_length(text) < x_weighted_length(best_over)
+            ):
+                best_over = text
             logger.info(
                 "render[%s/%s]: invariance retry %d/%d (%s)",
                 view.action, tone, attempt + 1, max_invariance_retries, exc,
@@ -428,16 +478,36 @@ def render(view: RendererView, tone: Tone, *, max_invariance_retries: int = 3) -
             prompt=base_prompt + "\n\n" + _REFUSAL_NUDGE,
             schema=RenderedReply,
             system=system_prompt,
-            reasoning_effort=None,
+            reasoning_effort=effort,
             max_tokens=8192,
-            timeout=30.0,
+            timeout=render_timeout,
         )
-        text = reply.text.strip()
-        _enforce_invariance(text, view, state)
-        logger.info("render[%s/%s]: succeeded after refusal nudge", view.action, tone)
-        return text
     except Exception as exc:
-        logger.warning("render[%s/%s]: refusal-nudge pass also failed (%s)", view.action, tone, exc)
-        if last_error is not None:
-            raise last_error
-        raise
+        logger.warning("render[%s/%s]: refusal-nudge call failed (%s)", view.action, tone, exc)
+    else:
+        text = reply.text.strip()
+        try:
+            _enforce_invariance(text, view, state, max_chars)
+            logger.info("render[%s/%s]: succeeded after refusal nudge", view.action, tone)
+            return text
+        except ValueError as exc:
+            last_error = exc
+            if "body limit" in str(exc) and (
+                best_over is None or x_weighted_length(text) < x_weighted_length(best_over)
+            ):
+                best_over = text
+
+    # Graceful length degrade: if the ONLY unmet constraint was the soft length
+    # ceiling, return the shortest attempt rather than failing the whole render
+    # over a stylistic cap. URLs/refusals still hard-fail; still bounded by the
+    # platform limit.
+    if best_over is not None and x_weighted_length(best_over) <= X_TWEET_LIMIT:
+        logger.warning(
+            "render[%s/%s]: could not meet length cap %d after retries; returning "
+            "shortest valid attempt (%d chars)",
+            view.action, tone, max_chars, x_weighted_length(best_over),
+        )
+        return best_over
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("render produced no output and no error")
