@@ -33,6 +33,34 @@ def get_post(conn, post_id):
     return post
 
 
+def list_posts(conn):
+    """All posts summarized for the browse/demo page: id, author, snippet,
+    study conditions, and a compact media badge (img/vid/gif + count)."""
+    rows = conn.execute(
+        "SELECT post_id, author_name, author_handle, content, "
+        "topic_condition, polarity_condition, media_json FROM posts "
+        "ORDER BY topic_condition, polarity_condition, post_id"
+    ).fetchall()
+    out = []
+    for r in rows:
+        media = json.loads(r["media_json"] or "[]")
+        badge = ""
+        if media:
+            t = media[0]["type"]
+            kind = "vid" if t == "video" else "gif" if t == "animated_gif" else "img"
+            badge = f"{kind}·{len(media)}"
+        out.append({
+            "post_id": r["post_id"],
+            "author_name": r["author_name"],
+            "author_handle": r["author_handle"],
+            "content": r["content"],
+            "topic": r["topic_condition"],
+            "polarity": r["polarity_condition"],
+            "media": badge,
+        })
+    return out
+
+
 def get_intervention(conn, post_id, condition):
     row = conn.execute(
         "SELECT * FROM interventions WHERE post_id = ? AND condition = ?",

@@ -58,3 +58,26 @@ def test_connection_is_readonly(mockx_db):
     conn = dbmod.connect(mockx_db)
     with pytest.raises(sqlite3.OperationalError):
         conn.execute("INSERT INTO posts (post_id) VALUES ('x')")
+
+
+def test_list_posts_summary(mockx_db):
+    conn = dbmod.connect(mockx_db)
+    posts = dbmod.list_posts(conn)
+    assert len(posts) == 2
+    by_id = {p["post_id"]: p for p in posts}
+    assert set(by_id) == {"t1", "t2"}
+    assert set(by_id["t1"]) >= {
+        "post_id", "author_name", "author_handle", "content", "topic", "polarity", "media",
+    }
+
+
+def test_browse_route_renders_all_posts(mockx_db):
+    from study.interface.server import create_app
+    client = create_app(db_path=mockx_db).test_client()
+    r = client.get("/browse")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    # one linked thread per condition, and each post present
+    for cond in dbmod.CONDITIONS:
+        assert f"condition={cond}" in body
+    assert "post_id=t1" in body and "post_id=t2" in body
