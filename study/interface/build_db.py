@@ -29,6 +29,18 @@ BOT_NAME = "Eddie Bot"
 BOT_HANDLE = "eddiexbot"
 BOT_AVATAR = "ED"
 TONES = ("neutral", "agreeable", "satirical")
+CONDITIONS = (*TONES, "control")
+
+# Opaque, stable per-(post, condition) access code so a participant's URL reveals
+# neither the post nor the condition they were assigned. Deterministic (hash of a
+# fixed salt) so issued links stay valid across DB rebuilds; rotate ACCESS_SALT
+# to invalidate every previously-issued link.
+ACCESS_SALT = "derad-mockx-2026"
+
+
+def access_code(post_id, condition):
+    return hashlib.sha256(
+        f"{ACCESS_SALT}:{post_id}:{condition}".encode()).hexdigest()[:12]
 
 _FIRST = ["Jordan", "Taylor", "Morgan", "Casey", "Riley", "Avery", "Quinn",
           "Cameron", "Skyler", "Reese", "Devon", "Harper", "Rowan", "Emerson",
@@ -179,6 +191,8 @@ def build(selected_csv, notes_csv, out_db, media_csv=None, replies_csv=None):
             note_classification TEXT, source_note_id TEXT,
             reply_likes INTEGER, reply_reposts INTEGER, reply_views INTEGER,
             is_stub INTEGER, PRIMARY KEY (post_id, condition))""")
+    conn.execute(
+        "CREATE TABLE access (code TEXT PRIMARY KEY, post_id TEXT, condition TEXT)")
 
     n_iv = 0
     for p in posts:
@@ -209,6 +223,10 @@ def build(selected_csv, notes_csv, out_db, media_csv=None, replies_csv=None):
             note["noteId"] if note else None,
             None, None, None, 0))
         n_iv += 1
+
+        for cond in CONDITIONS:
+            conn.execute("INSERT INTO access VALUES (?,?,?)",
+                         (access_code(p["post_id"], cond), p["post_id"], cond))
 
     conn.commit()
     conn.close()

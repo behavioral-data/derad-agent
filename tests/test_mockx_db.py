@@ -60,24 +60,45 @@ def test_connection_is_readonly(mockx_db):
         conn.execute("INSERT INTO posts (post_id) VALUES ('x')")
 
 
-def test_list_posts_summary(mockx_db):
+def test_list_posts_includes_opaque_codes(mockx_db):
     conn = dbmod.connect(mockx_db)
     posts = dbmod.list_posts(conn)
-    assert len(posts) == 2
     by_id = {p["post_id"]: p for p in posts}
     assert set(by_id) == {"t1", "t2"}
-    assert set(by_id["t1"]) >= {
-        "post_id", "author_name", "author_handle", "content", "topic", "polarity", "media",
-    }
+    t1 = by_id["t1"]
+    assert set(t1) >= {"post_id", "author_name", "author_handle", "content",
+                       "topic", "polarity", "media", "codes"}
+    assert set(t1["codes"]) == set(dbmod.CONDITIONS)          # a code per condition
+    assert len(set(t1["codes"].values())) == len(dbmod.CONDITIONS)  # all distinct
 
 
-def test_browse_route_renders_all_posts(mockx_db):
+def test_resolve_code_roundtrip(mockx_db):
+    conn = dbmod.connect(mockx_db)
+    p = dbmod.list_posts(conn)[0]
+    for cond, code in p["codes"].items():
+        assert dbmod.resolve_code(conn, code) == (p["post_id"], cond)
+        assert dbmod.get_thread_by_code(conn, code)["post"]["post_id"] == p["post_id"]
+    assert dbmod.resolve_code(conn, "deadbeef0000") is None
+    assert dbmod.get_thread_by_code(conn, "deadbeef0000") is None
+
+
+def test_browse_links_use_opaque_codes_only(mockx_db):
     from study.interface.server import create_app
     client = create_app(db_path=mockx_db).test_client()
     r = client.get("/browse")
     assert r.status_code == 200
     body = r.get_data(as_text=True)
-    # one linked thread per condition, and each post present
-    for cond in dbmod.CONDITIONS:
-        assert f"condition={cond}" in body
-    assert "post_id=t1" in body and "post_id=t2" in body
+    assert body.count("/?v=") >= 8         # 2 posts x 4 conditions, code links only
+    assert "condition=" not in body        # no readable condition/post leaks in URLs
+    assert "post_id=" not in body
+
+
+def test_api_thread_by_code_hides_condition(mockx_db):
+    from study.interface.server import create_app
+    conn = dbmod.connect(mockx_db)
+    code = dbmod.list_posts(conn)[0]["codes"]["satirical"]
+    client = create_app(db_path=mockx_db).test_client()
+    r = client.get(f"/api/thread?v={code}")
+    assert r.status_code == 200
+    assert "condition" not in r.get_json()["intervention"]   # stripped from response
+    assert client.get("/api/thread?v=deadbeef0000").status_code == 404

@@ -63,10 +63,10 @@ def _render_browse(posts):
         topic = html.escape(p["topic"] or "")
         pol = html.escape(p["polarity"] or "")
         media = f'<span class="media">{html.escape(p["media"])}</span>' if p["media"] else ""
-        pid = html.escape(p["post_id"])
+        codes = p.get("codes", {})
         links = " ".join(
-            f'<a class="c c-{c}" href="/?post_id={pid}&condition={c}" target="_blank" rel="noopener">{_COND_LABEL[c]}</a>'
-            for c in dbmod.CONDITIONS
+            f'<a class="c c-{c}" href="/?v={html.escape(codes[c])}" target="_blank" rel="noopener">{_COND_LABEL[c]}</a>'
+            for c in dbmod.CONDITIONS if c in codes
         )
         search = html.escape(
             f'{p["author_name"]} {p["author_handle"]} {p["content"]} {p["topic"]}'.lower()
@@ -118,12 +118,22 @@ def create_app(db_path=None):
 
     @app.get("/api/thread")
     def api_thread():
-        post_id = request.args.get("post_id", "")
-        condition = request.args.get("condition", "")
-        if condition not in dbmod.CONDITIONS:
-            return jsonify({"error": f"invalid condition: {condition!r}"}), 400
+        # Participant links carry only an opaque code (?v=…); post_id+condition
+        # is the legacy/internal path. Either way the request never exposes the
+        # condition in a readable form.
         conn = dbmod.connect(app.config["MOCKX_DB"])
         try:
+            code = request.args.get("v", "")
+            if code:
+                resolved = dbmod.resolve_code(conn, code)
+                if resolved is None:
+                    return jsonify({"error": "not found"}), 404
+                post_id, condition = resolved
+            else:
+                post_id = request.args.get("post_id", "")
+                condition = request.args.get("condition", "")
+                if condition not in dbmod.CONDITIONS:
+                    return jsonify({"error": f"invalid condition: {condition!r}"}), 400
             thread = dbmod.get_thread(conn, post_id, condition)
         finally:
             conn.close()

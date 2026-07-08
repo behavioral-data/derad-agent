@@ -33,9 +33,28 @@ def get_post(conn, post_id):
     return post
 
 
+def resolve_code(conn, code):
+    """Opaque access code -> (post_id, condition), or None. Lets participant URLs
+    carry a single unreadable token instead of the post id + condition."""
+    row = conn.execute(
+        "SELECT post_id, condition FROM access WHERE code = ?", (code,)).fetchone()
+    return (row["post_id"], row["condition"]) if row else None
+
+
+def get_thread_by_code(conn, code):
+    resolved = resolve_code(conn, code)
+    if resolved is None:
+        return None
+    return get_thread(conn, resolved[0], resolved[1])
+
+
 def list_posts(conn):
     """All posts summarized for the browse/demo page: id, author, snippet,
-    study conditions, and a compact media badge (img/vid/gif + count)."""
+    study conditions, a compact media badge (img/vid/gif + count), and the
+    opaque per-condition access codes (for building participant links)."""
+    codes = {}
+    for r in conn.execute("SELECT code, post_id, condition FROM access"):
+        codes.setdefault(r["post_id"], {})[r["condition"]] = r["code"]
     rows = conn.execute(
         "SELECT post_id, author_name, author_handle, content, "
         "topic_condition, polarity_condition, media_json FROM posts "
@@ -57,6 +76,7 @@ def list_posts(conn):
             "topic": r["topic_condition"],
             "polarity": r["polarity_condition"],
             "media": badge,
+            "codes": codes.get(r["post_id"], {}),
         })
     return out
 

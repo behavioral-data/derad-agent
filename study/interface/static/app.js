@@ -339,15 +339,20 @@ function renderThread(data) {
 
 (async () => {
   const p = new URLSearchParams(location.search);
+  const code = p.get("v");
   const postId = p.get("post_id");
   const condition = p.get("condition");
-  if (!postId || !condition) {
-    renderError("Missing post_id or condition.");
+  let data;
+  if (code) {
+    data = await MockXAPI.getThreadByCode(code);      // participant path (opaque)
+  } else if (postId && condition) {
+    data = await MockXAPI.getThread(postId, condition); // legacy/internal path
+  } else {
+    renderError("Missing link parameter.");
     return;
   }
-  const data = await MockXAPI.getThread(postId, condition);
   if (!data) {
-    renderError("Post or condition not found.");
+    renderError("This post could not be found.");
     return;
   }
   renderThread(data);
