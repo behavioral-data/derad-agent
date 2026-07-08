@@ -7,7 +7,7 @@ def assign(post_counts, n_posts):
 
     :param post_counts: a dict of post ID to assignment count
     :param n_posts: the number of posts to assign
-    :return: the list of posts IDs assigned to the next participant
+    :return: the list of post IDs assigned to the next participant
     """
     if len(post_counts) < n_posts:
         raise ValueError("n_posts must be >= len(post_counts)!")

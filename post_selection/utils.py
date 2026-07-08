@@ -46,25 +46,3 @@ def filter_tweet(tweet, topic_condition):
                 return True
     return False
 
-def get_top_10_misleading_tweets(
-        misleading_tweets_df,
-        polarity_condition,
-        topic_condition,
-):
-    tweets = []
-    i = 0
-    while len(tweets) < NUM_TWEETS_PER_CONDITION and i < MAX_TRIES:
-        tweet_rows = misleading_tweets_df.iloc[i:i + 100]
-        response_tweets = get_tweets(tweet_rows['tweetId'])
-        if response_tweets is not None:
-            for tweet in response_tweets:
-                tweet_info = misleading_tweets_df.loc[misleading_tweets_df['tweetId'] == tweet['id']]
-                if filter_tweet(tweet, topic_condition):
-                    tweet['polarity'] = tweet_info['polarity'].item()
-                    tweet['polarity_condition'] = polarity_condition
-                    tweet['topic_condition'] = topic_condition
-                    tweets.append(tweet)
-        i += 100
-    if i >= MAX_TRIES:
-        print("Stopping early, max tries reached")
-    return tweets
