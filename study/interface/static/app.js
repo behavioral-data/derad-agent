@@ -97,6 +97,64 @@ function actionIcons() {
   };
 }
 
+// Media-player control glyphs (play/pause/mute/unmute/fullscreen).
+const VIDEO_ICONS = {
+  play: `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`,
+  pause: `<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>`,
+  muted: `<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM19 12l2.5 2.5 1.5-1.5L20.5 11 23 8.5 21.5 7 19 9.5 16.5 7 15 8.5 17.5 11 15 13.5 16.5 15 19 12z"/></svg>`,
+  unmuted: `<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>`,
+  full: `<svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>`,
+};
+
+function fmtDur(s) {
+  s = Math.max(0, Math.floor(s || 0));
+  return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+}
+
+// Wire up X-style behaviour on each rendered <video>: hover controls (play/pause,
+// scrubber, time, mute, fullscreen) and click-the-frame-to-toggle-mute.
+function initVideoPlayers(root) {
+  root.querySelectorAll(".video-player").forEach((wrap) => {
+    const v = wrap.querySelector("video");
+    const playBtn = wrap.querySelector(".vc-play");
+    const muteBtn = wrap.querySelector(".vc-mute");
+    const fullBtn = wrap.querySelector(".vc-full");
+    const prog = wrap.querySelector(".vc-progress");
+    const fill = wrap.querySelector(".vc-fill");
+    const time = wrap.querySelector(".vc-time");
+    if (!v) return;
+    const syncPlay = () => {
+      playBtn.innerHTML = v.paused ? VIDEO_ICONS.play : VIDEO_ICONS.pause;
+      playBtn.setAttribute("aria-label", v.paused ? "Play" : "Pause");
+    };
+    const syncMute = () => {
+      muteBtn.innerHTML = v.muted ? VIDEO_ICONS.muted : VIDEO_ICONS.unmuted;
+      muteBtn.setAttribute("aria-label", v.muted ? "Unmute" : "Mute");
+    };
+    v.addEventListener("timeupdate", () => {
+      if (v.duration) fill.style.width = (v.currentTime / v.duration * 100) + "%";
+      time.textContent = fmtDur(v.currentTime);
+    });
+    v.addEventListener("play", syncPlay);
+    v.addEventListener("pause", syncPlay);
+    v.addEventListener("volumechange", syncMute);
+    playBtn.addEventListener("click", (e) => { e.stopPropagation(); v.paused ? v.play() : v.pause(); });
+    muteBtn.addEventListener("click", (e) => { e.stopPropagation(); v.muted = !v.muted; });
+    fullBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const req = v.requestFullscreen || v.webkitRequestFullscreen || wrap.requestFullscreen;
+      if (req) req.call(v.requestFullscreen ? v : wrap);
+    });
+    prog.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const r = prog.getBoundingClientRect();
+      if (v.duration) v.currentTime = ((e.clientX - r.left) / r.width) * v.duration;
+    });
+    v.addEventListener("click", () => { v.muted = !v.muted; });  // X: click frame to (un)mute
+    syncPlay(); syncMute();
+  });
+}
+
 function initials(name) {
   return String(name || "").trim().split(/\s+/).map((w) => w[0] || "")
     .slice(0, 2).join("").toUpperCase();
@@ -118,15 +176,26 @@ function renderMedia(media) {
   if (!Array.isArray(media) || media.length === 0) return "";
   const shown = media.slice(0, 4);
   const items = shown.map((m) => {
-    const isMovie = m.type === "video" || m.type === "animated_gif";
-    // Playable video/gif → X-style autoplay, muted, looping (poster shows until it loads).
-    if (isMovie && m.video) {
-      const gifBadge = m.type === "animated_gif"
-        ? `<span class="gif-badge" aria-hidden="true">GIF</span>` : "";
+    // Animated GIF → autoplay muted loop, no controls (X shows just a GIF badge).
+    if (m.type === "animated_gif" && m.video) {
       return `
     <div class="media-item">
       <video src="${escapeHtml(m.video)}" poster="${escapeHtml(m.src)}" autoplay muted loop playsinline preload="metadata"></video>
-      ${gifBadge}
+      <span class="gif-badge" aria-hidden="true">GIF</span>
+    </div>`;
+    }
+    // Video → autoplay muted loop with X-style hover controls (see initVideoPlayers).
+    if (m.type === "video" && m.video) {
+      return `
+    <div class="media-item video-player">
+      <video src="${escapeHtml(m.video)}" poster="${escapeHtml(m.src)}" autoplay muted loop playsinline preload="metadata"></video>
+      <div class="video-controls">
+        <button class="vc-btn vc-play" type="button" aria-label="Pause"></button>
+        <div class="vc-progress"><div class="vc-fill"></div></div>
+        <span class="vc-time">0:00</span>
+        <button class="vc-btn vc-mute" type="button" aria-label="Unmute"></button>
+        <button class="vc-btn vc-full" type="button" aria-label="Full screen"></button>
+      </div>
     </div>`;
     }
     // Photo, or a video with no downloadable file → poster still (+ play badge for video).
@@ -261,6 +330,7 @@ function renderThread(data) {
   if (window.twemoji) {
     window.twemoji.parse(el, { base: "/static/twemoji/", folder: "svg", ext: ".svg", className: "emoji" });
   }
+  initVideoPlayers(el);
   const snippet = (post.content || "").replace(/\s+/g, " ").trim().slice(0, 60);
   document.title = `${post.author_name} on X: "${snippet}${snippet.length >= 60 ? "…" : ""}" / X`;
 }
