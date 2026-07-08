@@ -222,6 +222,10 @@ function statSpan(n, label) {
   return n > 0 ? `<span><strong>${fmtNum(n)}</strong> ${label}</span>` : "";
 }
 
+// Blue X verified badge (shared by the focal author and the bot).
+const VERIFIED_BADGE = ' <span class="verified-badge" aria-label="Verified account"><svg viewBox="0 0 22 22" aria-hidden="true"><path d="M20.396 11c-.018-.646-.215-1.275-.57-1.816-.354-.54-.852-.972-1.438-1.246.223-.607.27-1.264.14-1.897-.131-.634-.437-1.218-.882-1.687-.47-.445-1.053-.75-1.687-.882-.633-.13-1.29-.083-1.897.14-.273-.587-.704-1.086-1.245-1.44S11.647 1.62 11 1.604c-.646.017-1.273.213-1.813.568s-.969.854-1.24 1.44c-.608-.223-1.267-.272-1.902-.14-.635.13-1.22.436-1.69.882-.445.47-.749 1.055-.878 1.688-.13.633-.08 1.29.144 1.896-.587.274-1.087.705-1.443 1.245-.356.54-.555 1.17-.574 1.817.02.647.218 1.276.574 1.817.356.54.856.972 1.443 1.245-.224.606-.274 1.263-.144 1.896.13.634.433 1.218.877 1.688.47.443 1.054.747 1.687.878.633.132 1.29.084 1.897-.136.274.586.705 1.084 1.246 1.439.54.354 1.17.551 1.816.569.647-.016 1.276-.213 1.817-.567s.972-.854 1.245-1.44c.604.239 1.266.296 1.903.164.636-.132 1.22-.447 1.68-.907.46-.46.477-1.054.597-1.686.122-.632.086-1.283-.106-1.882.604-.274 1.118-.724 1.472-1.282.354-.559.54-1.195.54-1.84z" fill="#1d9bf0"/><path d="M9.662 14.97L6.25 11.56l1.414-1.414 2 2 5-5 1.414 1.414z" fill="#fff"/></svg></span>';
+const BOT_AVATAR_URL = "/static/eddiexbot.jpg";
+
 // noteHtml is "" when there is no context card; populated for community notes.
 function renderPost(post, noteHtml = "") {
   const icons = actionIcons();
@@ -230,9 +234,7 @@ function renderPost(post, noteHtml = "") {
   const content = bodyText.trim()
     ? `<div class="post-content">${linkify(escapeHtml(bodyText), { entities: true })}</div>` : "";
   const { quotes, bookmarks } = derivedPostCounts(post);
-  const verified = post.author_verified
-    ? ' <span class="verified-badge" aria-label="Verified account"><svg viewBox="0 0 22 22" aria-hidden="true"><path d="M20.396 11c-.018-.646-.215-1.275-.57-1.816-.354-.54-.852-.972-1.438-1.246.223-.607.27-1.264.14-1.897-.131-.634-.437-1.218-.882-1.687-.47-.445-1.053-.75-1.687-.882-.633-.13-1.29-.083-1.897.14-.273-.587-.704-1.086-1.245-1.44S11.647 1.62 11 1.604c-.646.017-1.273.213-1.813.568s-.969.854-1.24 1.44c-.608-.223-1.267-.272-1.902-.14-.635.13-1.22.436-1.69.882-.445.47-.749 1.055-.878 1.688-.13.633-.08 1.29.144 1.896-.587.274-1.087.705-1.443 1.245-.356.54-.555 1.17-.574 1.817.02.647.218 1.276.574 1.817.356.54.856.972 1.443 1.245-.224.606-.274 1.263-.144 1.896.13.634.433 1.218.877 1.688.47.443 1.054.747 1.687.878.633.132 1.29.084 1.897-.136.274.586.705 1.084 1.246 1.439.54.354 1.17.551 1.816.569.647-.016 1.276-.213 1.817-.567s.972-.854 1.245-1.44c.604.239 1.266.296 1.903.164.636-.132 1.22-.447 1.68-.907.46-.46.477-1.054.597-1.686.122-.632.086-1.283-.106-1.882.604-.274 1.118-.724 1.472-1.282.354-.559.54-1.195.54-1.84z" fill="#1d9bf0"/><path d="M9.662 14.97L6.25 11.56l1.414-1.414 2 2 5-5 1.414 1.414z" fill="#fff"/></svg></span>'
-    : "";
+  const verified = post.author_verified ? VERIFIED_BADGE : "";
   return `
     <div class="post-expanded">
       <div class="post-meta-row">
@@ -274,10 +276,10 @@ function renderBotReply(iv, post) {
   return `
     <div class="reply-card">
       <div class="post-inner">
-        <div class="avatar-col">${renderAvatar(iv.bot_name, iv.bot_handle)}</div>
+        <div class="avatar-col"><img class="avatar" src="${BOT_AVATAR_URL}" alt=""></div>
         <div class="post-body">
           <div class="post-meta">
-            <span class="author-name">${escapeHtml(iv.bot_name)}</span>
+            <span class="author-name">${escapeHtml(iv.bot_name)}</span>${VERIFIED_BADGE}
             <span class="author-handle text-dim">@${escapeHtml(iv.bot_handle)}</span>
             <span class="text-dim">·</span>
             <span class="post-time text-dim">${relTime(replyDate)}</span>

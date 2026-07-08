@@ -220,7 +220,9 @@ img.emoji {
   display: flex; align-items: center; justify-content: center;
   font-size: 14px; font-weight: 700; color: #fff;
   flex-shrink: 0; background: #536471;
+  overflow: hidden;
 }
+img.avatar { object-fit: cover; }
 .post-body { flex: 1; min-width: 0; }
 .post-meta { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .author-name { font-weight: 700; font-size: 15px; white-space: nowrap; }

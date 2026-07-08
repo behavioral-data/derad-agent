@@ -25,7 +25,7 @@ DEFAULT_DB = os.path.join(_STUDY, "data", "study.db")
 
 csv.field_size_limit(10_000_000)
 
-BOT_NAME = "Eddie"
+BOT_NAME = "Eddie Bot"
 BOT_HANDLE = "eddiexbot"
 BOT_AVATAR = "ED"
 TONES = ("neutral", "agreeable", "satirical")
