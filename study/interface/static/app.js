@@ -337,6 +337,31 @@ function renderThread(data) {
   document.title = `${post.author_name} on X: "${snippet}${snippet.length >= 60 ? "…" : ""}" / X`;
 }
 
+// Record that this participant saw this thread: one beacon on load (proof of
+// exposure) and one on pagehide/first-hide carrying dwell time. Same-origin,
+// so no CORS. Only fires when both an opaque code and a participant id are present.
+function logExposure(code, pid, day) {
+  const t0 = Date.now();
+  const send = (dwell) => {
+    const body = JSON.stringify({ code, pid, day: day || 0, dwell_ms: dwell });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon("/api/exposure", new Blob([body], { type: "application/json" }));
+    } else {
+      fetch("/api/exposure", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body, keepalive: true,
+      });
+    }
+  };
+  send(0);
+  let done = false;
+  const finalize = () => { if (!done) { done = true; send(Date.now() - t0); } };
+  window.addEventListener("pagehide", finalize);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") finalize();
+  });
+}
+
 (async () => {
   const p = new URLSearchParams(location.search);
   const code = p.get("v");
@@ -356,4 +381,6 @@ function renderThread(data) {
     return;
   }
   renderThread(data);
+  const pid = p.get("pid");
+  if (code && pid) logExposure(code, pid, p.get("day"));
 })();

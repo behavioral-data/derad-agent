@@ -7,6 +7,13 @@ import os
 from flask import Flask, jsonify, request, send_from_directory
 
 from . import db as dbmod
+from .assignment import assign
+from .study_store import Exposure, get_store
+
+# Which parents may embed the interface in an <iframe> (Qualtrics survey).
+# Override with DERAD_FRAME_ANCESTORS if the survey is hosted elsewhere.
+_FRAME_ANCESTORS = os.environ.get(
+    "DERAD_FRAME_ANCESTORS", "'self' https://*.qualtrics.com")
 
 
 # ── Browse / demo gallery ───────────────────────────────────────────────────
@@ -95,9 +102,66 @@ def create_app(db_path=None):
     app = Flask(__name__, static_folder="static", static_url_path="/static")
     app.config["MOCKX_DB"] = db_path
 
+    @app.after_request
+    def _allow_qualtrics_iframe(resp):
+        # Permit embedding inside the Qualtrics survey; frame-ancestors is the
+        # modern replacement for X-Frame-Options (which we deliberately omit).
+        resp.headers["Content-Security-Policy"] = f"frame-ancestors {_FRAME_ANCESTORS}"
+        return resp
+
     @app.get("/healthz")
     def healthz():
         return "ok", 200
+
+    @app.get("/api/session")
+    def api_session():
+        """Idempotently assign the participant, return that day's opaque codes.
+        The condition is NOT returned — it stays server-side so nothing the
+        client can see reveals the group."""
+        pid = request.args.get("pid", "").strip()
+        day = request.args.get("day", "").strip()
+        if not pid or not day.isdigit():
+            return jsonify({"error": "pid and numeric day are required"}), 400
+        day_i = int(day)
+        conn = dbmod.connect(app.config["MOCKX_DB"])
+        try:
+            a = assign(pid, get_store(), dbmod.cells(conn))
+            if not (1 <= day_i <= len(a.blocks)):
+                return jsonify({"error": f"day out of range 1..{len(a.blocks)}"}), 400
+            codes = [dbmod.code_for(conn, post_id, a.condition)
+                     for post_id in a.blocks[day_i - 1]]
+        finally:
+            conn.close()
+        return jsonify({"pid": pid, "day": day_i, "codes": codes})
+
+    @app.post("/api/exposure")
+    def api_exposure():
+        """Record that a participant viewed a thread (idempotent per post)."""
+        data = request.get_json(silent=True, force=True) or {}   # force: sendBeacon mimetype varies
+        code = (data.get("code") or "").strip()
+        pid = (data.get("pid") or "").strip()
+        if not code or not pid:
+            return jsonify({"error": "code and pid are required"}), 400
+        conn = dbmod.connect(app.config["MOCKX_DB"])
+        try:
+            resolved = dbmod.resolve_code(conn, code)
+        finally:
+            conn.close()
+        if resolved is None:
+            return jsonify({"error": "unknown code"}), 404
+        post_id, condition = resolved
+        try:
+            day = int(data.get("day") or 0)
+        except (TypeError, ValueError):
+            day = 0
+        try:
+            dwell = int(data.get("dwell_ms") or 0)
+        except (TypeError, ValueError):
+            dwell = 0
+        get_store().log_exposure(Exposure(
+            pid=pid, condition=condition, post_id=post_id, code=code,
+            day=day, dwell_ms=dwell))
+        return jsonify({"ok": True})
 
     @app.get("/")
     def index():

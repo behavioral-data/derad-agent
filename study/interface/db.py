@@ -48,6 +48,25 @@ def get_thread_by_code(conn, code):
     return get_thread(conn, resolved[0], resolved[1])
 
 
+def code_for(conn, post_id, condition):
+    """The opaque access code for a (post, condition) pair, or None."""
+    row = conn.execute(
+        "SELECT code FROM access WHERE post_id = ? AND condition = ?",
+        (post_id, condition)).fetchone()
+    return row["code"] if row else None
+
+
+def cells(conn):
+    """(topic, polarity) -> [post_id] over all posts — the strata the
+    participant assignment samples from (3 per cell -> 9/topic, 18/polarity)."""
+    out = {}
+    for r in conn.execute(
+            "SELECT post_id, topic_condition, polarity_condition FROM posts"):
+        key = (r["topic_condition"], r["polarity_condition"])
+        out.setdefault(key, []).append(r["post_id"])
+    return out
+
+
 def list_posts(conn):
     """All posts summarized for the browse/demo page: id, author, snippet,
     study conditions, a compact media badge (img/vid/gif + count), and the
