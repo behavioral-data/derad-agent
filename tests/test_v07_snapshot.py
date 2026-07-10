@@ -1,0 +1,42 @@
+# tests/test_v07_snapshot.py
+from datetime import datetime, timezone
+from unittest import mock
+
+from agent.factcheck import snapshot
+from agent.factcheck.search import FetchedPage
+
+
+class _CdxResp:
+    status_code = 200
+    def json(self):
+        return [["timestamp", "original"], ["20260421080000", "https://news.test/gas"]]
+    def raise_for_status(self):
+        pass
+
+
+def test_snapshot_lookup_builds_id_url():
+    with mock.patch("requests.get", return_value=_CdxResp()):
+        url = snapshot.snapshot_lookup(
+            "https://news.test/gas", datetime(2026, 4, 23, tzinfo=timezone.utc))
+    assert url == "https://web.archive.org/web/20260421080000id_/https://news.test/gas"
+
+
+def test_fetch_snapshot_none_when_no_capture():
+    class _Empty(_CdxResp):
+        def json(self):
+            return [["timestamp", "original"]]
+    with mock.patch("requests.get", return_value=_Empty()):
+        page = snapshot.fetch_snapshot(
+            "https://news.test/gas", datetime(2026, 4, 23, tzinfo=timezone.utc))
+    assert page is None
+
+
+def test_fetch_snapshot_reports_original_url():
+    fetched = FetchedPage(200, "https://web.archive.org/web/20260421080000id_/https://news.test/gas",
+                          "Gas prices fall", "body", "2026-04-21")
+    with mock.patch("requests.get", return_value=_CdxResp()), \
+         mock.patch("agent.factcheck.snapshot._fetch_clean_page", return_value=fetched):
+        page = snapshot.fetch_snapshot(
+            "https://news.test/gas", datetime(2026, 4, 23, tzinfo=timezone.utc))
+    assert page.final_url == "https://news.test/gas"
+    assert page.body_markdown == "body"
