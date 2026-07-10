@@ -92,6 +92,27 @@ def _initial_user_message(post_text: str, ctx: PipelineContext,
     return "\n\n".join(parts)
 
 
+def _append_user(messages: list, content) -> None:
+    """Append a user message, merging into a trailing user message if present.
+
+    The real Anthropic client enforces strict role alternation, so two
+    adjacent user messages 400. When merging, all tool_result blocks are
+    ordered first (relative order preserved) — the API requires tool_results
+    to lead the user turn that answers a tool_use."""
+    new_blocks = ([{"type": "text", "text": content}]
+                  if isinstance(content, str) else list(content))
+    if messages and messages[-1]["role"] == "user":
+        prev = messages[-1]["content"]
+        prev_blocks = ([{"type": "text", "text": prev}]
+                       if isinstance(prev, str) else list(prev))
+        combined = prev_blocks + new_blocks
+        is_tr = lambda b: isinstance(b, dict) and b.get("type") == "tool_result"
+        messages[-1]["content"] = ([b for b in combined if is_tr(b)]
+                                   + [b for b in combined if not is_tr(b)])
+    else:
+        messages.append({"role": "user", "content": new_blocks})
+
+
 def _record_server_search(runtime: ToolRuntime, block) -> None:
     content = getattr(block, "content", None)
     if not isinstance(content, list):
@@ -120,16 +141,16 @@ def _drive(messages: list, *, client, runtime: ToolRuntime, model: str,
             if forced:
                 return None, stats
             forced = True
-            messages.append({"role": "user", "content": _FORCED_FINALIZE})
+            _append_user(messages, _FORCED_FINALIZE)
         response = client.messages.create(
             model=model, max_tokens=8192, system=system,
             messages=messages, tools=_tools(),
         )
         stats.turns += 1
         blocks = list(getattr(response, "content", []) or [])
-        assistant_content = []
         tool_results = []
         draft: Optional[DraftVerdict] = None
+        finalize_id = "t"
         for block in blocks:
             btype = getattr(block, "type", None)
             if btype == "web_search_tool_result":
@@ -147,30 +168,31 @@ def _drive(messages: list, *, client, runtime: ToolRuntime, model: str,
             elif name == "finalize":
                 try:
                     draft = DraftVerdict.model_validate(getattr(block, "input", {}) or {})
+                    finalize_id = tool_id
                 except ValidationError as exc:
                     tool_results.append({"type": "tool_result", "tool_use_id": tool_id,
                                          "is_error": True,
                                          "content": f"finalize rejected: {exc}"[:2000]})
                     draft = None
-        # Serialize the assistant turn back into history (text + tool_use raw)
-        messages.append({"role": "assistant", "content": [
-            _block_to_dict(b) for b in blocks if getattr(b, "type", None) in ("text", "tool_use")
-        ] or [{"type": "text", "text": ""}]})
+        # Append the RAW assistant blocks — server_tool_use /
+        # web_search_tool_result blocks must survive for context fidelity.
+        messages.append({"role": "assistant",
+                         "content": blocks or [{"type": "text", "text": ""}]})
         if draft is not None:
             stats.finalized = True
+            # Close the transcript: every tool_use needs its tool_result, so
+            # revise_in_loop's follow-up user message stays legal.
+            tool_results.append({"type": "tool_result", "tool_use_id": finalize_id,
+                                 "content": "finalize accepted"})
+            _append_user(messages, tool_results)
             return draft, stats
         if tool_results:
-            messages.append({"role": "user", "content": tool_results})
+            _append_user(messages, tool_results)
+        elif getattr(response, "stop_reason", "") == "pause_turn":
+            pass  # trailing-assistant transcripts are legal; just call again
         elif getattr(response, "stop_reason", "") == "end_turn" and not forced:
-            messages.append({"role": "user", "content":
-                             "Continue the playbook. When done, call finalize."})
-
-
-def _block_to_dict(b) -> dict:
-    if getattr(b, "type", None) == "text":
-        return {"type": "text", "text": getattr(b, "text", "")}
-    return {"type": "tool_use", "id": getattr(b, "id", "t"),
-            "name": getattr(b, "name", ""), "input": getattr(b, "input", {}) or {}}
+            _append_user(messages,
+                         "Continue the playbook. When done, call finalize.")
 
 
 def run_loop(
@@ -181,9 +203,11 @@ def run_loop(
     model: Optional[str] = None,
 ) -> tuple[Optional[DraftVerdict], ToolRuntime, LoopStats, list]:
     runtime = runtime or ToolRuntime(cutoff=cutoff)
-    if model is None:
-        client_built, model = build_loop_client() if client is None else (client, "claude-sonnet")
-        client = client or client_built
+    if client is None:
+        client, built = build_loop_client()
+        model = model or built
+    elif model is None:
+        model = os.environ.get("AZURE_CLAUDE_DEPLOYMENT_CHAT", "claude-sonnet")
     system = load_prompt("loop_playbook")
     messages = [{"role": "user",
                  "content": _initial_user_message(post_text, ctx, as_of, cutoff)}]
@@ -198,9 +222,9 @@ def revise_in_loop(
 ) -> tuple[Optional[DraftVerdict], LoopStats]:
     if model is None:
         _, model = build_loop_client()
-    messages.append({"role": "user", "content":
-                     ("REVISION REQUIRED by the independent verifier. Address every "
-                      "point, then call finalize once more:\n" + revision_instructions)})
+    _append_user(messages,
+                 ("REVISION REQUIRED by the independent verifier. Address every "
+                  "point, then call finalize once more:\n" + revision_instructions))
     system = load_prompt("loop_playbook")
     return _drive(messages, client=client, runtime=runtime, model=model,
                   system=system, max_turns=max_turns, wall_clock_s=wall_clock_s)
