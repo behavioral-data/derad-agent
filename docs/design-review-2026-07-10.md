@@ -118,7 +118,8 @@ fields and was slated to grow to ~12).
 
 ## Status
 
-v0.6 stands as the record of what was tested; this document supersedes its §3/§5
-architecture with the loop+verifier design pending the D1–D4 decisions. The clean
-held-out numbers (§2.5) remain the evidence base — they measured the loop, which is
-now what ships.
+v0.7 core implemented on branch `factcheck-v07` (loop engine, verifier,
+snapshot fetching, render lints R-4/R-5 + transformation rendering, prompt
+versioning, replay harness, study-mode batch wiring, D1 display offset).
+Remaining before the 108-post regeneration: the video path (T9, separate
+plan) and the symmetric-rubric evaluation harness run.
