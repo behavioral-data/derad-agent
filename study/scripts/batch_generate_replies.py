@@ -28,8 +28,10 @@ from __future__ import annotations
 import argparse
 import csv
 import logging
+import os
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -72,6 +74,8 @@ from agent.app.utils import (
     render_reply,
     run_factcheck,
 )
+from agent.factcheck.freeze import view_for_renderer
+from agent.factcheck.render import render_all_tones
 from study.interface.db import connect_writable, update_bot_replies
 
 # Output column order (fixed per user request).
@@ -87,6 +91,17 @@ class Post:
 
     id: str
     text: str
+    created_at: str | None = None
+
+
+def study_window(created_at: str) -> tuple[datetime, datetime]:
+    """(as_of, evidence_cutoff=+48h) from a posts.csv created_at value."""
+    if not (created_at or "").strip():
+        raise ValueError("--study-mode requires a created_at column on every row")
+    as_of = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    if as_of.tzinfo is None:
+        as_of = as_of.replace(tzinfo=timezone.utc)
+    return as_of, as_of + timedelta(hours=48)
 
 
 def default_output_path(input_path: Path) -> Path:
@@ -108,7 +123,8 @@ def load_posts(input_path: Path, *, limit: int | None = None) -> list[Post]:
             if not text:
                 logging.warning("Skipping id=%s — empty text", post_id)
                 continue
-            posts.append(Post(id=post_id, text=text))
+            created_at = (row.get("created_at") or "").strip() or None
+            posts.append(Post(id=post_id, text=text, created_at=created_at))
             if limit is not None and len(posts) >= limit:
                 break
     return posts
@@ -130,15 +146,27 @@ def generate_all_tones(
     tweet_id: str,
     *,
     include_sources: bool = True,
+    study_mode: bool = False,
+    created_at: str | None = None,
+    use_loop_renderer: bool = False,
 ) -> dict[str, str]:
     """Generate all three tone replies exactly as the live bot would.
 
     Fetches the tweet (text + attached images + author/metadata context) via
     the same ``fetch_tweet`` the streamer uses, runs the fact-check pipeline
     once on those identical inputs (``run_factcheck``), then renders each tone
-    from that single verdict (``render_reply``) so evidence is held fixed
-    across the post's conditions. Optionally appends the cited source URLs
-    below each reply for the mock display.
+    from that single verdict so evidence is held fixed across the post's
+    conditions. Optionally appends the cited source URLs below each reply for
+    the mock display.
+
+    When ``study_mode`` is set, the post's ``created_at`` fixes the evidence
+    window: ``as_of = created_at`` and ``evidence_cutoff = created_at + 48h``
+    are passed to ``run_factcheck`` (honored only by the loop engine) so no
+    reply can cite evidence published after the study cutoff.
+
+    When ``use_loop_renderer`` is set (``--engine loop``), all three tones come
+    from a single ``render_all_tones(view)`` call (neutral-first + register
+    transforms) instead of three independent ``render_reply`` renders.
     """
     snap = fetch_tweet(tweet_id)
     if snap is None or not (snap.text or "").strip():
@@ -148,6 +176,14 @@ def generate_all_tones(
     statement = snap.text
     image_urls = list(snap.image_urls or [])
     tweet_context = build_tweet_context(snap)
+
+    run_kwargs: dict = {}
+    if study_mode:
+        as_of, cutoff = study_window(created_at or "")
+        run_kwargs["as_of"] = as_of
+        run_kwargs["evidence_cutoff"] = cutoff
+        logging.info("id=%s — study window as_of=%s cutoff=%s", tweet_id, as_of, cutoff)
+
     logging.info("id=%s — running pipeline (images=%d)", tweet_id, len(image_urls))
     try:
         frozen = run_factcheck(
@@ -156,12 +192,33 @@ def generate_all_tones(
             image_urls=image_urls,
             tweet_context=tweet_context,
             invoker_instruction="",
+            **run_kwargs,
         )
     except Exception:
         logging.exception("id=%s — pipeline failed", tweet_id)
         return {tone: "" for tone in OUTPUT_TONES}
 
-    replies: dict[str, str] = {}
+    if use_loop_renderer:
+        logging.info("id=%s — rendering all tones (loop renderer)", tweet_id)
+        try:
+            rendered = render_all_tones(view_for_renderer(frozen, parent_post_text=statement))
+        except Exception:
+            logging.exception("id=%s — render_all_tones failed", tweet_id)
+            return {tone: "" for tone in OUTPUT_TONES}
+        sources = [
+            s.url for s in frozen.presentation_payload.primary_sources_to_cite
+        ][:MAX_SOURCES]
+        replies: dict[str, str] = {}
+        for tone in OUTPUT_TONES:
+            text = rendered.get(tone, "")
+            replies[tone] = (
+                format_reply_with_sources(text, sources)
+                if include_sources
+                else (text or "").strip()
+            )
+        return replies
+
+    replies = {}
     for tone in OUTPUT_TONES:
         logging.info("id=%s tone=%s — rendering", tweet_id, tone)
         try:
@@ -199,6 +256,8 @@ def process_batch(
     limit: int | None = None,
     include_sources: bool = True,
     db_path: Path | None = None,
+    study_mode: bool = False,
+    use_loop_renderer: bool = False,
 ) -> int:
     """Load posts, generate replies, write CSV and optionally study.db. Returns rows written."""
     posts = load_posts(input_path, limit=limit)
@@ -235,7 +294,11 @@ def process_batch(
             for idx, post in enumerate(posts, start=1):
                 logging.info("[%d/%d] id=%s", idx, len(posts), post.id)
                 replies = generate_all_tones(
-                    post.id, include_sources=include_sources,
+                    post.id,
+                    include_sources=include_sources,
+                    study_mode=study_mode,
+                    created_at=post.created_at,
+                    use_loop_renderer=use_loop_renderer,
                 )
                 write_output_row(writer, fh, post.id, replies)
                 written += 1
@@ -298,6 +361,20 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Omit the Sources & reasoning block from reply cells",
     )
+    parser.add_argument(
+        "--engine",
+        choices=("staged", "loop"),
+        default="staged",
+        help="Fact-check pipeline engine (default: staged). 'loop' uses the "
+             "v0.7 verified-loop orchestrator + neutral-first render_all_tones.",
+    )
+    parser.add_argument(
+        "--study-mode",
+        action="store_true",
+        help="Fix each post's evidence window from its created_at column "
+             "(as_of=created_at, evidence_cutoff=created_at+48h). Requires a "
+             "created_at value on every row; honored by --engine loop.",
+    )
     return parser
 
 
@@ -330,6 +407,11 @@ def main(argv: list[str] | None = None) -> int:
         print("ERROR: --limit must be a positive integer", file=sys.stderr)
         return 1
 
+    # Engine selection is process-global: run_factcheck reads
+    # DERAD_FACTCHECK_ENGINE. Default "staged" preserves legacy behavior.
+    os.environ["DERAD_FACTCHECK_ENGINE"] = args.engine
+    use_loop_renderer = args.engine == "loop"
+
     try:
         written = process_batch(
             input_path,
@@ -337,6 +419,8 @@ def main(argv: list[str] | None = None) -> int:
             limit=args.limit,
             include_sources=not args.no_sources,
             db_path=db_path,
+            study_mode=args.study_mode,
+            use_loop_renderer=use_loop_renderer,
         )
     except FileNotFoundError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
