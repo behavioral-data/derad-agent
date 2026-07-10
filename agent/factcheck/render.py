@@ -573,7 +573,7 @@ def render_all_tones(
     # Lint the neutral render itself — it is the source of truth every register
     # transform derives from, so a substance leak here propagates to all tones.
     # render()'s signature can't carry feedback, so retry once and keep the
-    # cleaner attempt (prefer the clean one; if both dirty, use the second).
+    # cleaner attempt (prefer the clean one; if both dirty, fewest violations wins).
     violations = lint_substance(neutral, payload, just)
     if violations:
         logger.info("render_all_tones[neutral]: substance lint violations on first "
@@ -584,9 +584,11 @@ def render_all_tones(
             neutral = retry                                     # clean retry wins
         else:
             logger.warning("render_all_tones[neutral]: both attempts have substance lint "
-                           "violations (first: [%s]; second: [%s]) — shipping second attempt",
+                           "violations (first: [%s]; second: [%s]) — shipping the attempt "
+                           "with fewer violations",
                            "; ".join(violations), "; ".join(retry_violations))
-            neutral = retry
+            if len(retry_violations) <= len(violations):
+                neutral = retry
 
     out = {"neutral": neutral}
     for tone in ("satirical", "agreeable"):

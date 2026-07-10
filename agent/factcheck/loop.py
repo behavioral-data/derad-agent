@@ -166,10 +166,7 @@ def _drive(messages: list, *, client, runtime: ToolRuntime, model: str,
                 tool_results.append({"type": "tool_result", "tool_use_id": tool_id,
                                      "content": out})
             elif name == "finalize" and draft is None:
-                # Only the FIRST finalize in a response is validated/accepted;
-                # any subsequent finalize block in the same response is ignored
-                # (no tool_result needed — the transcript closes on the accepted
-                # one, whose id is captured in finalize_id).
+                # Only the FIRST finalize in a response is validated/accepted.
                 try:
                     draft = DraftVerdict.model_validate(getattr(block, "input", {}) or {})
                     finalize_id = tool_id
@@ -178,6 +175,11 @@ def _drive(messages: list, *, client, runtime: ToolRuntime, model: str,
                                          "is_error": True,
                                          "content": f"finalize rejected: {exc}"[:2000]})
                     draft = None
+            elif name == "finalize":
+                # Duplicate finalize in the same response: still needs a matching
+                # tool_result or a later revision turn 400s on the dangling tool_use.
+                tool_results.append({"type": "tool_result", "tool_use_id": tool_id,
+                                     "content": "duplicate finalize ignored"})
         # Append the RAW assistant blocks — server_tool_use /
         # web_search_tool_result blocks must survive for context fidelity.
         messages.append({"role": "assistant",

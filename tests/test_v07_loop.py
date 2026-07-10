@@ -61,7 +61,9 @@ def test_loop_invalid_finalize_retries():
 
 def test_double_finalize_first_wins():
     # One response with TWO finalize blocks: first valid, second invalid garbage.
-    # Only the first is validated/accepted; the second is ignored (no tool_result).
+    # Only the first is validated/accepted; the second is ignored, but it still
+    # receives a matching tool_result — every tool_use must be closed or a later
+    # revision turn 400s on the dangling id.
     client = FakeClient([
         [_tool_use("finalize", _DRAFT_INPUT, id_="tA"),
          _tool_use("finalize", {"action": "verify"}, id_="tB")],   # second: missing fields
@@ -72,8 +74,9 @@ def test_double_finalize_first_wins():
     assert last["role"] == "user"
     trs = [b for b in last["content"]
            if isinstance(b, dict) and b.get("type") == "tool_result"]
-    assert any(b.get("tool_use_id") == "tA" for b in trs)          # first finalize closed
-    assert not any(b.get("tool_use_id") == "tB" for b in trs)      # second ignored entirely
+    by_id = {b.get("tool_use_id"): b for b in trs}
+    assert by_id["tA"]["content"] == "finalize accepted"           # first finalize closed
+    assert by_id["tB"]["content"] == "duplicate finalize ignored"  # second closed as duplicate
     assert not any(b.get("is_error") for b in trs)                 # no error tool_result
 
 
