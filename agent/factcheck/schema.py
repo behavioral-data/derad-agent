@@ -86,6 +86,7 @@ class BackendVersion(_Frozen):
     fetch_layer: str = ""
     source_reliability_lists_version: dict = Field(default_factory=dict)
     pipeline_commit: str = ""
+    prompt_version: str = ""
 
 
 class ProvenanceMatch(_Frozen):
@@ -127,6 +128,12 @@ class Evidence(_Frozen):
     # capped at a few KB. Lets reconcile reason over the actual reporting, not
     # just the cited_text snippet. Empty when fetch/extract failed.
     body_markdown: str = ""
+    # v0.7 — publication date extracted from the page (ISO YYYY-MM-DD) or None.
+    published_at: Optional[str] = None
+    # How this row entered the log.
+    origin: Literal["search", "fetch", "post_link", "provenance"] = "search"
+    # True when the body came from an archive.org snapshot (study mode).
+    via_snapshot: bool = False
 
 
 class Claim(_Frozen):
@@ -291,6 +298,22 @@ class PresentationPayload(_Frozen):
     context_note: Optional[str] = None
     counterpoints: tuple[Counterpoint, ...] = Field(default_factory=tuple)
     perspectives: tuple[Perspective, ...] = Field(default_factory=tuple)
+    # v0.7 — short fact tokens the renderer must preserve in EVERY tone
+    # (numbers, names, provenance findings). Basis for render lint R-5.
+    load_bearing_facts: tuple[str, ...] = Field(default_factory=tuple)
+
+
+class VerifierReport(_Frozen):
+    """Independent verifier pass output (v0.7). Frozen into the verdict."""
+    passed: bool
+    temporal_leaks: tuple[str, ...] = Field(default_factory=tuple)
+    derivation_gaps: tuple[str, ...] = Field(default_factory=tuple)
+    lint_violations: tuple[str, ...] = Field(default_factory=tuple)
+    injection_flags: tuple[str, ...] = Field(default_factory=tuple)
+    fabrication_language_ok: bool = True
+    required_revisions: str = ""
+    downgrade: bool = False
+    revision_used: bool = False
 
 
 class FrozenVerdict(_Frozen):
@@ -322,4 +345,14 @@ class FrozenVerdict(_Frozen):
     tone_neutral_justification: str
     presentation_payload: PresentationPayload
     overall_state: OverallState = "checked"
+    # ── v0.7 loop-engine fields (all defaulted; absent in legacy freezes) ──
+    engine: Literal["staged", "loop"] = "staged"
+    hypotheses: tuple[str, ...] = Field(default_factory=tuple)
+    target_hypothesis: str = ""
+    implied_claim: str = ""
+    knowledge_state_at_post_date: str = ""
+    verdict_derivation: str = ""
+    as_of: Optional[datetime] = None
+    evidence_cutoff: Optional[datetime] = None
+    verifier_report: Optional[VerifierReport] = None
     frozen: Literal[True] = True
