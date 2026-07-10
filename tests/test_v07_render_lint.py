@@ -23,6 +23,23 @@ def test_lint_substance_flags_foreign_number():
 def test_lint_substance_flags_pipeline_leak():
     out = lint_substance("PitchBook failed to load during fact-checking.", _PAYLOAD, "")
     assert any("failed to load" in v for v in out)
+    # Natural prose containing substrings of the old, overbroad markers
+    # ("pipeline", "cutoff") must NOT be flagged — false positives here trip
+    # neutral-fallback, a research-validity risk.
+    assert lint_substance("The oil pipeline disruption pushed prices up 44%.", _PAYLOAD, "") == []
+    assert lint_substance("The income cutoff sits at $2.81.", _PAYLOAD, "") == []
+
+
+def test_lint_substance_accepts_reframed_decorations():
+    # "44 percent" / bare "2.81" carry the same numbers as the payload's
+    # "44%" / "$2.81" — decoration-stripped comparison must accept them.
+    assert lint_substance("Prices rose 44 percent from 2.81.", _PAYLOAD, "") == []
+
+
+def test_lint_cross_tone_numeral_subset_branch():
+    # Fact "$2.81" is not a literal substring of the text, but its stripped
+    # numeral appears — the numeral-subset branch of _fact_in must match.
+    assert lint_cross_tone({"neutral": "went from 2.81 to 4.02"}, ("$2.81",)) == []
 
 
 def test_lint_cross_tone_flags_missing_fact():
