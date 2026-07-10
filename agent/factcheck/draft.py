@@ -7,6 +7,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from agent.shared.text import canonicalize_url
+
 from .loop_tools import EvidenceRow
 from .schema import (
     Action, BackendVersion, ChallengedProposition, Claim, ConsolidatedFindings,
@@ -32,10 +34,13 @@ class DraftSource(BaseModel):
 
 
 class DraftVerdict(BaseModel):
-    hypotheses: list[str] = Field(default_factory=list)
-    target_hypothesis: str = ""
+    """The `finalize` tool input. Decision fields are REQUIRED — the loop
+    must commit to hypotheses, evidence references, and a derivation; only
+    genuinely optional presentation extras carry defaults."""
+    hypotheses: list[str]
+    target_hypothesis: str
     implied_claim: str = ""
-    action: Action = "verify"
+    action: Action
     central_claim: str
     headline_finding: str
     justification: str
@@ -43,19 +48,22 @@ class DraftVerdict(BaseModel):
     context_note: Optional[str] = None
     counterpoints: list[dict] = Field(default_factory=list)   # {"summary", "source_urls"}
     perspectives: list[dict] = Field(default_factory=list)    # {"label", "summary", "source_urls"}
-    primary_sources: list[DraftSource] = Field(default_factory=list)
+    primary_sources: list[DraftSource]
     load_bearing_evidence_snippet: str = ""
-    load_bearing_facts: list[str] = Field(default_factory=list)
-    evidence_refs: list[EvidenceRef] = Field(default_factory=list)
+    load_bearing_facts: list[str]
+    evidence_refs: list[EvidenceRef]
     knowledge_state_at_post_date: str = ""
-    verdict_derivation: str = ""
-    confidence: Literal["high", "medium", "low"] = "medium"
-    verdict_leaning: Literal["supported", "refuted", "conflicting", "insufficient"] = "insufficient"
+    verdict_derivation: str
+    confidence: Literal["high", "medium", "low"]
+    verdict_leaning: Literal["supported", "refuted", "conflicting", "insufficient"]
 
 
 def _tier_refs(urls: list[str], table: list[SourceQualityEntry]) -> tuple[TierRef, ...]:
+    # Table URLs are already canonical (build_quality_table canonicalizes on
+    # ingest); canonicalize the lookup key so a textual URL variant from the
+    # draft resolves to its stored tier instead of falling to "unknown".
     tier_by = {e.url: e.tier for e in table}
-    return tuple(TierRef(url=u, tier=tier_by.get(u, "unknown")) for u in urls)
+    return tuple(TierRef(url=u, tier=tier_by.get(canonicalize_url(u), "unknown")) for u in urls)
 
 
 def _findings_for(draft: DraftVerdict, ref_urls: dict[str, list[str]],

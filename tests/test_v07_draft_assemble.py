@@ -1,5 +1,8 @@
 from datetime import datetime, timezone
 
+import pytest
+from pydantic import ValidationError
+
 from agent.factcheck.draft import DraftSource, DraftVerdict, EvidenceRef, assemble_frozen
 from agent.factcheck.loop_tools import EvidenceRow
 from agent.factcheck.schema import (
@@ -62,3 +65,11 @@ def test_on_point_primary_source_counts_double():
     assert derive_action_outcome("verify", findings, table) == "verified_nei"
     assert derive_action_outcome("verify", findings, table,
                                  on_point_urls=frozenset({"https://cdc.gov/x"})) == "verified_refuted"
+
+
+def test_draft_verdict_requires_decision_fields():
+    # finalize must force commitment: hypotheses, target_hypothesis, action,
+    # primary_sources, load_bearing_facts, evidence_refs, verdict_derivation,
+    # confidence, verdict_leaning are all required.
+    with pytest.raises(ValidationError):
+        DraftVerdict(central_claim="c", headline_finding="h", justification="j")
