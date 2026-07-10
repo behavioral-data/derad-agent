@@ -566,8 +566,28 @@ def render_all_tones(
     variant is NEVER shipped: after `max_lint_retries` failed attempts (each
     retried with the violations as feedback), that key falls back to the
     neutral text so all three registers agree on substance."""
-    neutral = render(view, "neutral", **({"length_key": length_key} if length_key else {}))
+    render_kwargs = {"length_key": length_key} if length_key else {}
+    neutral = render(view, "neutral", **render_kwargs)
     payload, just = view.presentation_payload, view.tone_neutral_justification
+
+    # Lint the neutral render itself — it is the source of truth every register
+    # transform derives from, so a substance leak here propagates to all tones.
+    # render()'s signature can't carry feedback, so retry once and keep the
+    # cleaner attempt (prefer the clean one; if both dirty, use the second).
+    violations = lint_substance(neutral, payload, just)
+    if violations:
+        logger.info("render_all_tones[neutral]: substance lint violations on first "
+                    "attempt (%s) — re-rendering once", "; ".join(violations))
+        retry = render(view, "neutral", **render_kwargs)
+        retry_violations = lint_substance(retry, payload, just)
+        if not retry_violations:
+            neutral = retry                                     # clean retry wins
+        else:
+            logger.warning("render_all_tones[neutral]: both attempts have substance lint "
+                           "violations (first: [%s]; second: [%s]) — shipping second attempt",
+                           "; ".join(violations), "; ".join(retry_violations))
+            neutral = retry
+
     out = {"neutral": neutral}
     for tone in ("satirical", "agreeable"):
         text, feedback = None, ""

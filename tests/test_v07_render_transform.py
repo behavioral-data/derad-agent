@@ -34,3 +34,20 @@ def test_lint_failing_variant_retries_then_falls_back_to_neutral():
                                  _NEUTRAL + " Understandable worry."]):
         out = render_all_tones(_VIEW, max_lint_retries=2)
     assert out["satirical"] == out["neutral"]        # fallback, never ship lint-failing text
+
+
+def test_neutral_lint_retry_uses_clean_render():
+    # First neutral render carries a foreign numeral (27 — not in the frozen
+    # payload/justification); the retry is clean. The clean retry must be the
+    # shipped neutral text, and the register transforms must derive from it.
+    dirty = "Prices rose 27 cents this week."     # 27 not in payload → substance lint fails
+    clean = _NEUTRAL
+    with mock.patch("agent.factcheck.render.render", side_effect=[dirty, clean]) as rnd, \
+         mock.patch("agent.factcheck.render._transform_register",
+                    side_effect=lambda neutral, tone, view, feedback="": f"{neutral} [{tone}]"):
+        out = render_all_tones(_VIEW)
+    assert rnd.call_count == 2                     # re-rendered once after the dirty attempt
+    assert out["neutral"] == clean
+    # transforms derive from the CLEAN neutral text, not the dirty first attempt
+    assert out["satirical"] == f"{clean} [satirical]"
+    assert out["agreeable"] == f"{clean} [agreeable]"

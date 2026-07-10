@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from .draft import DraftVerdict
 from .llm import call_claude_json
 from .loop import revise_in_loop, run_loop
-from .loop_tools import EvidenceRow, ToolRuntime
+from .loop_tools import UNTRUSTED_CLOSE, UNTRUSTED_OPEN, EvidenceRow, ToolRuntime
 from .prompt_store import load_prompt
 from .schema import VerifierReport
 
@@ -44,7 +44,8 @@ def verify_draft(
         "evidence_log": [
             {"idx": r.idx, "url": r.url, "published_date": r.published_at,
              "origin": r.origin, "via_snapshot": r.via_snapshot,
-             "snippet": r.snippet, "body_excerpt": (r.body_markdown or "")[:1200]}
+             "snippet": r.snippet,
+             "body_excerpt": f"{UNTRUSTED_OPEN}\n{(r.body_markdown or '')[:1200]}\n{UNTRUSTED_CLOSE}" if r.body_markdown else ""}
             for r in rows
         ],
     }
@@ -63,10 +64,11 @@ def verify_draft(
 
 
 def apply_downgrade(draft: DraftVerdict) -> DraftVerdict:
+    # Downgrade state is frozen in verifier_report.downgrade — do NOT leak a prose
+    # prefix into the justification (it would surface in reply-facing derivations).
     return draft.model_copy(update={
         "confidence": "low",
         "verdict_leaning": "insufficient",
-        "justification": "[downgraded by verifier] " + draft.justification,
     })
 
 

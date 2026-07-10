@@ -59,6 +59,24 @@ def test_loop_invalid_finalize_retries():
     assert draft is not None and stats.turns == 2
 
 
+def test_double_finalize_first_wins():
+    # One response with TWO finalize blocks: first valid, second invalid garbage.
+    # Only the first is validated/accepted; the second is ignored (no tool_result).
+    client = FakeClient([
+        [_tool_use("finalize", _DRAFT_INPUT, id_="tA"),
+         _tool_use("finalize", {"action": "verify"}, id_="tB")],   # second: missing fields
+    ])
+    draft, _, stats, msgs = run_loop("post", client=client, ctx=PipelineContext(), model="m")
+    assert draft is not None and draft.justification == "j"        # the FIRST draft
+    last = msgs[-1]
+    assert last["role"] == "user"
+    trs = [b for b in last["content"]
+           if isinstance(b, dict) and b.get("type") == "tool_result"]
+    assert any(b.get("tool_use_id") == "tA" for b in trs)          # first finalize closed
+    assert not any(b.get("tool_use_id") == "tB" for b in trs)      # second ignored entirely
+    assert not any(b.get("is_error") for b in trs)                 # no error tool_result
+
+
 def test_loop_turn_cap_forces_finalize_nudge():
     # Model never finalizes; loop must stop at cap + 1 forced turn, unfinalized.
     client = FakeClient([[NS(type="text", text="thinking...")] for _ in range(10)])

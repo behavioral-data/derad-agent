@@ -16,6 +16,12 @@ def test_fetch_page_wraps_untrusted_and_logs_row():
     assert UNTRUSTED_OPEN in out and UNTRUSTED_CLOSE in out
     assert out.index(UNTRUSTED_OPEN) < out.index("IGNORE PREVIOUS") < out.index(UNTRUSTED_CLOSE)
     assert "published_date: 2026-04-21" in out
+    # title is now fenced INSIDE the untrusted block, not a trusted metadata line
+    assert "page-reported title: Gas prices fall" in out
+    assert (out.index(UNTRUSTED_OPEN)
+            < out.index("page-reported title: Gas prices fall")
+            < out.index(UNTRUSTED_CLOSE))
+    assert "\ntitle: " not in out            # no trusted title: metadata line
     assert len(rt.rows) == 1
     row = rt.rows[0]
     assert row.idx == 0 and row.origin == "fetch" and row.published_at == "2026-04-21"

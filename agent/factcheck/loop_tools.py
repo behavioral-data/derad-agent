@@ -75,8 +75,7 @@ class ToolRuntime:
         return (
             f"evidence_row: {row.idx}\n"
             f"url: {url}\n"
-            f"title: {row.title}\n"
             f"published_date: {row.published_at or 'unknown'}\n"
             f"via_snapshot: {via_snapshot}\n"
-            f"{UNTRUSTED_OPEN}\n{row.body_markdown}\n{UNTRUSTED_CLOSE}"
+            f"{UNTRUSTED_OPEN}\npage-reported title: {row.title}\n\n{row.body_markdown}\n{UNTRUSTED_CLOSE}"
         )

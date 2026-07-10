@@ -11,10 +11,13 @@ _D = dict(hypotheses=[], target_hypothesis="", action="verify", central_claim="c
 
 
 def test_apply_downgrade_weakens():
-    out = apply_downgrade(DraftVerdict(**_D))
+    src = DraftVerdict(**_D)
+    out = apply_downgrade(src)
     assert out.confidence == "low"
     assert out.verdict_leaning == "insufficient"
-    assert out.justification.startswith("[downgraded by verifier]")
+    # justification is UNCHANGED — downgrade state lives in verifier_report.downgrade,
+    # not in a leaked prose prefix
+    assert out.justification == src.justification
 
 
 def test_run_verified_loop_pass_no_revision():

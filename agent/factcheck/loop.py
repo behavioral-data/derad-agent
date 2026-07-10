@@ -165,7 +165,11 @@ def _drive(messages: list, *, client, runtime: ToolRuntime, model: str,
                 out = runtime.fetch_page(url)
                 tool_results.append({"type": "tool_result", "tool_use_id": tool_id,
                                      "content": out})
-            elif name == "finalize":
+            elif name == "finalize" and draft is None:
+                # Only the FIRST finalize in a response is validated/accepted;
+                # any subsequent finalize block in the same response is ignored
+                # (no tool_result needed — the transcript closes on the accepted
+                # one, whose id is captured in finalize_id).
                 try:
                     draft = DraftVerdict.model_validate(getattr(block, "input", {}) or {})
                     finalize_id = tool_id

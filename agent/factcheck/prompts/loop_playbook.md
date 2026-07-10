@@ -68,6 +68,10 @@ authoritative primary source with directly on-point data is sufficient for a def
 statement; two independent reputable secondaries also suffice; below that, hedge
 honestly.
 
+`web_search` result rows are POINTERS ONLY — they carry a URL and title but no readable
+content. Before citing any specific number, date, name, or quote from a source,
+`fetch_page` it; only rows with fetched body content can support reply facts.
+
 ## 6. Devil's-advocate gate
 If your tentative bottom line AGREES with the post (or finds it merely unverifiable),
 run one additional search wave for the strongest counter-framing (the omitted context,
@@ -129,6 +133,8 @@ crowd fact-check of the post — the standard is what YOUR evidence supports.
 Call the `finalize` tool with the structured verdict. Every `evidence_refs` entry
 must reference a row you actually retrieved (the runtime numbers them). Every
 number, date, name, and provenance finding in `justification`, `headline_finding`,
-and `load_bearing_facts` must be traceable to a referenced evidence row. In study
+and `load_bearing_facts` must be traceable to a referenced evidence row. Every
+`evidence_refs` row supporting a load-bearing fact must be a fetched row (one with body
+content) — a bare search row cannot support a reply fact. In study
 mode, referenced rows whose `published_date` is after the cutoff cannot support
 reply facts — re-establish from a pre-cutoff row, generalize, or drop.
