@@ -2,6 +2,8 @@
 from datetime import datetime, timezone
 from unittest import mock
 
+import requests
+
 from agent.factcheck import snapshot
 from agent.factcheck.search import FetchedPage
 
@@ -40,3 +42,27 @@ def test_fetch_snapshot_reports_original_url():
             "https://news.test/gas", datetime(2026, 4, 23, tzinfo=timezone.utc))
     assert page.final_url == "https://news.test/gas"
     assert page.body_markdown == "body"
+
+
+def test_snapshot_lookup_sends_spec_params():
+    with mock.patch("requests.get", return_value=_CdxResp()) as m:
+        snapshot.snapshot_lookup(
+            "https://news.test/gas", datetime(2026, 4, 23, tzinfo=timezone.utc))
+    args, kwargs = m.call_args
+    assert args[0] == "https://web.archive.org/cdx/search/cdx"
+    assert kwargs["params"] == {
+        "url": "https://news.test/gas",
+        "to": "20260423000000",
+        "limit": "-1",
+        "output": "json",
+        "filter": "statuscode:200",
+        "fl": "timestamp,original",
+    }
+    assert kwargs["timeout"] == 10.0
+
+
+def test_snapshot_lookup_none_on_network_error():
+    with mock.patch("requests.get", side_effect=requests.RequestException("boom")):
+        url = snapshot.snapshot_lookup(
+            "https://news.test/gas", datetime(2026, 4, 23, tzinfo=timezone.utc))
+    assert url is None
