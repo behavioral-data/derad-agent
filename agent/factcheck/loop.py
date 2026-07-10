@@ -220,8 +220,11 @@ def revise_in_loop(
     messages: list, revision_instructions: str, *, client, runtime: ToolRuntime,
     model: Optional[str] = None, max_turns: int = 6, wall_clock_s: float = 180.0,
 ) -> tuple[Optional[DraftVerdict], LoopStats]:
-    if model is None:
-        _, model = build_loop_client()
+    if client is None:
+        client, built = build_loop_client()
+        model = model or built
+    elif model is None:
+        model = os.environ.get("AZURE_CLAUDE_DEPLOYMENT_CHAT", "claude-sonnet")
     _append_user(messages,
                  ("REVISION REQUIRED by the independent verifier. Address every "
                   "point, then call finalize once more:\n" + revision_instructions))
