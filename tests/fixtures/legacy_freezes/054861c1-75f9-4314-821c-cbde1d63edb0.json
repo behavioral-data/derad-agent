@@ -1,0 +1,325 @@
+{
+  "invocation_id": "054861c1-75f9-4314-821c-cbde1d63edb0",
+  "target_tweet_id": "2032575368977101031",
+  "invocation_time": "2026-07-08T05:09:47.187794Z",
+  "thread_context": "",
+  "modality": "mixed",
+  "backend_version": {
+    "model": "claude-via-azure-ai-services",
+    "vlm_model": "claude-via-azure-ai-services",
+    "search_provider": "claude-web-search:claude-sonnet-4-6",
+    "reverse_image_provider": "",
+    "fetch_layer": "",
+    "source_reliability_lists_version": {
+      "curated_lists": "factcheck-0.5",
+      "model_prior": "claude-sonnet",
+      "ifcn_commit": "20f43f5bbadff664372148a8527f2f9840bdcd3c",
+      "wikipedia_rsp_revids": {
+        "1": 1344410779,
+        "2": 1355995668,
+        "3": 1354344997,
+        "4": 1353937898,
+        "5": 1354346179,
+        "6": 1356066446,
+        "7": 1354348101,
+        "8": 1355131776
+      },
+      "lists_generated_at": "2026-05-28T20:18:34+00:00"
+    },
+    "pipeline_commit": "f5ba4c735f6cd0fb5ed83d2cd71a925677802e52"
+  },
+  "attached_images": [
+    {
+      "image_id": "img1",
+      "image_url": "https://pbs.twimg.com/amplify_video_thumb/2032575308176543744/img/86-tLDGlYQ8Z8Seu.jpg",
+      "ocr_text": "abc\nNEWS\nAugust 15, 2024\n@mopcentre\nTikTok\n@ kcz_ws_mike\nFlorida orders schools to\ndestroy books including Black\nand Native American history",
+      "vlm_description": "A TikTok screenshot, watermarked by user @kcz_ws_mike and branded with an ABC News logo dated August 15, 2024, shows a large dumpster or truck bed filled with hundreds of discarded books scattered haphazardly. The setting appears to be a parking lot with palm trees and other lush green trees visible in the background, suggesting a warm-climate location consistent with Florida. A caption overlaid at the bottom reads: 'Florida orders schools to destroy books including Black and Native American history.' The image also bears a logo for the account @mopcentre in the upper right corner.",
+      "canonical_image_match": null,
+      "provenance": [
+        {
+          "match_url": "https://abcnews.go.com/US/books-dumped-en-masse-floridas-new-college-sparking/story?id=112892229",
+          "earliest_seen": null,
+          "match_caption": "Books dumped en masse at Florida's New College, sparking controversy - ABC News"
+        },
+        {
+          "match_url": "https://www.nbcnews.com/nbc-out/out-news/florida-new-college-books-removed-lgbtq-race-women-rcna166912",
+          "earliest_seen": null,
+          "match_caption": "Florida college dumps hundreds of books, many on sexuality, race and feminism"
+        },
+        {
+          "match_url": "https://www.libraryjournal.com/story/disposal-of-books-at-floridas-new-college-results-in-library-director-termination",
+          "earliest_seen": null,
+          "match_caption": "Disposal of Books at Florida’s New College Results in Library Director Termination | Library Journal"
+        },
+        {
+          "match_url": "https://www.chronicle.com/article/new-colleges-book-dumping-went-viral-a-beloved-student-led-center-was-the-biggest-loss",
+          "earliest_seen": null,
+          "match_caption": "New College’s Book Dumping Went Viral. A Beloved Student-Led Center Was the Biggest Loss."
+        },
+        {
+          "match_url": "https://www.metroweekly.com/2024/08/florida-college-throws-hundreds-lgbtq-books-in-a-dumpster/",
+          "earliest_seen": null,
+          "match_caption": "Florida College Throws Hundreds of LGBTQ Books in a Dumpster - Metro Weekly"
+        }
+      ],
+      "manipulation_check": "out_of_scope_nei"
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "c1",
+      "text": "Governor DeSantis issued an order specifically requiring books about Black History and Native American history to be destroyed.",
+      "type": "verifiable",
+      "modality": "text",
+      "is_central": true,
+      "evidence": [
+        {
+          "question": "fact check: Governor DeSantis issued an order specifically requiring books about Black History and Native American history to be destroyed.",
+          "source_url": "https://www.politifact.com/factchecks/2023/may/31/ron-desantis/ron-desantis-said-that-not-a-single-book-was-banne/",
+          "snippet": "In 2022, Florida lawmakers passed H.B. 1467, known informally as the curriculum transparency bill. It prohibited \"pornography\" or \"inappropriate\" book...",
+          "stance": "neutral",
+          "body_markdown": "### Stand up for the facts!\n\nOur only agenda is to publish the truth so you can be an informed participant in democracy.\n\nWe need your help.\n\n### I would like to contribute\n\n# Ron DeSantis said that not ‘a single book’ was banned in Florida. Districts have removed dozens.\n\n#### If Your Time is short\n\n- In 2022, Florida lawmakers passed H.B. 1467, known informally as the curriculum transparency bill. It prohibited \"pornography\" or \"inappropriate\" books in school libraries, which were already disallowed under law.\n\n- DeSantis said in a press statement in March that 23 school districts had removed 175 books.\n\n- The American Library Association says a \"ban\" is the removal of a book based on a person or group’s objection.\n\nGov. Ron DeSantis has fought back against allegations that Florida is banning books, calling it a \"hoax.\"\n\n\"There's not been a single book banned in the state of Florida,\" the Republican said in his May 24 presidential campaign launch on Twitter Spaces. \"You can go buy or you can use whatever book you want.\"\n\nDeSantis said Florida empowered parents to review curriculum to ensure books match state standards and are age-appropriate.\n\n\"Parents have flagged books in schools that, for example, teach middle school kids how to use sex apps that provide graphic depictions of sex acts and sex toys for people as young as fifth grade,\" DeSantis said. \"And so clearly that is not appropriate.\"\n\nDeSantis argued county school districts are removing books. But state law sets rules for which materials are prohibited and prescribes how school districts evaluate objections to books.\n\nDeSantis’ claim that no book has been banned in Florida goes too far. Florida districts have removed some books entirely while restricting others to certain grades or requiring students to get parental permission to see them.\n\n\"Banning\" is in the eye of the beholder, said Emily J.M. Knox, an information sciences professor at University of Illinois at Urbana-Champaign. People who seek to ban books define bans narrowly as the total removal of books.\n\nSome \"people like to say it's not banning because you can get it in the public library/bookstore/Amazon or whatever,\" Knox said. \"But it is censorship, because it's about control of access to knowledge. The whole point is to make sure that some people do not have unfettered access to that info.\"\n\n## Florida passed a bill that sets rule for public school libraries\n\nDebates about book bans have existed for decades, prompting events such as Banned Book Week. But efforts to ban books have risen recently amid public conversations about racial justice and LGBTQ+ topics. Some observers say the pandemic gave parents a closer view of what their children were learning in virtual classrooms.\n\nIn 2022, Florida lawmakers passed H.B. 1467, known informally as the curriculum transparency bill. State law already prohibited pornographic content in school books and allowed parents to file objections. But the 2022 law aimed to make it easier for "
+        },
+        {
+          "question": "fact check: Governor DeSantis issued an order specifically requiring books about Black History and Native American history to be destroyed.",
+          "source_url": "https://www.cfpublic.org/education/2024-11-11/florida-list-banned-books-schools",
+          "snippet": "Starting in 2023, law HB 1069 required every school district in Florida to have a policy in place for challenging books. Under that law, a book could ...",
+          "stance": "neutral",
+          "body_markdown": "Over the weekend, the Florida Department of Education released a list of over 700 books that were “removed or discontinued” from districts throughout the state last school year.\n\nThat’s an increase of almost 400 books from the list they released a year ago, for the 2022-2023 school year.\n\nAccording to the list, Central Florida districts including Brevard, Marion, Orange, Polk, Seminole and Volusia County Schools all removed books last year.\n\nVolusia led with 40 banned books, including classics like “Slaughterhouse Five” by Kurt Vonnegut along with newer favorites like “Looking for Alaska” by John Green.\n\nFlorida Freedom to Read Project Director Stephana Ferrell called the list an undercount, and says she’s worried that even according to DOE data, book bans continue to rise in the state.\n\n“A lot of them removed many, many books, including classic literature and literature that regularly appears on the AP exams and prepares our students for college level coursework. We're removing all of these books,” said Ferrell.\n\nFerrell said a few parents and residents still make up the bulk of these challenges.\n\n“And right now, what's happening is one or two loud people in a particular district can dictate for all what is available, and it runs against, again, what a majority of parents are telling their school districts they want,” said Ferrell.\n\nPEN America found Florida led the country again last year in book bans, with over 4,500 books banned in the Sunshine State, costing districts about $34,000 to $135,000 a year.\n\nStarting in 2023, law HB 1069 required every school district in Florida to have a policy in place for challenging books.\n\nUnder that law, a book could be challenged if it includes any content that “depicts or describes sexual conduct, is not suited to student needs and their ability to comprehend the material presented, or is inappropriate for the grade level and age group for which the material is used.”\n\nThousands of books were challenged in the state including books like the Bible, the dictionary and other classics.\n\nIn response, Governor Ron DeSantis asked the legislature to put some restrictions in place when it came to book bans, and in 2024, he signed HB 1285 into law, which restricts the number of challenges a non-parent can make in a school district.\n\nIn a statement corresponding to this year’s list of banned books, the Florida Department of Education said, “There are no books banned in Florida and sexually explicit materials do not belong in schools. Once again, far left activist groups are pushing the book ban hoax on Floridians. The better question is why do these groups continue to fight to expose children to sexually explicit materials.”\n\n**Here’s the list of books that were banned in Central Florida schools during the 2023-2024 school year according to the Florida Department of Education:**\n\n**Brevard County Schools**\n\n**Grades K-12**\n\n\"A Court of Frost and Starlight\" Sarah J Maas\n\n\"A Court of Mist and Fury\" Sarah J Maas\n\n\"A Cou"
+        },
+        {
+          "question": "fact check: Governor DeSantis issued an order specifically requiring books about Black History and Native American history to be destroyed.",
+          "source_url": "https://www.cnn.com/2024/04/16/politics/desantis-education-book-challenges-reaj/index.html",
+          "snippet": "“That involves objecting to normal books, like some of the books that I saw in the teacher’s lounge, these classic books.” · In the first half of the ...",
+          "stance": "neutral",
+          "body_markdown": ""
+        },
+        {
+          "question": "Did Florida order schools to destroy books including Black and Native American history in August 2024? What was the specific policy or order involved?",
+          "source_url": "https://www.naacpldf.org/florida-war-on-black-history/",
+          "snippet": "And, finally, there’s HB 1467, a law that has recently led to the removal of classroom books in public school districts in Florida due to its require\n...",
+          "stance": "neutral",
+          "body_markdown": "Public education has been taken hostage in Florida. And the state legislature and governor’s feverish campaign to strictly limit what facts and information can be accessed in public learning institutions is the driving force behind this egregious incursion.\n\nThe impact of this campaign, put into motion through a series of targeted and often discriminatory laws, is already being felt. The Florida Department of Education’s recent **rejection** of a pilot Advanced Placement (AP) African American Studies course lays bare the jarring nature of these implications. But the tentacles of the push for censorship, the war on truth, and the erasure of historically marginalized voices and stories in Florida extend far beyond a single high school course. Students at all levels of their educational careers, and the state as a whole, will endure far-reaching impacts from these laws for many years to come.\n\nThree chilling anti-education laws are working in concert to undermine the quality of education in Florida’s public schools. The first is **HB 7**, a measure derisively branded as the “Stop W.O.K.E.” Act, which restricts discussion around certain topics related to race and gender in Florida public schools. The restrictions imposed by Stop W.O.K.E. were reportedly what resulted in the barring of the AP African American Studies pilot course from Florida high schools. Notably, the Legal Defense Fund and co-counsel Ballard Spahr, the American Civil Liberties Union (ACLU), and the ACLU of Florida, **won** a preliminary injunction to stop HB 7 from being enforced in public universities and colleges while litigation over its constitutionality continues. But this injunction does not stop the state from mandating the restriction of topics related to race and gender at the elementary, junior high, and high school levels in the meantime.\n\nMeanwhile, there is also **HB 1557**, widely known as the “**Don’t Say Gay” law**, which bans lessons and instructional materials related to gender identity and sexual orientation for students in kindergarten through third grade. And, finally, there’s **HB 1467**, a law that has recently led to the **removal of classroom books** in public school districts in Florida due to its requirement that reading materials undergo a sustained review and preapproval process before students use them.\n\n“The thing with those three [laws], is that they are all interconnected,” says Andrew Spar, President of the **Florida Education Association**, in a recent interview with LDF. “Also, all three were very, very vague in how they were worded, and I personally believe that’s intentional for them to be vague. Because it’s opened the door to create some chaos and confusion and distrust in our schools.”\n\nChaos, confusion, and distrust are indeed roiling through public schools. Teachers, librarians, and other school officials have indicated they are deeply fearful of the **felony charges** that could come if they are found in violation of HB 1467. Amid this fea"
+        },
+        {
+          "question": "Did Florida order schools to destroy books including Black and Native American history in August 2024? What was the specific policy or order involved?",
+          "source_url": "https://www.alligator.org/article/2024/07/florida-bill-limits-citizen-led-school-book-objections-to-once-per-month",
+          "snippet": "“There were a lot of times when I got so uncomfortable getting into the character’s heads, and I’d have to put the book down, but I kept coming back.”...",
+          "stance": "neutral",
+          "body_markdown": "Tucked away in the corner of a Gainesville bookstore, Janet McGee read one of the most frequently banned children’s books in the United States for the first time.\n\n“It was incredible,” she said. “There were a lot of times when I got so uncomfortable getting into the character’s heads, and I’d have to put the book down, but I kept coming back.”\n\nFollowing state education reforms allowing the removal of elementary through high school level books containing themes including race, sexuality and gender among others, new legislation aims to limit the number of citizen book objections to school district library materials. Local politicians, teachers and parents expressed differing opinions concerning the state of Alachua County book challenges.\n\nHaving taken effect July 1, House Bill 1285 specifies that county residents who are not the parent or guardian of a student “with access to school district materials” may only object to a maximum of one material per month. However, there is no limit to the number of objections parents or guardians may make.\n\n**Previous legislation**\n\nThe law follows book challenges enacted by HB 1467 signed into law by Gov. Ron DeSantis in 2022, which required school districts to list reading materials for parent review in an attempt to protect children from what he called “indoctrination.”\n\n“We are not going to let politicians deny parents the right to know what is being taught in our schools. I’m proud to sign this legislation that ensures curriculum transparency,” DeSantis said in a 2022 press release.\n\nEnacted in 2023, HB 1069 focused on removing content concerning sexual and gender identity in public schools from pre-kindergarten through eighth grade and extended parent and citizen involvement in the book challenging process for “pornographic” and “sexually explicit material,” which is now restricted for non-parent citizens by HB 1285.\n\nTeachers who failed to register reading material of concern faced penalties, including the loss of teaching certification, fines or criminal charges in extreme cases.\n\nWhile the legislation impacts public schools statewide, implementation varies by school district.\n\n**Alachua County book challenges**\n\nAlachua County Public Schools District Media Specialist Patty Duval said books at each school are curated by individual media specialists who read recommendations for age-appropriateness from peer-reviewed journals, purchase sets from vetted publishing companies and add new books based on popular check-outs.\n\nA parent or citizen seeking removal must submit the “Citizen’s Request for Reconsideration of Library Materials” form to the principal of their child’s school. In accordance with HB 1285, the form will be updated to specify whether the objector is a parent or resident and whether the resident has made an objection within the last 30 days, Duval said.\n\nWhile books determined to be sexually explicit or pornographic material are removed immediately pending further investigation, Duval said ch"
+        },
+        {
+          "question": "Did Florida order schools to destroy books including Black and Native American history in August 2024? What was the specific policy or order involved?",
+          "source_url": "https://www.cfpublic.org/education/2025-04-03/florida-bill-easier-challenge-books-put-penalties-for-schools-who-dont",
+          "snippet": "PEN America ranked Florida number one in the country for book bans in 2023 and 2024. ",
+          "stance": "neutral",
+          "body_markdown": "A bill that would make it easier to remove books in K-12 schools and libraries after they’ve been objected to on the grounds of obscenity has passed its first committee in the Florida House.\n\nUnder the proposed legislation, committees reviewing a book that’s been objected to wouldn’t be able to consider its literary or artistic merit when considering whether to ban it. Additionally, books that depict or describe sex in any way would have to be removed within five days of an objection and remain unavailable throughout the review process.\n\nRepublican State Representative Doug Bankson, who represents part of Orange and Seminole counties in Central Florida introduced the bill.\n\n“I think the desire is to protect our children, because it is about protecting their minds and seeing them be able to be educated in the best possible way,” said Bankson.\n\nHouse Bill 1539 would also require the Florida Department of Education to monitor each district's compliance with these new rules through audits and other reports.\n\nIf a district is found to be noncompliant, then the department would send the district a warning letter and may withhold funding until the district complies.\n\nThe district would be required to submit a corrective action plan and additional sanctions could be placed on the district if it doesn’t show progress made toward this plan.\n\nDemocratic State Representative LaVon Bracy Davis voted against the bill. She said it’s unconstitutional, and fails to uphold the Miller Test, a legal standard set by the U.S. Supreme Court to determine whether material is obscene.\n\n“It fails the third prong of the Miller Test and is a way to just ban more books,\" said Bracy Davis.\n\nA companion bill in the Florida Senate was temporarily postponed due to concerns regarding its constitutionality.\n\nOnly sexual education textbooks and other materials approved by the Florida Department of Education would be exempt.\n\nIn 2023, a Florida law took effect that required every school district in the state to have a process in place for challenging books. What followed were thousands of book challenges. PEN America ranked Florida number one in the country for book bans in 2023 and 2024.\n\nIn 2024, Republican Governor Ron DeSantis urged the legislature to put some restrictions in place for these objections after books like the Bible and classroom dictionaries were challenged.\n\nLegislators complied, limiting the number of challenges residents without children in a district could make, to one per month.\n\nBut that same year, the Florida Department of Education released a list of over 700 books that had been removed from classrooms and libraries throughout the state. Titles included Rupi Kaur’s poetry anthologies, *Milk and Honey* and *The Sun and Her Flowers* and classics like *The Handmaid’s Tale.*\n\nBoth these new bills moving through the Florida Senate and House would define books as harmful to minors as, “any reproduction, imitation, characterization, description, exhibition, present"
+        }
+      ]
+    },
+    {
+      "claim_id": "c2",
+      "text": "Books about Black History and Native American history were physically discarded at a Florida college.",
+      "type": "verifiable",
+      "modality": "text",
+      "is_central": false,
+      "evidence": []
+    },
+    {
+      "claim_id": "c3",
+      "text": "The image shown dates to August 15, 2024, not to the moment the tweet was posted in March 2026.",
+      "type": "verifiable",
+      "modality": "text",
+      "is_central": false,
+      "evidence": []
+    },
+    {
+      "claim_id": "c4",
+      "text": "Florida's book-removal policy exclusively or primarily targeted Black History and Native American history books.",
+      "type": "mixed",
+      "modality": "text",
+      "is_central": false,
+      "evidence": []
+    }
+  ],
+  "cross_modal_report": {
+    "lens_1_text_text": {
+      "narrative": "The central claim appears to originate from a TikTok screenshot bearing an ABC News logo (dated August 15, 2024) and the caption 'Florida orders schools to destroy books including Black and Native American history.' Provenance hits confirm this image relates to a real but narrower incident: books were found in a dumpster outside the library of New College of Florida — a single public college, not K-12 schools broadly — in August 2024. Reputable-news sources (ABC News, NBC News, Library Journal, Chronicle of Higher Education) all cover the same specific event. The Chronicle notes that state law actually permits disposal of state-funded property through sale or transfer to other governmental entities or nonprofit organizations, and the library director at New College was subsequently terminated in connection with the incident. The NBC News piece specifies the discarded titles 'many on sexuality, race and feminism' — not exclusively or specifically Black History and Native American history. None of the sources in evidence document a DeSantis executive order or administrative directive specifically targeting books about Black History and Native American history for destruction.\n\nThe K-12 book-removal evidence (Politifact, NAACP LDF, cfpublic.org, alligator.org) establishes a separate real phenomenon: Florida laws HB 1467 (2022), HB 1069 (2023), and HB 1285 (2024) created frameworks under which school districts removed hundreds of books — but those statutes focus on sexually explicit or pornographic content, not on racial or ethnic history specifically. The NAACP LDF source documents Florida's broader restrictions on Black history education (AP African American Studies, Stop WOKE Act), but these are distinct measures from any book-destruction order. There is no cross-source evidence, from any tier, of DeSantis issuing an order specifically requiring the destruction of Black History or Native American history books. The TikTok caption materially overstates and mischaracterizes the underlying event.",
+      "cross_source_contradictions": [
+        {
+          "topic": "Whether the book-dumping at New College was the result of a DeSantis order targeting Black/Native American history specifically",
+          "sources_for": [],
+          "sources_against": [
+            {
+              "url": "https://abcnews.go.com/US/books-dumped-en-masse-floridas-new-college-sparking/story?id=112892229",
+              "tier": "reputable-news"
+            },
+            {
+              "url": "https://www.nbcnews.com/nbc-out/out-news/florida-new-college-books-removed-lgbtq-race-women-rcna166912",
+              "tier": "reputable-news"
+            },
+            {
+              "url": "https://www.chronicle.com/article/new-colleges-book-dumping-went-viral-a-beloved-student-led-center-was-the-biggest-loss",
+              "tier": "reputable-news"
+            }
+          ],
+          "resolution": "No source — including the very ABC News article from which the image appears to originate — describes the New College dumping as the result of a DeSantis order specifically targeting Black History or Native American history books. The actual reporting covers a broader collection disposal at one college, involving LGBTQ, race, and feminism titles, with the library director subsequently terminated. The claim's framing is unsupported across all tiers of evidence."
+        }
+      ]
+    },
+    "lens_2_image_text": {
+      "ran": true,
+      "narrative": "Image OCR + description folded into reconcile prompt.",
+      "image_provenance": {
+        "earliest_seen": "unknown",
+        "true_caption": "unknown",
+        "true_context": "unknown",
+        "provenance_sources": [
+          "https://abcnews.go.com/US/books-dumped-en-masse-floridas-new-college-sparking/story?id=112892229",
+          "https://www.nbcnews.com/nbc-out/out-news/florida-new-college-books-removed-lgbtq-race-women-rcna166912",
+          "https://www.libraryjournal.com/story/disposal-of-books-at-floridas-new-college-results-in-library-director-termination",
+          "https://www.chronicle.com/article/new-colleges-book-dumping-went-viral-a-beloved-student-led-center-was-the-biggest-loss",
+          "https://www.metroweekly.com/2024/08/florida-college-throws-hundreds-lgbtq-books-in-a-dumpster/"
+        ]
+      },
+      "image_caption_match": "undetermined"
+    },
+    "lens_3_cross_modal": {
+      "ran": true,
+      "narrative": "Cross-modal reasoning folded into reconcile prompt.",
+      "modality_conflicts": []
+    }
+  },
+  "consolidated_findings": {
+    "verified_propositions": [],
+    "refuted_propositions": [
+      {
+        "proposition": "Governor DeSantis issued an order specifically requiring books about Black History and Native American history to be destroyed.",
+        "refuting_sources": [
+          {
+            "url": "https://abcnews.go.com/US/books-dumped-en-masse-floridas-new-college-sparking/story?id=112892229",
+            "tier": "reputable-news"
+          },
+          {
+            "url": "https://www.nbcnews.com/nbc-out/out-news/florida-new-college-books-removed-lgbtq-race-women-rcna166912",
+            "tier": "reputable-news"
+          },
+          {
+            "url": "https://www.chronicle.com/article/new-colleges-book-dumping-went-viral-a-beloved-student-led-center-was-the-biggest-loss",
+            "tier": "reputable-news"
+          },
+          {
+            "url": "https://www.politifact.com/factchecks/2023/may/31/ron-desantis/ron-desantis-said-that-not-a-single-book-was-banne/",
+            "tier": "fact-checker"
+          }
+        ],
+        "counter_fact": "The viral image depicts a book dumpster at New College of Florida — a single public college — in August 2024. The removed books covered LGBTQ, race, and feminism topics broadly, not exclusively Black History or Native American history. The incident was not the result of a DeSantis executive order specifically targeting those subjects; Florida's book-removal statutes (HB 1467, HB 1069) apply to K-12 schools and focus on sexually explicit content, not racial or ethnic history. The New College library director was terminated in the aftermath.",
+        "is_central": true
+      }
+    ],
+    "disputed_propositions": [],
+    "unaddressed_propositions": [],
+    "contextual_findings": [],
+    "challenged_propositions": [],
+    "perspectives": []
+  },
+  "source_quality_table": [
+    {
+      "url": "https://www.politifact.com/factchecks/2023/may/31/ron-desantis/ron-desantis-said-that-not-a-single-book-was-banne/",
+      "tier": "fact-checker",
+      "tier_source": "ifcn",
+      "rationale": "IFCN verified signatory."
+    },
+    {
+      "url": "https://www.cfpublic.org/education/2024-11-11/florida-list-banned-books-schools",
+      "tier": "unknown",
+      "tier_source": "model-prior",
+      "rationale": "Domain is not confidently identifiable as a well-known outlet; insufficient prior to assign a reliable tier."
+    },
+    {
+      "url": "https://www.cnn.com/2024/04/16/politics/desantis-education-book-challenges-reaj/index.html",
+      "tier": "reputable-news",
+      "tier_source": "wikipedia-rsp",
+      "rationale": "Wikipedia RSP: generally reliable."
+    },
+    {
+      "url": "https://www.naacpldf.org/florida-war-on-black-history/",
+      "tier": "primary-source",
+      "tier_source": "model-prior",
+      "rationale": "NAACP Legal Defense and Educational Fund is a major civil rights legal institution; its site represents official organizational positions and primary legal/policy materials."
+    },
+    {
+      "url": "https://www.alligator.org/article/2024/07/florida-bill-limits-citizen-led-school-book-objections-to-once-per-month",
+      "tier": "unknown",
+      "tier_source": "model-prior",
+      "rationale": "The Independent Florida Alligator is the University of Florida's independent student newspaper; credible for a student outlet but not a nationally recognized news organization, so conservatively classified as unknown."
+    },
+    {
+      "url": "https://www.cfpublic.org/education/2025-04-03/florida-bill-easier-challenge-books-put-penalties-for-schools-who-dont",
+      "tier": "unknown",
+      "tier_source": "model-prior",
+      "rationale": "Domain is not confidently identifiable as a well-known outlet; insufficient prior to assign a reliable tier."
+    },
+    {
+      "url": "https://abcnews.go.com/US/books-dumped-en-masse-floridas-new-college-sparking/story?id=112892229",
+      "tier": "reputable-news",
+      "tier_source": "wikipedia-rsp",
+      "rationale": "Wikipedia RSP: generally reliable."
+    },
+    {
+      "url": "https://www.nbcnews.com/nbc-out/out-news/florida-new-college-books-removed-lgbtq-race-women-rcna166912",
+      "tier": "reputable-news",
+      "tier_source": "wikipedia-rsp",
+      "rationale": "Wikipedia RSP: generally reliable."
+    },
+    {
+      "url": "https://www.libraryjournal.com/story/disposal-of-books-at-floridas-new-college-results-in-library-director-termination",
+      "tier": "reputable-news",
+      "tier_source": "model-prior",
+      "rationale": "Library Journal is a well-established professional trade publication for the library and information science field with clear editorial standards."
+    },
+    {
+      "url": "https://www.chronicle.com/article/new-colleges-book-dumping-went-viral-a-beloved-student-led-center-was-the-biggest-loss",
+      "tier": "reputable-news",
+      "tier_source": "model-prior",
+      "rationale": "The Chronicle of Higher Education is a long-established, editorially rigorous trade publication widely respected for coverage of higher education."
+    },
+    {
+      "url": "https://www.metroweekly.com/2024/08/florida-college-throws-hundreds-lgbtq-books-in-a-dumpster/",
+      "tier": "reputable-news",
+      "tier_source": "model-prior",
+      "rationale": "Metro Weekly is a Washington D.C.-based LGBTQ news magazine in operation since 1994 with consistent original reporting and editorial standards."
+    }
+  ],
+  "action": "verify",
+  "action_source": "inferred",
+  "pivoted_from": null,
+  "invoker_instruction_text": "",
+  "action_outcome": "verified_refuted",
+  "verdict_label": "Refuted",
+  "tone_neutral_justification": "The claim makes three specific, falsifiable assertions: (1) DeSantis issued an order, (2) the order specifically targeted Black History and Native American history books, and (3) the books were required to be destroyed. All three fail on the available evidence. The viral TikTok image — which appears to be the source of the claim — traces back to real ABC News and NBC News reporting on a book disposal at New College of Florida in August 2024. That incident involved a single public college (not 'schools' broadly), and the books were described by NBC News as covering 'sexuality, race and feminism' generally — not specifically Black History or Native American history. The Chronicle of Higher Education reports that state law permits disposal of state-funded property through legitimate channels (sale or transfer to other entities), meaning even 'destruction' is an overstatement of the legal mechanism. Crucially, no source in evidence — including the very ABC News report from which the image appears to originate — describes a DeSantis executive order specifically targeting those two subject areas. Florida's real book-removal laws (HB 1467, HB 1069), documented by Politifact and the NAACP LDF, operate on K-12 school libraries and focus on sexually explicit or pornographic content, not racial or ethnic history books. The TikTok caption has therefore taken a real but narrower and more contested institutional controversy and transformed it into a false claim about a targeted, explicit, governor-issued destruction order. Readers should understand that Florida's education policy landscape does include real restrictions on Black history education (the AP African American Studies rejection, the Stop WOKE Act) and widespread K-12 book removals — but those are distinct phenomena that do not constitute the specific claim being made here.",
+  "presentation_payload": {
+    "headline_finding": "The claim is false on multiple specific counts: no DeSantis order targeted Black History or Native American history books for destruction, the viral image shows a book disposal at a single college (New College of Florida), and the discarded books spanned LGBTQ, race, and feminism topics — not those categories specifically.",
+    "counter_fact": "The August 2024 incident depicted in the image involved New College of Florida — one public college under DeSantis-appointed leadership — disposing of library books covering LGBTQ, race, and feminism subjects broadly. No executive order from DeSantis specifically required the destruction of Black History or Native American history books; Florida's legislative book-removal frameworks (HB 1467, HB 1069) concern K-12 schools and focus on sexually explicit material. The New College library director was fired following the controversy.",
+    "primary_sources_to_cite": [
+      {
+        "url": "https://abcnews.go.com/US/books-dumped-en-masse-floridas-new-college-sparking/story?id=112892229",
+        "display_name": "ABC News"
+      },
+      {
+        "url": "https://www.nbcnews.com/nbc-out/out-news/florida-new-college-books-removed-lgbtq-race-women-rcna166912",
+        "display_name": "NBC News"
+      },
+      {
+        "url": "https://www.chronicle.com/article/new-colleges-book-dumping-went-viral-a-beloved-student-led-center-was-the-biggest-loss",
+        "display_name": "The Chronicle of Higher Education"
+      }
+    ],
+    "load_bearing_evidence_snippet": "\"While the optics of seeing thousands of books in a dumpster are far from ideal, it is important to understand that the disposition of materials is a normal part of library collection management\" — and the Chronicle notes state law permits disposal through sale or transfer to governmental or nonprofit entities. NBC News identifies the titles as 'many on sexuality, race and feminism,' not specifically Black or Native American history.",
+    "context_note": null,
+    "counterpoints": [],
+    "perspectives": []
+  },
+  "overall_state": "checked",
+  "frozen": true
+}

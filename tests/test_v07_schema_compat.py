@@ -1,12 +1,19 @@
 import glob
 import json
+import os
 
 from agent.factcheck.schema import Evidence, FrozenVerdict, VerifierReport
 
+FIXTURE_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "legacy_freezes")
+
 
 def test_old_freezes_still_parse():
-    paths = sorted(glob.glob("data/freezes/*.json"))[:5]
-    assert paths, "expected existing freezes on disk"
+    # Committed fixtures — always present, so this is the hard guarantee.
+    paths = sorted(glob.glob(os.path.join(FIXTURE_DIR, "*.json")))
+    assert paths, "expected committed legacy-freeze fixtures"
+    # Opportunistically also parse real freezes when they exist on disk
+    # (data/freezes/ is gitignored, so it may be absent in worktrees/CI).
+    paths += sorted(glob.glob("data/freezes/*.json"))[:5]
     for p in paths:
         fv = FrozenVerdict.model_validate(json.load(open(p)))
         assert fv.engine == "staged"          # default for legacy freezes
