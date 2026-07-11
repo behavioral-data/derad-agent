@@ -64,12 +64,14 @@ def verify_draft(
 
 
 def apply_downgrade(draft: DraftVerdict) -> DraftVerdict:
-    # Downgrade state is frozen in verifier_report.downgrade — do NOT leak a prose
-    # prefix into the justification (it would surface in reply-facing derivations).
-    return draft.model_copy(update={
-        "confidence": "low",
-        "verdict_leaning": "insufficient",
-    })
+    # Downgrade is ADVISORY (final-review adjudication): it is frozen in
+    # verifier_report.downgrade + confidence="low" for the eval harness and
+    # any downstream consumer. It must NOT flip verdict_leaning — that
+    # collapsed substantive verdicts to *_nei/_unavailable outcomes while the
+    # payload stayed substantive, recreating the v0.6 outcome/payload
+    # incoherence this redesign exists to fix. Do NOT leak a prose prefix
+    # into the justification either (it would surface in replies).
+    return draft.model_copy(update={"confidence": "low"})
 
 
 def _to_report(out: VerifierOutput, revision_used: bool) -> VerifierReport:
@@ -107,6 +109,18 @@ def run_verified_loop(
         revision_used = True
         revised, _ = revise_in_loop(messages, out.required_revisions,
                                     client=client, runtime=runtime, model=model)
+        if revised is None:
+            # Mechanical failure (revision finalize never validated / turns
+            # exhausted) — retry the SAME demanded revision once with an
+            # explicit resubmit instruction. This is not a second verifier
+            # round; the verifier's demand is unchanged.
+            logger.warning("run_verified_loop: revision produced no draft — retrying once")
+            revised, _ = revise_in_loop(
+                messages,
+                out.required_revisions
+                + "\n\nIMPORTANT: resubmit the COMPLETE corrected draft via the "
+                  "finalize tool — every required field must be present.",
+                client=client, runtime=runtime, model=model)
         if revised is not None:
             draft = revised
             out = verify_draft(draft, runtime.rows, post_text=post_text,

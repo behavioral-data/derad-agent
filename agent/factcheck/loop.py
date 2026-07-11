@@ -171,6 +171,8 @@ def _drive(messages: list, *, client, runtime: ToolRuntime, model: str,
                     draft = DraftVerdict.model_validate(getattr(block, "input", {}) or {})
                     finalize_id = tool_id
                 except ValidationError as exc:
+                    logger.warning("loop: finalize rejected (turn %d): %s",
+                                   stats.turns, str(exc)[:300])
                     tool_results.append({"type": "tool_result", "tool_use_id": tool_id,
                                          "is_error": True,
                                          "content": f"finalize rejected: {exc}"[:2000]})
