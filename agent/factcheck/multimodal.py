@@ -15,6 +15,7 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
+import anthropic
 import requests
 from pydantic import BaseModel
 
@@ -137,11 +138,30 @@ def fetch_image_bytes(url: str) -> Optional[tuple[bytes, str]]:
     if not content_type.startswith("image/"):
         logger.warning("Skipping non-image url=%s content-type=%s", url, content_type)
         return None
-    data = resp.content
-    if len(data) > _IMAGE_BYTE_CAP:
-        logger.warning("Image too large (%d bytes), skipping: %s", len(data), url)
+    # Read in chunks and abort as soon as the running total exceeds the cap
+    # — mirrors search.py's capped-download pattern. `resp` was opened with
+    # stream=True specifically so this loop can bail before buffering an
+    # unbounded/huge body into memory (reading `resp.content` directly would
+    # buffer the whole response first, defeating the cap and risking an OOM).
+    chunks: list[bytes] = []
+    total = 0
+    try:
+        for chunk in resp.iter_content(chunk_size=65536):
+            if not chunk:
+                continue
+            total += len(chunk)
+            if total > _IMAGE_BYTE_CAP:
+                logger.warning(
+                    "Image exceeds byte cap (%d), aborting stream: %s", _IMAGE_BYTE_CAP, url,
+                )
+                return None
+            chunks.append(chunk)
+    except requests.RequestException:
+        logger.exception("Image fetch failed while streaming for %s", url)
         return None
-    return data, content_type
+    finally:
+        resp.close()
+    return b"".join(chunks), content_type
 
 
 _SUPPORTED_VLM_MIME = {"image/png", "image/jpeg", "image/gif", "image/webp"}
@@ -239,9 +259,12 @@ def extract_image(url: str, *, search_backend: SearchBackend, provenance_top_k: 
     image_bytes, media_type = fetched
     try:
         extract = _vlm_extract(image_bytes, media_type)
-    except (ValueError, TimeoutError) as exc:
+    except (ValueError, TimeoutError, anthropic.APIConnectionError) as exc:
         # ValueError covers JSON parse + schema validation; TimeoutError
-        # covers the per-stage budget. Other exceptions propagate.
+        # covers the per-stage budget; anthropic.APIConnectionError (parent
+        # of APITimeoutError, which does NOT subclass TimeoutError) covers
+        # an Anthropic-SDK timeout/connection error. Other exceptions
+        # propagate.
         logger.warning("VLM extraction failed for %s: %s", url, exc)
         return None
 

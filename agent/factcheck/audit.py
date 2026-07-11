@@ -125,12 +125,19 @@ def audit(
 
     # 2. Every URL the renderer can surface must be in source_quality_table.
     known_urls = {canonicalize_url(entry.url) for entry in source_quality_table}
-    # Free-form text fields the renderer can quote — any URL the LLM
-    # fabricated into these must still resolve to source_quality_table.
+    # Free-form text fields where the LLM writes findings/citations in
+    # prose — any URL fabricated into these must still resolve to
+    # source_quality_table. Deliberately EXCLUDES tone_neutral_justification
+    # and load_bearing_evidence_snippet: those carry a human-quote /
+    # reasoning narrative that can legitimately reproduce a verbatim
+    # evidence quote containing an incidental URL that was never itself a
+    # retrieved source (e.g. a URL mentioned inside the quoted text). That
+    # is not a citation and must not fail the audit. The structured
+    # citation fields (primary_sources_to_cite, counterpoints/perspectives
+    # citing_sources) are still fully enforced below via
+    # `_collect_action_urls`, so fabricated citations are still caught.
     free_text_fields: list[str] = [
-        tone_neutral_justification,
         presentation_payload.headline_finding,
-        presentation_payload.load_bearing_evidence_snippet,
         presentation_payload.counter_fact,
         presentation_payload.context_note,
     ]

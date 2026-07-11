@@ -48,3 +48,31 @@ def test_bot_handle_match_is_case_insensitive():
 def test_unrelated_at_mention_is_not_continuation():
     # A parent that @-mentions someone else (not the bot) is still a valid target.
     assert _cont("67890", "@SomeoneElse this claim is false") is False
+
+
+def test_handle_prefix_collision_is_not_continuation():
+    # Bug: a substring match on "@eddiexbot" would also fire on a DIFFERENT,
+    # longer handle that merely starts with ours — silently dropping a
+    # legitimate invocation target authored by a non-bot third party.
+    assert _cont("67890", "Cool analysis @eddiexbot2, thanks for sharing") is False
+
+
+def test_handle_as_word_prefix_collision_is_not_continuation():
+    # Same collision, spelled out with a short hypothetical handle so the
+    # "whole token, not substring" requirement is unambiguous: "@eddieson"
+    # must not match handle "eddie".
+    saved = app_module.BOT_HANDLE
+    app_module.BOT_HANDLE = "eddie"
+    try:
+        assert _cont("67890", "@eddieson is spreading misinformation") is False
+    finally:
+        app_module.BOT_HANDLE = saved
+
+
+def test_exact_handle_still_matches_as_whole_token():
+    saved = app_module.BOT_HANDLE
+    app_module.BOT_HANDLE = "eddie"
+    try:
+        assert _cont("67890", "@eddie provide context on this") is True
+    finally:
+        app_module.BOT_HANDLE = saved

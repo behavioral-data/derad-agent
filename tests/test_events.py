@@ -73,6 +73,24 @@ class TestInMemoryEventsStore:
         assert len(store.events) == 1
         assert store.events[0].mention_id == "m1"
 
+    def test_conversation_ids_by_reply_only_includes_rows_with_both_fields(self):
+        store = events_module.InMemoryEventsStore()
+        store.write_event(events_module.MentionEvent(
+            mention_id="m1", parent_id="p1", author_id="a1", tone="neutral",
+            received_at_utc=_now(), reply_id="r1", conversation_id="c1",
+        ))
+        # Legacy row: reply posted, but no conversation_id was ever captured.
+        store.write_event(events_module.MentionEvent(
+            mention_id="m2", parent_id="p2", author_id="a2", tone="neutral",
+            received_at_utc=_now(), reply_id="r2",
+        ))
+        # No reply posted at all — shouldn't appear regardless of conversation_id.
+        store.write_event(events_module.MentionEvent(
+            mention_id="m3", parent_id="p3", author_id="a3", tone="neutral",
+            received_at_utc=_now(), conversation_id="c3",
+        ))
+        assert store.conversation_ids_by_reply() == {"r1": "c1"}
+
     def test_appends_drop(self):
         store = events_module.InMemoryEventsStore()
         drop = events_module.MentionDrop(
@@ -200,6 +218,34 @@ class TestEventWiring:
         assert ev.pipeline_ms is not None and ev.pipeline_ms >= 0
         # Forward-join key to InfoTokens — must be set before the event is written.
         assert isinstance(ev.info_token, str) and ev.info_token
+
+    def test_replied_outcome_captures_conversation_id(self, monkeypatch, fake_events_store):
+        """conversation_id (the true thread root) must land on the event, not
+        just parent_id — collect_replies needs it to search the whole thread
+        for bystander replies instead of a narrower (sub-)conversation."""
+        from agent.app.utils import TweetSnapshot
+        snap = TweetSnapshot(
+            text="Mail-in voting causes fraud.",
+            author_id="12345",
+            author_username="parent_user",
+            conversation_id="99900",
+        )
+        gen = {
+            "text": "Here are the facts.",
+            "sources": ["https://a.example"],
+            "verdict_label": "Refuted",
+            "action": "verify",
+            "action_outcome": "verified_refuted",
+            "queries": ["query1"],
+        }
+        ev, _ts = self._run_process(
+            fetch_snap=snap,
+            generate_reply_result=gen,
+            post_reply_returns=["REPLY_ID", "LINK_REPLY_ID"],
+            monkeypatch=monkeypatch,
+            fake_events_store=fake_events_store,
+        )
+        assert ev.conversation_id == "99900"
 
     def test_parent_fetch_failed_outcome(self, monkeypatch, fake_events_store):
         ev = self._run_process(

@@ -10,7 +10,7 @@ Usage:
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from agent.app.events import BotReplyReply, SNAPSHOT_MIN_AGE, get_store, log_reply_reply, utcnow
 from agent.llm.config import get_x_client
@@ -22,6 +22,15 @@ MAX_REPLIES_PER_BOT_TWEET = 100
 # viral thread can't burn unbounded X-API quota per bot reply.
 MAX_PAGES_PER_BOT_TWEET = 5
 
+# X's search_recent endpoint only indexes roughly the last 7 days of tweets.
+# Once a bot reply's entire capture window has aged past that horizon, no
+# future run can ever find bystander replies to it — the tweets that would
+# match are no longer in search_recent's index, full stop. Re-querying such a
+# reply forever (as opposed to just skipping it) burns API quota for zero
+# possible benefit, so main() drops it from the candidate set once it ages
+# out and logs the loss instead of retrying silently.
+SEARCH_RECENT_HORIZON = timedelta(days=7)
+
 
 def _collect_one(
     bot_reply_id: str,
@@ -30,6 +39,7 @@ def _collect_one(
     parent_id: str | None,
     link_reply_id: str | None = None,
     bot_user_id: str | None = None,
+    conversation_id: str | None = None,
 ) -> int:
     """Fetch replies to bot_reply_id from X and write BotReplyReply rows. Returns count written.
 
@@ -44,10 +54,19 @@ def _collect_one(
         bot_user_id = os.getenv("BOT_USER_ID") or None
 
     # X v2 search has no reply-target operator, so we search the whole
-    # conversation (conversation_id is the thread root = parent_id, the post the
-    # invoker replied to) and filter in Python to tweets that reply to the bot.
-    if not parent_id:
-        logger.info("No parent_id for bot_reply_id=%s — cannot search conversation, skipping", bot_reply_id)
+    # conversation and filter in Python to tweets that reply to the bot.
+    # conversation_id is the true thread ROOT; parent_id is only the tweet the
+    # invoker immediately replied to, which is the same tweet as the thread
+    # root for a top-level invocation but NOT for a mid-thread claim — using
+    # parent_id there searches the wrong (sub-)conversation and silently
+    # collects zero replies. Fall back to parent_id only for legacy rows
+    # captured before conversation_id was recorded.
+    search_root = conversation_id or parent_id
+    if not search_root:
+        logger.info(
+            "No conversation_id/parent_id for bot_reply_id=%s — cannot search conversation, skipping",
+            bot_reply_id,
+        )
         return 0
 
     # posts.search_recent returns a generator of page objects (each with .data /
@@ -56,7 +75,7 @@ def _collect_one(
     try:
         client = get_x_client()
         pages = client.posts.search_recent(
-            query=f"conversation_id:{parent_id}",
+            query=f"conversation_id:{search_root}",
             tweet_fields=["author_id", "public_metrics", "referenced_tweets", "text"],
             expansions=["author_id"],
             user_fields=["username"],
@@ -128,28 +147,54 @@ def _collect_one(
     return written
 
 
+def _select_candidates(store, now: datetime) -> list[tuple[str, str, str | None, str | None, str | None, str | None]]:
+    """Bot replies eligible for bystander-reply collection right now.
+
+    Eligible = aged past SNAPSHOT_MIN_AGE, not yet collected, AND still
+    within X search_recent's ~7-day horizon. A reply that ages past the
+    horizon while still uncollected is permanently unreachable (search_recent
+    can no longer see tweets from its capture window) — it's logged and
+    dropped here rather than being re-queried forever.
+    """
+    already_done = store.collected_reply_ids()
+    conversation_ids = store.conversation_ids_by_reply()
+    candidates = []
+    for reply_id, tone, posted_at, mention_id, parent_id, link_reply_id in store.iter_reply_ids():
+        if posted_at is None or reply_id in already_done:
+            continue
+        posted = posted_at if posted_at.tzinfo else posted_at.replace(tzinfo=timezone.utc)
+        age = now - posted
+        if age < SNAPSHOT_MIN_AGE:
+            continue
+        if age >= SEARCH_RECENT_HORIZON:
+            logger.warning(
+                "bot_reply_id=%s aged out uncollected after %s (search_recent horizon is %s) "
+                "— no bystander replies can be recovered; dropping from the candidate set",
+                reply_id, age, SEARCH_RECENT_HORIZON,
+            )
+            continue
+        candidates.append((reply_id, tone, mention_id, parent_id, link_reply_id, conversation_ids.get(reply_id)))
+    return candidates
+
+
 def main() -> None:
     logging.basicConfig(level="INFO", format="%(asctime)s %(levelname)s %(message)s")
 
     store = get_store()
     now = utcnow()
-    already_done = store.collected_reply_ids()
-    candidates = [
-        (reply_id, tone, mention_id, parent_id, link_reply_id)
-        for reply_id, tone, posted_at, mention_id, parent_id, link_reply_id in store.iter_reply_ids()
-        if posted_at is not None
-        and now - (posted_at if posted_at.tzinfo else posted_at.replace(tzinfo=timezone.utc)) >= SNAPSHOT_MIN_AGE
-        and reply_id not in already_done
-    ]
+    candidates = _select_candidates(store, now)
 
     if not candidates:
-        logger.info("No uncollected bot replies aged ≥3 days — nothing to collect")
+        logger.info("No uncollected bot replies aged ≥3 days and within the collection horizon — nothing to collect")
         return
 
     logger.info("Collecting replies for %d bot tweets", len(candidates))
     total = 0
-    for reply_id, tone, mention_id, parent_id, link_reply_id in candidates:
-        n = _collect_one(reply_id, tone, mention_id, parent_id, link_reply_id=link_reply_id)
+    for reply_id, tone, mention_id, parent_id, link_reply_id, conversation_id in candidates:
+        n = _collect_one(
+            reply_id, tone, mention_id, parent_id,
+            link_reply_id=link_reply_id, conversation_id=conversation_id,
+        )
         logger.info("bot_reply_id=%s: collected %d bystander replies", reply_id, n)
         total += n
 

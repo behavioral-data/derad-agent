@@ -1,0 +1,86 @@
+% Commands for TeXCount
+%TC:macro \cite [option:text,text]
+%TC:macro \citep [option:text,text]
+%TC:macro \citet [option:text,text]
+%TC:envir table 0 1
+%TC:envir table* 0 1
+%TC:envir tabular [ignore] word
+%TC:envir displaymath 0 word
+%TC:envir math 0 word
+%TC:envir comment 0 0
+
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage{textcomp}
+\usepackage[margin=1in]{geometry}
+\usepackage{csquotes}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{xcolor}
+\usepackage{natbib}
+\usepackage{listings}
+\usepackage[hidelinks]{hyperref}
+
+%% Style for reproducing system prompts verbatim in the appendix.
+\lstdefinestyle{prompt}{%
+  basicstyle=\ttfamily\scriptsize,
+  breaklines=true,
+  breakatwhitespace=false,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  upquote=true,
+  frame=single,
+  framesep=5pt,
+  xleftmargin=6pt,
+  xrightmargin=6pt,
+  aboveskip=8pt,
+  belowskip=8pt,
+  extendedchars=true,
+  literate=%
+    {—}{{---}}1
+    {–}{{--}}1
+    {≤}{{$\leq$}}1
+    {≥}{{$\geq$}}1
+    {×}{{$\times$}}1
+    {…}{{\ldots}}1
+    {’}{{'}}1
+    {‘}{{'}}1
+    {“}{{"}}1
+    {”}{{"}}1
+    {§}{{\S}}1,
+}
+
+\newcommand\todo[1]{\textcolor{red}{#1}}
+
+%% Make bare \cite parenthetical (natbib's default \cite is textual, like \citet).
+\renewcommand{\cite}{\citep}
+
+\title{De-Antagonizing Online Political Conversations with Satirical AI}
+\author{
+  Andrew Shaw \quad Advait Bhat \quad Aahan Patel \quad Trisha Bhatawdekar \\
+  Galen Weld \quad Amy X. Zhang \quad Tim Althoff \\[4pt]
+  University of Washington
+}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\input{sections/1-introduction}
+\input{sections/2-related-work}
+\input{sections/3-methods}
+\input{sections/4-results}
+\input{sections/5-discussion}
+\input{sections/6-conclusion}
+
+\bibliographystyle{plainnat}
+\bibliography{main}
+
+\newpage
+\appendix
+\input{sections/appendix}
+
+\end{document}

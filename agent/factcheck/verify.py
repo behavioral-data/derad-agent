@@ -21,6 +21,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Literal, Optional
 
+import anthropic
 from pydantic import BaseModel, Field
 
 from agent.shared.text import canonicalize_url
@@ -110,7 +111,6 @@ _SEED_QUERIES_BY_ACTION: dict[Action, list[str]] = {
         "{claim} debate",
         "{claim} different perspectives",
     ],
-    "decline": [],                         # never gets here — pipeline short-circuits
 }
 
 
@@ -128,7 +128,6 @@ _DEFAULT_MAX_QUESTIONS: dict[Action, int] = {
     "provide_context": 6,         # 2 seeds + 4 controller steps
     "challenge_opinion": 6,
     "surface_perspectives": 6,
-    "decline": 0,
 }
 
 
@@ -180,10 +179,12 @@ def _decide_next(
             max_tokens=1024,
             timeout=30.0,
         )
-    except (ValueError, TimeoutError):
-        # Parse/schema failure or wall-clock timeout. Caller distinguishes
-        # first-iteration failure (raise VerifyControllerError) from later
-        # ones (graceful stop with partial evidence).
+    except (ValueError, TimeoutError, anthropic.APIConnectionError):
+        # Parse/schema failure, wall-clock timeout, or an Anthropic-SDK
+        # timeout/connection error (anthropic.APITimeoutError does NOT
+        # subclass TimeoutError). Caller distinguishes first-iteration
+        # failure (raise VerifyControllerError) from later ones (graceful
+        # stop with partial evidence).
         logger.warning("Verification-loop controller call failed.", exc_info=True)
         return None
 

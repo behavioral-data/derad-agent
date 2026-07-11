@@ -1,5 +1,5 @@
 # Participant data
-data_analysis/input
+study/data_analysis/input
 
 # Python cache files
 __pycache__/
@@ -107,3 +107,6 @@ keys.md
 
 # Internal project tracking — not for public consumption
 todo.md
+
+# mock-x study interface — generated, read-only DB artifact
+study/data/study.db
