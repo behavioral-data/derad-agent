@@ -58,7 +58,7 @@ def test_snapshot_lookup_sends_spec_params():
         "filter": "statuscode:200",
         "fl": "timestamp,original",
     }
-    assert kwargs["timeout"] == 10.0
+    assert kwargs["timeout"] == 6.0   # fail-fast lookup default
 
 
 def test_snapshot_lookup_none_on_network_error():
@@ -66,3 +66,37 @@ def test_snapshot_lookup_none_on_network_error():
         url = snapshot.snapshot_lookup(
             "https://news.test/gas", datetime(2026, 4, 23, tzinfo=timezone.utc))
     assert url is None
+
+
+def test_cdx_circuit_breaker_trips_and_skips(monkeypatch):
+    import requests as _requests
+    from agent.factcheck import snapshot as snap
+    # reset breaker state
+    monkeypatch.setattr(snap, "_cdx_consecutive_failures", 0)
+    monkeypatch.setattr(snap, "_cdx_disabled_until", 0.0)
+    calls = {"n": 0}
+
+    def _boom(*a, **kw):
+        calls["n"] += 1
+        raise _requests.ReadTimeout("slow")
+
+    with mock.patch("requests.get", side_effect=_boom):
+        for _ in range(3):
+            assert snap.snapshot_lookup(
+                "https://news.test/x", datetime(2026, 4, 23, tzinfo=timezone.utc)) is None
+        # breaker tripped: 4th call returns None WITHOUT a network attempt
+        assert snap.snapshot_lookup(
+            "https://news.test/x", datetime(2026, 4, 23, tzinfo=timezone.utc)) is None
+    assert calls["n"] == 3
+    assert snap._cdx_disabled_until > 0
+
+
+def test_cdx_success_resets_breaker(monkeypatch):
+    from agent.factcheck import snapshot as snap
+    monkeypatch.setattr(snap, "_cdx_consecutive_failures", 2)
+    monkeypatch.setattr(snap, "_cdx_disabled_until", 0.0)
+    with mock.patch("requests.get", return_value=_CdxResp()):
+        url = snap.snapshot_lookup(
+            "https://news.test/gas", datetime(2026, 4, 23, tzinfo=timezone.utc))
+    assert url is not None
+    assert snap._cdx_consecutive_failures == 0
