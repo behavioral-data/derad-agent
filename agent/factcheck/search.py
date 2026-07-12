@@ -58,6 +58,21 @@ class SearchHit:
     # rather than just the search-result snippet. Empty when fetch/extract
     # failed (paywall, JS-only page, 404, timeout, etc.).
     body_markdown: str = ""
+    # Publication date (ISO YYYY-MM-DD) when trafilatura's metadata
+    # extraction finds one for the fetched page, else None. Populated during
+    # hit classification; lets downstream stages weigh source recency.
+    published_date: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class FetchedPage:
+    """One fetched-and-extracted page. `published_date` is ISO YYYY-MM-DD
+    when trafilatura's metadata extraction finds one, else None."""
+    status: Optional[int]
+    final_url: Optional[str]
+    title: Optional[str]
+    body_markdown: str
+    published_date: Optional[str] = None
 
 
 # Override to 1 to force HEAD+title validation on every URL even when it's
@@ -368,15 +383,15 @@ _PAGE_MAX_BYTES = 512 * 1024
 _CONTENT_CAP = 3000
 
 
-def _fetch_clean_page(
-    url: str, *, timeout_s: float = 8.0
-) -> tuple[Optional[int], Optional[str], Optional[str], str]:
+def _fetch_clean_page(url: str, *, timeout_s: float = 8.0) -> FetchedPage:
     """Fetch a URL and extract a clean markdown body via trafilatura.
 
-    Returns ``(status_code, final_url, page_title, body_markdown)``.
-    Any of status/final_url/page_title is ``None`` on transport failure;
-    ``body_markdown`` is ``""`` when extraction was unsuccessful (paywall,
-    JS-rendered, non-article page, etc.) but the page itself loaded.
+    Returns a ``FetchedPage``. ``status``/``final_url``/``title`` are
+    ``None`` on transport failure; ``body_markdown`` is ``""`` when
+    extraction was unsuccessful (paywall, JS-rendered, non-article page,
+    etc.) but the page itself loaded. ``published_date`` is ISO
+    ``YYYY-MM-DD`` when trafilatura's metadata extraction finds one, else
+    ``None``.
 
     Single network round-trip per URL — used by ``_classify_hit`` to both
     validate the hit (via title-match for model-typed URLs) and enrich it
@@ -394,7 +409,7 @@ def _fetch_clean_page(
             stream=True,
         )
     except Exception:
-        return None, None, None, ""
+        return FetchedPage(None, None, None, "")
 
     try:
         chunks: list[bytes] = []
@@ -411,7 +426,7 @@ def _fetch_clean_page(
             resp.close()
         except Exception:
             pass
-        return resp.status_code, str(resp.url), None, ""
+        return FetchedPage(resp.status_code, str(resp.url), None, "")
     finally:
         try:
             resp.close()
@@ -424,12 +439,17 @@ def _fetch_clean_page(
     except (LookupError, TypeError):
         html_text = body.decode("utf-8", errors="replace")
 
-    # Title — prefer trafilatura's metadata extraction; fall back to regex.
+    # Title + publication date — prefer trafilatura's metadata extraction;
+    # fall back to a regex for the title only.
     title: Optional[str] = None
+    published_date: Optional[str] = None
     try:
         meta = trafilatura.extract_metadata(html_text)
-        if meta is not None and meta.title:
-            title = meta.title.strip()
+        if meta is not None:
+            if meta.title:
+                title = meta.title.strip()
+            if meta.date:
+                published_date = str(meta.date)[:10]
     except Exception:
         pass
     if not title:
@@ -455,7 +475,7 @@ def _fetch_clean_page(
     except Exception:
         pass
 
-    return resp.status_code, str(resp.url), title, body_markdown
+    return FetchedPage(resp.status_code, str(resp.url), title, body_markdown, published_date)
 
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -512,43 +532,44 @@ def _classify_hit(h: SearchHit) -> tuple[Optional[SearchHit], Optional[tuple[str
     if not h.url.startswith(("http://", "https://")):
         return None, (h.url, "non-http")
 
-    status, final_url, page_title, body_markdown = _fetch_clean_page(h.url)
-    if status is None:
+    page = _fetch_clean_page(h.url)
+    if page.status is None:
         return None, (h.url, "fetch_failed")
-    if status >= 400:
+    if page.status >= 400:
         # WAF/anti-bot blocks (403/429/451) are worth tracking by domain so we
         # can later decide whether a fallback fetch path (archive snapshot /
         # reader proxy) is worth adding for the worst offenders. Tagged so the
         # log line is greppable: `waf_block domain=…`.
-        if status in (403, 429, 451):
-            logger.info("waf_block domain=%s status=%d url=%s", urlparse(h.url).netloc, status, h.url)
-        return None, (h.url, f"http_{status}")
+        if page.status in (403, 429, 451):
+            logger.info("waf_block domain=%s status=%d url=%s", urlparse(h.url).netloc, page.status, h.url)
+        return None, (h.url, f"http_{page.status}")
 
     enriched = SearchHit(
         url=h.url,
-        title=h.title or (page_title or ""),
+        title=h.title or (page.title or ""),
         snippet=h.snippet,
         is_annotation=h.is_annotation,
-        body_markdown=body_markdown,
+        body_markdown=page.body_markdown,
+        published_date=page.published_date,
     )
 
     # Annotation-stamped URLs are server-vouched — skip title verification.
     if h.is_annotation and not _VALIDATE_ANNOTATIONS:
         return enriched, None
 
-    if not page_title:
+    if not page.title:
         logger.info("URL %s returned no <title>; passing through unverified.", h.url)
         return enriched, None
     if not h.title:
         # No claimed title to compare against — accept and adopt the page title.
         return enriched, None
 
-    score = _title_match_score(h.title, page_title)
+    score = _title_match_score(h.title, page.title)
     if score >= _TITLE_MATCH_THRESHOLD:
         return enriched, None
     return None, (
         h.url,
-        f"title_mismatch score={score:.2f} claimed={h.title[:40]!r} actual={page_title[:40]!r}",
+        f"title_mismatch score={score:.2f} claimed={h.title[:40]!r} actual={page.title[:40]!r}",
     )
 
 

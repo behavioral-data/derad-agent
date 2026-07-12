@@ -37,6 +37,8 @@ from agent.shared.text import URL_RE, X_TWEET_LIMIT, x_weighted_length
 
 from .freeze import RendererView
 from .llm import call_claude_json
+from .prompt_store import load_prompt
+from .render_lint import lint_cross_tone, lint_substance
 from .schema import Action, Tone
 
 
@@ -511,3 +513,100 @@ def render(
     if last_error is not None:
         raise last_error
     raise RuntimeError("render produced no output and no error")
+
+
+# ── v0.7 neutral-first rendering + register transformation ─────────────────
+#
+# WHY this exists: tone variants used to be three INDEPENDENT generations from
+# the payload, and they diverged — the satirical variant dropped load-bearing
+# facts, and variants asserted conflicting numbers. Neutral-first fixes the
+# fact set once (the neutral render is the source of truth) and derives the
+# other registers by TRANSFORMING that text, holding substance constant while
+# changing only voice. The Task-10 lints (R-4 substance, R-5 cross-tone) are
+# the gate: a variant that can't pass after retries falls back to the neutral
+# text rather than shipping divergent substance.
+
+def _transform_register(neutral_text: str, tone: Tone, view: RendererView,
+                        feedback: str = "") -> str:
+    """One register-transformation call: neutral text in, same-substance
+    re-voiced text out. Enforces the standard invariance checks.
+
+    Substance is held fixed by construction — the prompt feeds the neutral
+    reply (the source of truth) plus the frozen fact list and instructs the
+    model to change only voice. `feedback`, when set, is the prior attempt's
+    lint/invariance violations, appended so the retry can self-correct."""
+    system = load_prompt("render_transform") + "\n\n" + _TONE_REGISTERS[tone]
+    max_chars = min(_LENGTH_PROFILES[_DEFAULT_LENGTH][1], X_TWEET_LIMIT)
+    prompt = (
+        f"NEUTRAL REPLY (source of truth):\n{neutral_text}\n\n"
+        f"TARGET REGISTER: {tone}\n"
+        f"FACT LIST (must survive):\n"
+        + "\n".join(f"- {f}" for f in view.presentation_payload.load_bearing_facts)
+        + (f"\n\nPREVIOUS ATTEMPT FAILED THESE CHECKS:\n{feedback}" if feedback else "")
+    )
+    reply = call_claude_json(
+        prompt=prompt, schema=RenderedReply, system=system,
+        reasoning_effort="medium" if tone == "satirical" else None,
+        max_tokens=4096, timeout=60.0,
+    )
+    text = reply.text.strip()
+    _enforce_invariance(text, view, _state_for(view), max_chars)
+    return text
+
+
+def render_all_tones(
+    view: RendererView, *, length_key: Optional[str] = None, max_lint_retries: int = 2,
+) -> dict:
+    """v0.7 neutral-first rendering. Neutral is rendered as before; satirical
+    and agreeable are register TRANSFORMATIONS of the neutral text, gated by
+    lint R-4 (substance) and R-5 (cross-tone facts). A variant that cannot
+    pass falls back to the neutral text.
+
+    Returns a dict with keys neutral/satirical/agreeable. A lint-failing
+    variant is NEVER shipped: after `max_lint_retries` failed attempts (each
+    retried with the violations as feedback), that key falls back to the
+    neutral text so all three registers agree on substance."""
+    render_kwargs = {"length_key": length_key} if length_key else {}
+    neutral = render(view, "neutral", **render_kwargs)
+    payload, just = view.presentation_payload, view.tone_neutral_justification
+
+    # Lint the neutral render itself — it is the source of truth every register
+    # transform derives from, so a substance leak here propagates to all tones.
+    # render()'s signature can't carry feedback, so retry once and keep the
+    # cleaner attempt (prefer the clean one; if both dirty, fewest violations wins).
+    violations = lint_substance(neutral, payload, just)
+    if violations:
+        logger.info("render_all_tones[neutral]: substance lint violations on first "
+                    "attempt (%s) — re-rendering once", "; ".join(violations))
+        retry = render(view, "neutral", **render_kwargs)
+        retry_violations = lint_substance(retry, payload, just)
+        if not retry_violations:
+            neutral = retry                                     # clean retry wins
+        else:
+            logger.warning("render_all_tones[neutral]: both attempts have substance lint "
+                           "violations (first: [%s]; second: [%s]) — shipping the attempt "
+                           "with fewer violations",
+                           "; ".join(violations), "; ".join(retry_violations))
+            if len(retry_violations) <= len(violations):
+                neutral = retry
+
+    out = {"neutral": neutral}
+    for tone in ("satirical", "agreeable"):
+        text, feedback = None, ""
+        for _ in range(max_lint_retries + 1):
+            try:
+                candidate = _transform_register(neutral, tone, view, feedback)
+            except Exception as exc:                      # transform/invariance failure
+                logger.warning("render_all_tones[%s]: transform failed (%s)", tone, exc)
+                feedback = str(exc)
+                continue
+            violations = lint_substance(candidate, payload, just)
+            violations += [v for v in
+                           lint_cross_tone({tone: candidate}, payload.load_bearing_facts)]
+            if not violations:
+                text = candidate
+                break
+            feedback = "; ".join(violations)
+            logger.info("render_all_tones[%s]: lint retry (%s)", tone, feedback[:200])
+        out[tone] = text if text is not None else neutral
+    return out

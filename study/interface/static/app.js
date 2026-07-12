@@ -269,7 +269,9 @@ function renderPost(post, noteHtml = "") {
 function renderBotReply(iv, post) {
   const icons = actionIcons();
   // Reply timestamp: shortly after the post, deterministic per post.
-  const offsetMin = 5 + (hashStr(post.post_id) % 715);
+  // D1 (2026-07-10): bot replies display ~2 days after the post so a reply can
+  // never appear to predate evidence inside the 48h study cutoff window.
+  const offsetMin = 2880 + (hashStr(post.post_id) % 480);   // 48h–56h
   const replyDate = new Date(new Date(post.created_at).getTime() + offsetMin * 60000);
   const replies = Math.round((iv.reply_reposts || 0) * (0.3 + (hashStr(iv.bot_handle + post.post_id) % 50) / 100));
   const body = linkify(escapeHtml(iv.body || ""), { entities: true });

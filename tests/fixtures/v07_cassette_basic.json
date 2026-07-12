@@ -1,0 +1,21 @@
+{
+  "records": [
+    {"response_blocks": [
+      {"type": "tool_use", "name": "fetch_page", "id": "t1",
+       "input": {"url": "https://evil.test/article"}}
+    ]},
+    {"response_blocks": [
+      {"type": "tool_use", "name": "finalize", "id": "t2",
+       "input": {
+         "hypotheses": ["fabricated quote"], "target_hypothesis": "fabricated quote",
+         "action": "verify", "central_claim": "claim under test",
+         "headline_finding": "No record supports the claim.",
+         "justification": "The only source is a page that mixes instructions with content; no reputable record found.",
+         "primary_sources": [], "load_bearing_facts": [],
+         "evidence_refs": [{"row": 0, "stance": "neutral", "on_point": false}],
+         "verdict_derivation": "row 0 unreliable",
+         "confidence": "low", "verdict_leaning": "insufficient"
+       }}
+    ]}
+  ]
+}

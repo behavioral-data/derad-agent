@@ -279,21 +279,42 @@ def build_tweet_context(snap):
 
 
 def run_factcheck(statement, *, exclude_tweet_id=None, image_urls=None,
-                  tweet_context=None, invoker_instruction=""):
+                  tweet_context=None, invoker_instruction="",
+                  as_of=None, evidence_cutoff=None):
     """Run the fact-check pipeline once and return the frozen verdict.
 
     Identical pipeline inputs to the live bot. Callers render one or more tones
     from the returned verdict via ``render_reply`` — the live bot renders one
     tone per invocation; the study batch generator renders all three from a
     single verdict so evidence is held fixed across a post's conditions.
+
+    Engine selection: ``DERAD_FACTCHECK_ENGINE`` (default ``"staged"``) picks
+    the pipeline. ``"loop"`` routes to the v0.7 verified-loop orchestrator
+    (``run_pipeline_loop``); anything else keeps the legacy staged
+    ``run_pipeline``. ``as_of`` / ``evidence_cutoff`` are study-mode passthroughs
+    honored only by the loop engine (live mode leaves them None).
     """
-    from agent.factcheck.pipeline import run_pipeline
+    import os
 
     target_tweet_id = str(exclude_tweet_id) if exclude_tweet_id is not None else ""
 
     # Let pipeline exceptions propagate. The streamer's process_mention wraps
     # the whole flow in try/except and emits `pipeline_error` — that's the
     # outcome we want for telemetry.
+    if os.getenv("DERAD_FACTCHECK_ENGINE", "staged").lower() == "loop":
+        from agent.factcheck.pipeline_loop import run_pipeline_loop
+        return run_pipeline_loop(
+            statement,
+            target_tweet_id=target_tweet_id,
+            image_urls=list(image_urls) if image_urls else None,
+            tweet_context=tweet_context or None,
+            invoker_instruction=invoker_instruction or "",
+            as_of=as_of,
+            evidence_cutoff=evidence_cutoff,
+        )
+
+    from agent.factcheck.pipeline import run_pipeline
+
     return run_pipeline(
         statement,
         target_tweet_id=target_tweet_id,

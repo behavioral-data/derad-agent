@@ -20,7 +20,7 @@ readme = "README.md"
 dependencies = [
     "langchain>=0.1.16",
     "langchain-anthropic>=1.4.0",
-    "pydantic>=2.0",
+    "pydantic>=2.11",  # anthropic SDK serializes request models with by_alias=None (needs 2.11+)
     "azure-ai-projects>=2.0",
     "Pillow>=10.0",
     "python-dotenv>=1.0.0",

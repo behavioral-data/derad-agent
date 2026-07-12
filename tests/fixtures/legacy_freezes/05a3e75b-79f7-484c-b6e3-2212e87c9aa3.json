@@ -1,0 +1,160 @@
+{
+  "invocation_id": "05a3e75b-79f7-484c-b6e3-2212e87c9aa3",
+  "target_tweet_id": "",
+  "invocation_time": "2026-05-26T07:39:53.846029Z",
+  "thread_context": "",
+  "modality": "text",
+  "backend_version": {
+    "model": "claude-via-azure-ai-services",
+    "vlm_model": "",
+    "search_provider": "claude-web-search:claude-sonnet-4-6",
+    "reverse_image_provider": "",
+    "fetch_layer": "",
+    "source_reliability_lists_version": {
+      "curated_lists": "factcheck-0.5",
+      "model_prior": "claude-sonnet"
+    },
+    "pipeline_commit": "3b57f60513f908e856b79c11c1e0c1469eca20bf"
+  },
+  "attached_images": [],
+  "claims": [
+    {
+      "claim_id": "c1",
+      "text": "Bill Gates designed the COVID-19 vaccines.",
+      "type": "verifiable",
+      "modality": "text",
+      "check_worthy": true,
+      "is_central": false,
+      "evidence": []
+    },
+    {
+      "claim_id": "c2",
+      "text": "COVID-19 vaccines contain microchips that track people.",
+      "type": "verifiable",
+      "modality": "text",
+      "check_worthy": true,
+      "is_central": true,
+      "evidence": [
+        {
+          "question": "fact check: COVID-19 vaccines contain microchips that track people.",
+          "source_url": "https://www.factcheck.org/2022/05/scicheck-pfizer-ceo-not-referencing-covid-19-vaccines-contrary-to-false-impression-in-posts-about-microchips/",
+          "snippet": "Both the Pfizer/BioNTech and Moderna vaccines contain messenger RNA, or mRNA; a variety of fatty molecules, or lipids, to protect the mRNA; and a few ...",
+          "stance": "refutes",
+          "body_markdown": ""
+        },
+        {
+          "question": "fact check: COVID-19 vaccines contain microchips that track people.",
+          "source_url": "https://factually.co/fact-checks/health/cdc-covid-19-vaccine-ingredients-list-36f332",
+          "snippet": "The Centers for Disease Control and Prevention directs readers to each COVID-19 vaccine’s FDA fact sheet or package insert for the definitive list of ...",
+          "stance": "refutes",
+          "body_markdown": ""
+        },
+        {
+          "question": "fact check: COVID-19 vaccines contain microchips that track people.",
+          "source_url": "https://english.factcrescendo.com/consumer-safety-fact-check/debunking-the-microsoft-microchip-in-covid-19-vaccines-claims-618904/",
+          "snippet": "No authorized or approved vaccine contains any material related to microchips or tracking technology. ",
+          "stance": "refutes",
+          "body_markdown": ""
+        }
+      ]
+    },
+    {
+      "claim_id": "c3",
+      "text": "The microchips in COVID vaccines operate via 5G networks to enable tracking.",
+      "type": "verifiable",
+      "modality": "text",
+      "check_worthy": true,
+      "is_central": false,
+      "evidence": []
+    }
+  ],
+  "cross_modal_report": {
+    "lens_1_text_text": {
+      "narrative": "All three sources converge in refuting the claim. FactCheck.org (IFCN-certified) directly addresses the conspiracy theory, noting that ingredient lists for all FDA-authorized COVID-19 vaccines are publicly available and contain no microchips—the microchip narrative was fuelled by a misrepresented 2018 Pfizer CEO clip predating COVID-19 vaccines entirely. Factually.co (unknown tier, used only as corroborating detail) enumerates actual vaccine components: mRNA, lipid nanoparticles, and common stabilizers. Fact Crescendo (IFCN-certified) further explains the physical impossibility—a tracking microchip would require at least 1 mm³ and its own antenna, far exceeding vaccine-needle capacity—and confirms the FDA explicitly states no tracking devices are present. No cross-source contradictions exist; all three sources align. The claim is refuted by two independent IFCN fact-checkers citing regulatory disclosures and expert opinion.",
+      "cross_source_contradictions": []
+    },
+    "lens_2_image_text": {
+      "ran": false,
+      "narrative": "",
+      "image_provenance": null,
+      "image_caption_match": "undetermined"
+    },
+    "lens_3_cross_modal": {
+      "ran": false,
+      "narrative": "",
+      "modality_conflicts": []
+    }
+  },
+  "consolidated_findings": {
+    "verified_propositions": [],
+    "refuted_propositions": [
+      {
+        "proposition": "COVID-19 vaccines contain microchips that track people.",
+        "refuting_sources": [
+          {
+            "url": "https://www.factcheck.org/2022/05/scicheck-pfizer-ceo-not-referencing-covid-19-vaccines-contrary-to-false-impression-in-posts-about-microchips/",
+            "tier": "fact-checker"
+          },
+          {
+            "url": "https://english.factcrescendo.com/consumer-safety-fact-check/debunking-the-microsoft-microchip-in-covid-19-vaccines-claims-618904/",
+            "tier": "fact-checker"
+          }
+        ],
+        "counter_fact": "Vaccine ingredients are publicly listed by the FDA; they contain only mRNA, lipids, and stabilizers—no microchips or tracking devices.",
+        "is_central": true
+      }
+    ],
+    "disputed_propositions": [],
+    "unaddressed_propositions": [],
+    "contextual_findings": [],
+    "challenged_propositions": [],
+    "perspectives": []
+  },
+  "source_quality_table": [
+    {
+      "url": "https://www.factcheck.org/2022/05/scicheck-pfizer-ceo-not-referencing-covid-19-vaccines-contrary-to-false-impression-in-posts-about-microchips/",
+      "tier": "fact-checker",
+      "tier_source": "ifcn",
+      "rationale": "IFCN signatory or recognized fact-checker."
+    },
+    {
+      "url": "https://factually.co/fact-checks/health/cdc-covid-19-vaccine-ingredients-list-36f332",
+      "tier": "unknown",
+      "tier_source": "model-prior",
+      "rationale": "No confident prior on this domain; despite the name suggesting fact-checking, it is not a recognized IFCN signatory or widely known fact-checking organization."
+    },
+    {
+      "url": "https://english.factcrescendo.com/consumer-safety-fact-check/debunking-the-microsoft-microchip-in-covid-19-vaccines-claims-618904/",
+      "tier": "fact-checker",
+      "tier_source": "ifcn",
+      "rationale": "IFCN signatory or recognized fact-checker."
+    }
+  ],
+  "action": "verify",
+  "action_source": "inferred",
+  "pivoted_from": null,
+  "invoker_instruction_text": "",
+  "action_outcome": "verified_refuted",
+  "verdict_label": "Refuted",
+  "tone_neutral_justification": "Two independent IFCN-certified fact-checkers (FactCheck.org, Fact Crescendo) and FDA public ingredient disclosures uniformly confirm no microchips are present; physical feasibility experts corroborate the finding.",
+  "presentation_payload": {
+    "headline_finding": "COVID-19 vaccines contain no microchips; FDA-published ingredient lists show only mRNA, lipids, and stabilizers.",
+    "counter_fact": "Vaccine ingredients are fully public; no microchips or tracking tech—a chip would be physically too large for a needle.",
+    "primary_sources_to_cite": [
+      {
+        "url": "https://www.factcheck.org/2022/05/scicheck-pfizer-ceo-not-referencing-covid-19-vaccines-contrary-to-false-impression-in-posts-about-microchips/",
+        "display_name": "FactCheck.org – SciCheck"
+      },
+      {
+        "url": "https://english.factcrescendo.com/consumer-safety-fact-check/debunking-the-microsoft-microchip-in-covid-19-vaccines-claims-618904/",
+        "display_name": "Fact Crescendo"
+      }
+    ],
+    "load_bearing_evidence_snippet": "\"No authorized or approved vaccine contains any material related to microchips or tracking technology.\" — Fact Crescendo",
+    "context_note": null,
+    "counterpoints": [],
+    "perspectives": []
+  },
+  "overall_state": "checked",
+  "frozen": true
+}
