@@ -24,6 +24,7 @@ def run_pipeline_loop(
     *,
     target_tweet_id: str = "",
     image_urls: Optional[list[str]] = None,
+    video_paths: Optional[list[str]] = None,
     tweet_context: Optional[dict] = None,
     invoker_instruction: str = "",
     as_of: Optional[datetime] = None,
@@ -35,9 +36,19 @@ def run_pipeline_loop(
     invocation_id = str(uuid.uuid4())
     invocation_time = datetime.now(timezone.utc)
     image_urls = image_urls or []
+    video_paths = video_paths or []
     image_evidence = []
-    if image_urls:
-        image_evidence = _run_multimodal(image_urls, build_default_backend())
+    if image_urls or video_paths:
+        backend = build_default_backend()
+        if image_urls:
+            image_evidence = _run_multimodal(image_urls, backend)
+        # Stage 1.5 for local video files (T9): keyframes → VLM → ImageEvidence,
+        # appended so the loop/reconcile/freeze treat video like any attached image.
+        for vp in video_paths:
+            from .video import extract_video
+            ve = extract_video(vp, search_backend=backend)
+            if ve is not None:
+                image_evidence.append(ve)
     ctx = PipelineContext(tweet_context=tweet_context, image_evidence=image_evidence,
                           invoker_instruction=invoker_instruction or "")
     logger.info("run_pipeline_loop[%s]: starting (study=%s)", invocation_id,
@@ -68,7 +79,7 @@ def run_pipeline_loop(
         target_tweet_id=target_tweet_id,
         backend_name="loop:web_search+fetch_page",
         thread_context_str=_thread_context(tweet_context),
-        modality=_resolve_modality(image_urls, claim_text),
+        modality=_resolve_modality(image_urls + video_paths, claim_text),
         attached_images=tuple(_attached_image_records(image_evidence)),
         as_of=as_of,
         evidence_cutoff=evidence_cutoff,

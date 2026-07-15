@@ -37,6 +37,19 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 DEFAULT_DB = _REPO_ROOT / "study" / "data" / "study.db"
+_MEDIA_ROOT = _REPO_ROOT / "study" / "data" / "media"
+
+
+def local_video_paths(tweet_id: str) -> list[str]:
+    """Local video files for a tweet, in ordinal order (study-mode only).
+
+    The study stores clips at ``study/data/media/<tweetId>/<ordinal>.mp4``.
+    Returns absolute paths that exist on disk; empty when the post has no video.
+    """
+    tdir = _MEDIA_ROOT / str(tweet_id)
+    if not tdir.is_dir():
+        return []
+    return [str(p) for p in sorted(tdir.glob("*.mp4"))]
 
 
 def _check_runtime_deps() -> None:
@@ -183,8 +196,15 @@ def generate_all_tones(
         run_kwargs["as_of"] = as_of
         run_kwargs["evidence_cutoff"] = cutoff
         logging.info("id=%s — study window as_of=%s cutoff=%s", tweet_id, as_of, cutoff)
+        # Video posts (T9): the X API skips video media, but the study stores the
+        # clips locally. Resolve them so Stage 1.5 can see the footage.
+        video_paths = local_video_paths(tweet_id)
+        if video_paths:
+            run_kwargs["video_paths"] = video_paths
+            logging.info("id=%s — %d local video(s) for Stage 1.5", tweet_id, len(video_paths))
 
-    logging.info("id=%s — running pipeline (images=%d)", tweet_id, len(image_urls))
+    logging.info("id=%s — running pipeline (images=%d, videos=%d)",
+                 tweet_id, len(image_urls), len(run_kwargs.get("video_paths", [])))
     try:
         frozen = run_factcheck(
             statement,

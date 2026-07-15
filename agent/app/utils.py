@@ -279,7 +279,7 @@ def build_tweet_context(snap):
 
 
 def run_factcheck(statement, *, exclude_tweet_id=None, image_urls=None,
-                  tweet_context=None, invoker_instruction="",
+                  video_paths=None, tweet_context=None, invoker_instruction="",
                   as_of=None, evidence_cutoff=None):
     """Run the fact-check pipeline once and return the frozen verdict.
 
@@ -307,6 +307,7 @@ def run_factcheck(statement, *, exclude_tweet_id=None, image_urls=None,
             statement,
             target_tweet_id=target_tweet_id,
             image_urls=list(image_urls) if image_urls else None,
+            video_paths=list(video_paths) if video_paths else None,
             tweet_context=tweet_context or None,
             invoker_instruction=invoker_instruction or "",
             as_of=as_of,
