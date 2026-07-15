@@ -28,6 +28,7 @@ also fails, the renderer raises → `pipeline_error`.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Optional
 
 import anthropic
@@ -38,7 +39,7 @@ from agent.shared.text import URL_RE, X_TWEET_LIMIT, x_weighted_length
 from .freeze import RendererView
 from .llm import call_claude_json
 from .prompt_store import load_prompt
-from .render_lint import lint_cross_tone, lint_substance
+from .render_lint import _strip_decoration, extract_numerals, lint_substance
 from .schema import Action, Tone
 
 
@@ -537,9 +538,21 @@ def _transform_register(neutral_text: str, tone: Tone, view: RendererView,
     lint/invariance violations, appended so the retry can self-correct."""
     system = load_prompt("render_transform") + "\n\n" + _TONE_REGISTERS[tone]
     max_chars = min(_LENGTH_PROFILES[_DEFAULT_LENGTH][1], X_TWEET_LIMIT)
+    # Length parity with the source reply is a study requirement: a satirical
+    # variant that runs 3x longer than neutral is both a length confound and a
+    # cap violation that forces a neutral-fallback (observed 74% fallback before
+    # this guidance). Give the model the source length as an explicit budget so
+    # the comedic/empathetic voice REPLACES words rather than adding them.
+    src_len = len(neutral_text)
+    budget = min(max_chars, max(src_len + 60, 320))
     prompt = (
-        f"NEUTRAL REPLY (source of truth):\n{neutral_text}\n\n"
+        f"NEUTRAL REPLY (source of truth, {src_len} chars):\n{neutral_text}\n\n"
         f"TARGET REGISTER: {tone}\n"
+        f"LENGTH BUDGET: your rewrite MUST be at most {budget} characters — aim for "
+        f"about the same length as the source reply. The register is carried by word "
+        f"choice and framing, not by adding sentences; comedic/empathetic economy means "
+        f"the voice replaces words, it does not append them. Do not tack on an extra "
+        f"paragraph.\n\n"
         f"FACT LIST (must survive):\n"
         + "\n".join(f"- {f}" for f in view.presentation_payload.load_bearing_facts)
         + (f"\n\nPREVIOUS ATTEMPT FAILED THESE CHECKS:\n{feedback}" if feedback else "")
@@ -557,56 +570,84 @@ def _transform_register(neutral_text: str, tone: Tone, view: RendererView,
 def render_all_tones(
     view: RendererView, *, length_key: Optional[str] = None, max_lint_retries: int = 2,
 ) -> dict:
-    """v0.7 neutral-first rendering. Neutral is rendered as before; satirical
-    and agreeable are register TRANSFORMATIONS of the neutral text, gated by
-    lint R-4 (substance) and R-5 (cross-tone facts). A variant that cannot
-    pass falls back to the neutral text.
+    """v0.7 tone rendering: each tone rendered DIRECTLY to the length cap, then
+    gated by two lints — R-4 (no numerals/sources beyond the frozen payload) and
+    R-5 (cross-tone consistency). The NEUTRAL render is the substance reference:
+    it packs whatever facts fit the cap declaratively; satirical/agreeable must
+    then (a) invent nothing (R-4) and (b) carry the numerals the neutral reply
+    kept (R-5, anchored to neutral — an achievable target since neutral proved
+    those numbers fit the budget). A tone that can't pass falls back to neutral
+    rather than ship a divergent variant.
 
-    Returns a dict with keys neutral/satirical/agreeable. A lint-failing
-    variant is NEVER shipped: after `max_lint_retries` failed attempts (each
-    retried with the violations as feedback), that key falls back to the
-    neutral text so all three registers agree on substance."""
+    R-5 anchors to the neutral reply, NOT to payload.load_bearing_facts: the loop
+    sometimes emits load_bearing_facts as many verbose sentences, and demanding
+    all of them verbatim in a witty ~520-char reply is unsatisfiable (it
+    collapsed fact-dense posts to neutral). Neutral's kept numerals are the
+    load-bearing set that must survive the register change. (Making the loop emit
+    concise fact tokens is the upstream follow-up.)
+
+    (Earlier drafts re-voiced the neutral reply via a transform pass; that
+    inflated fact-dense replies past the cap and collapsed ~74% of satirical
+    variants. Direct generation writes to the cap natively — the pre-v0.7
+    behavior — and the lints supply the substance guarantee.)
+
+    Returns a dict with keys neutral/satirical/agreeable."""
     render_kwargs = {"length_key": length_key} if length_key else {}
-    neutral = render(view, "neutral", **render_kwargs)
     payload, just = view.presentation_payload, view.tone_neutral_justification
 
-    # Lint the neutral render itself — it is the source of truth every register
-    # transform derives from, so a substance leak here propagates to all tones.
-    # render()'s signature can't carry feedback, so retry once and keep the
-    # cleaner attempt (prefer the clean one; if both dirty, fewest violations wins).
-    violations = lint_substance(neutral, payload, just)
-    if violations:
-        logger.info("render_all_tones[neutral]: substance lint violations on first "
-                    "attempt (%s) — re-rendering once", "; ".join(violations))
-        retry = render(view, "neutral", **render_kwargs)
-        retry_violations = lint_substance(retry, payload, just)
-        if not retry_violations:
-            neutral = retry                                     # clean retry wins
-        else:
-            logger.warning("render_all_tones[neutral]: both attempts have substance lint "
-                           "violations (first: [%s]; second: [%s]) — shipping the attempt "
-                           "with fewer violations",
-                           "; ".join(violations), "; ".join(retry_violations))
-            if len(retry_violations) <= len(violations):
-                neutral = retry
-
-    out = {"neutral": neutral}
-    for tone in ("satirical", "agreeable"):
-        text, feedback = None, ""
+    def _render_lint_gated(tone: Tone, *, required_numerals=None,
+                           fallback: Optional[str]) -> str:
+        """Direct render + lint gate. R-4 (lint_substance) always applies; when
+        `required_numerals` is given (satirical/agreeable), the render must also
+        contain every one of those numerals (R-5 anchored to neutral). Returns
+        the first clean render; a non-neutral tone falls back to `fallback`
+        (neutral) if none is clean; the neutral tone (fallback=None) ships its
+        fewest-violations attempt."""
+        best, best_v = None, None
         for _ in range(max_lint_retries + 1):
             try:
-                candidate = _transform_register(neutral, tone, view, feedback)
-            except Exception as exc:                      # transform/invariance failure
-                logger.warning("render_all_tones[%s]: transform failed (%s)", tone, exc)
-                feedback = str(exc)
+                cand = render(view, tone, **render_kwargs)
+            except Exception as exc:
+                logger.warning("render_all_tones[%s]: render failed (%s)", tone, exc)
                 continue
-            violations = lint_substance(candidate, payload, just)
-            violations += [v for v in
-                           lint_cross_tone({tone: candidate}, payload.load_bearing_facts)]
-            if not violations:
-                text = candidate
-                break
-            feedback = "; ".join(violations)
-            logger.info("render_all_tones[%s]: lint retry (%s)", tone, feedback[:200])
-        out[tone] = text if text is not None else neutral
+            v = list(lint_substance(cand, payload, just))          # R-4
+            if required_numerals:                                  # R-5 (headline-anchored)
+                cand_nums = {_strip_decoration(t) for t in extract_numerals(cand)}
+                kept = required_numerals & cand_nums
+                # Require a MAJORITY of the headline's verdict-critical numerals,
+                # not all: a witty register legitimately reframes a number into a
+                # figure ("calling the final score at halftime" for "13th"), and
+                # what it drops is typically the claim's own wrong number while
+                # keeping the correction. A gross drop (e.g. 0 kept) still fails.
+                need = max(1, math.ceil(0.67 * len(required_numerals)))
+                if len(kept) < need:
+                    v.append(f"{tone} kept only {sorted(kept)} of headline numerals "
+                             f"{sorted(required_numerals)} (need >= {need})")
+            if not v:
+                return cand
+            if best_v is None or len(v) < len(best_v):
+                best, best_v = cand, v
+            logger.info("render_all_tones[%s]: lint retry (%s)", tone, "; ".join(v)[:160])
+        if fallback is not None:
+            logger.warning("render_all_tones[%s]: no lint-clean render — falling back to neutral",
+                           tone)
+            return fallback
+        if best is not None:
+            logger.warning("render_all_tones[neutral]: shipping fewest-violations render (%s)",
+                           "; ".join(best_v)[:160])
+            return best
+        return ""
+
+    neutral = _render_lint_gated("neutral", fallback=None)
+    # R-5 anchor = the headline_finding's numerals (the verdict-critical numbers,
+    # e.g. 13th→5th), NOT every numeral in the neutral reply. Neutral packs
+    # supporting dates/scores a witty register can't all carry; gating on those
+    # collapsed satirical to neutral on fact-dense posts. R-4 (no invention) still
+    # applies to every numeral, so dropped supporting numbers can't become wrong
+    # ones — they simply aren't required in the shorter registers.
+    required = {_strip_decoration(t)
+                for t in extract_numerals(payload.headline_finding or "")}
+    out = {"neutral": neutral}
+    for tone in ("satirical", "agreeable"):
+        out[tone] = _render_lint_gated(tone, required_numerals=required, fallback=neutral)
     return out

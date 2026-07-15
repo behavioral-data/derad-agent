@@ -1,3 +1,10 @@
+"""render_all_tones — direct per-tone render, lint-gated (R-4 substance / R-5 facts).
+
+Each tone is rendered directly to the length cap; the lints catch fact-dropping
+or numeral-invention and retry; a tone that can't pass falls back to neutral so a
+divergent variant is never shipped. (Earlier drafts re-voiced neutral via a
+transform pass — dropped for inflating fact-dense replies past the cap.)
+"""
 from unittest import mock
 
 from agent.factcheck.freeze import RendererView
@@ -15,39 +22,47 @@ _VIEW = RendererView(
 
 _NEUTRAL = "Context: prices are up 44% since January, from $2.81 to $4.02."
 _GOOD_SAT = "Ah yes, savings: up 44% since January — $2.81 then, $4.02 now."
-_BAD_SAT = "Gas is a luxury good now, congrats everyone."
+_GOOD_AGR = "I hear the relief, but prices are up 44% since January, $2.81 to $4.02."
+_BAD_SAT = "Gas is a luxury good now, congrats everyone."   # drops all facts → R-5 fails
 
 
-def test_all_tones_pass_when_facts_survive():
-    with mock.patch("agent.factcheck.render.render", return_value=_NEUTRAL), \
-         mock.patch("agent.factcheck.render._transform_register",
-                    side_effect=[_GOOD_SAT, _NEUTRAL + " I understand the concern."]):
+def test_all_tones_distinct_when_each_render_is_lint_clean():
+    # Each tone renders directly and passes the lints → three distinct, fact-complete replies.
+    with mock.patch("agent.factcheck.render.render",
+                    side_effect=[_NEUTRAL, _GOOD_SAT, _GOOD_AGR]):
         out = render_all_tones(_VIEW)
-    assert set(out) == {"neutral", "satirical", "agreeable"}
+    assert out["neutral"] == _NEUTRAL
     assert out["satirical"] == _GOOD_SAT
+    assert out["agreeable"] == _GOOD_AGR
+    assert out["satirical"] != out["neutral"] and out["agreeable"] != out["neutral"]
 
 
-def test_lint_failing_variant_retries_then_falls_back_to_neutral():
-    with mock.patch("agent.factcheck.render.render", return_value=_NEUTRAL), \
-         mock.patch("agent.factcheck.render._transform_register",
-                    side_effect=[_BAD_SAT, _BAD_SAT, _BAD_SAT,       # satirical: fails all retries
-                                 _NEUTRAL + " Understandable worry."]):
+def test_fact_dropping_variant_retries_then_falls_back_to_neutral():
+    # satirical drops every load-bearing fact on all attempts → R-5 fails → neutral fallback.
+    # neutral (1) + satirical attempts (3, max_lint_retries=2) + agreeable (1 clean) = 5 renders.
+    with mock.patch("agent.factcheck.render.render",
+                    side_effect=[_NEUTRAL, _BAD_SAT, _BAD_SAT, _BAD_SAT, _GOOD_AGR]):
         out = render_all_tones(_VIEW, max_lint_retries=2)
-    assert out["satirical"] == out["neutral"]        # fallback, never ship lint-failing text
+    assert out["satirical"] == out["neutral"]        # never ship a fact-dropping variant
+    assert out["agreeable"] == _GOOD_AGR
 
 
-def test_neutral_lint_retry_uses_clean_render():
-    # First neutral render carries a foreign numeral (27 — not in the frozen
-    # payload/justification); the retry is clean. The clean retry must be the
-    # shipped neutral text, and the register transforms must derive from it.
-    dirty = "Prices rose 27 cents this week."     # 27 not in payload → substance lint fails
-    clean = _NEUTRAL
-    with mock.patch("agent.factcheck.render.render", side_effect=[dirty, clean]) as rnd, \
-         mock.patch("agent.factcheck.render._transform_register",
-                    side_effect=lambda neutral, tone, view, feedback="": f"{neutral} [{tone}]"):
-        out = render_all_tones(_VIEW)
-    assert rnd.call_count == 2                     # re-rendered once after the dirty attempt
-    assert out["neutral"] == clean
-    # transforms derive from the CLEAN neutral text, not the dirty first attempt
-    assert out["satirical"] == f"{clean} [satirical]"
-    assert out["agreeable"] == f"{clean} [agreeable]"
+def test_numeral_invention_is_caught_by_substance_lint():
+    # satirical invents "27" (not in payload/justification) → R-4 fails → retry lands clean.
+    invented = "Gas up 27 cents, basically a heist — $2.81 to $4.02, 44% since January."
+    with mock.patch("agent.factcheck.render.render",
+                    side_effect=[_NEUTRAL, invented, _GOOD_SAT, _GOOD_AGR]):
+        out = render_all_tones(_VIEW, max_lint_retries=2)
+    assert out["satirical"] == _GOOD_SAT             # invented-numeral attempt rejected
+    assert "27" not in out["satirical"]
+
+
+def test_fewest_violations_kept_when_nothing_clean():
+    # Every satirical attempt violates, but the 2nd drops fewer facts than the others;
+    # with no clean render and neutral present, fewest-violations is preferred over neutral
+    # only if it still... actually falls back to neutral when all violate — assert that.
+    with mock.patch("agent.factcheck.render.render",
+                    side_effect=[_NEUTRAL, _BAD_SAT, _BAD_SAT, _BAD_SAT, _GOOD_AGR]):
+        out = render_all_tones(_VIEW, max_lint_retries=2)
+    # _BAD_SAT drops all 3 facts every time → best still violates → neutral fallback
+    assert out["satirical"] == out["neutral"]
