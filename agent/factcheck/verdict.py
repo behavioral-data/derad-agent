@@ -162,6 +162,55 @@ def derive_action_outcome(
     return "verified_nei"
 
 
+# Outcomes that mean "the pipeline produced no usable result."
+_NO_RESULT_OUTCOMES: frozenset[ActionOutcome] = frozenset({
+    "verified_nei", "context_unavailable", "challenge_unavailable",
+    "perspectives_insufficient",
+})
+
+_DECISIVE_VERIFY: dict[str, ActionOutcome] = {
+    "refuted": "verified_refuted",
+    "supported": "verified_supported",
+    "conflicting": "verified_conflicting",
+}
+
+_SUBSTANTIVE_BY_ACTION: dict[Action, ActionOutcome] = {
+    "provide_context": "context_provided",
+    "challenge_opinion": "challenged",
+    "surface_perspectives": "perspectives_surfaced",
+}
+
+
+def reconcile_outcome_with_finding(
+    outcome: ActionOutcome,
+    action: Action,
+    verdict_leaning: str,
+    *,
+    verifier_passed: bool,
+) -> ActionOutcome:
+    """Promote a mechanical 'no-result' outcome to the finding it actually states,
+    when the INDEPENDENT verifier approved the draft.
+
+    The source-tier count in `derive_action_outcome` can return `verified_nei`
+    etc. even when the model committed a decisive verdict and the verifier
+    confirmed it is derivable and warranted — producing a label that
+    contradicts the reply (findings say "FALSE", the outcome code says
+    "not enough evidence"). Once the verifier is the sourcing guard, that
+    mechanical recount should not silently null a verifier-approved verdict;
+    the source count feeds `confidence`, not the label.
+
+    Only fires when: the verifier PASSED (not downgraded / not scrubbed), the
+    current outcome is a no-result bucket, and the draft's leaning/action is
+    decisive. A downgraded/scrubbed verdict (verifier_passed=False, e.g. a
+    confirmed temporal leak or an unwarranted correction) keeps the
+    conservative no-result label."""
+    if not verifier_passed or outcome not in _NO_RESULT_OUTCOMES:
+        return outcome
+    if action == "verify":
+        return _DECISIVE_VERIFY.get(verdict_leaning, outcome)  # 'insufficient' stays no-result
+    return _SUBSTANTIVE_BY_ACTION.get(action, outcome)
+
+
 _OUTCOME_TO_VERDICT: dict[ActionOutcome, Verdict] = {
     "verified_supported": "Supported",
     "verified_refuted": "Refuted",

@@ -18,7 +18,7 @@ from .schema import (
     VerifierReport,
 )
 from .sources import build_quality_table, source_lists_version
-from .verdict import derive_action_outcome, derive_verdict
+from .verdict import derive_action_outcome, derive_verdict, reconcile_outcome_with_finding
 from .prompt_store import prompt_version
 
 
@@ -153,6 +153,14 @@ def assemble_frozen(
     findings = _findings_for(draft, ref_urls, table)
     on_point = frozenset(by_idx[er.row].url for er in refs if er.on_point)
     action_outcome = derive_action_outcome(draft.action, findings, table, on_point_urls=on_point)
+    # Label fidelity: a passed independent verifier means the finding is
+    # derivable + warranted, so a mechanical no-result label (from the source
+    # count) shouldn't contradict a decisive reply. Promote it to match the
+    # finding; a downgraded/scrubbed verdict keeps the conservative label.
+    action_outcome = reconcile_outcome_with_finding(
+        action_outcome, draft.action, draft.verdict_leaning,
+        verifier_passed=bool(verifier_report and verifier_report.passed),
+    )
     payload = PresentationPayload(
         headline_finding=draft.headline_finding,
         counter_fact=draft.counter_fact,

@@ -73,3 +73,83 @@ def test_draft_verdict_requires_decision_fields():
     # confidence, verdict_leaning are all required.
     with pytest.raises(ValidationError):
         DraftVerdict(central_claim="c", headline_finding="h", justification="j")
+
+
+# ---- label-fidelity reconciliation (PS-4/EV-14 fix) ----
+from agent.factcheck.verdict import reconcile_outcome_with_finding
+
+
+def test_reconcile_promotes_verifier_passed_decisive_verdicts():
+    # verifier passed + decisive leaning + no-result label → promoted to the finding
+    assert reconcile_outcome_with_finding("verified_nei", "verify", "refuted",
+                                          verifier_passed=True) == "verified_refuted"
+    assert reconcile_outcome_with_finding("verified_nei", "verify", "supported",
+                                          verifier_passed=True) == "verified_supported"
+    assert reconcile_outcome_with_finding("context_unavailable", "provide_context", "insufficient",
+                                          verifier_passed=True) == "context_provided"
+    assert reconcile_outcome_with_finding("challenge_unavailable", "challenge_opinion", "insufficient",
+                                          verifier_passed=True) == "challenged"
+
+
+def test_reconcile_leaves_conservative_labels_when_verifier_did_not_pass():
+    # downgraded/scrubbed (verifier_passed=False) keeps the conservative no-result label
+    assert reconcile_outcome_with_finding("verified_nei", "verify", "refuted",
+                                          verifier_passed=False) == "verified_nei"
+    # 'insufficient' leaning stays no-result even when the verifier passed
+    assert reconcile_outcome_with_finding("verified_nei", "verify", "insufficient",
+                                          verifier_passed=True) == "verified_nei"
+    # a non-no-result outcome is never touched
+    assert reconcile_outcome_with_finding("verified_supported", "verify", "supported",
+                                          verifier_passed=True) == "verified_supported"
+
+
+def test_assemble_promotes_label_for_verifier_passed_weakly_sourced_refutation(monkeypatch):
+    from agent.factcheck.schema import VerifierReport
+    monkeypatch.setattr(
+        "agent.factcheck.draft.build_quality_table",
+        # classify everything 'unknown' → no reliable sources → derive_action_outcome
+        # would return verified_nei despite a decisive refuted leaning
+        lambda urls: [SourceQualityEntry(url=u, tier="unknown",
+                                         tier_source="model-prior", rationale="t")
+                      for u in dict.fromkeys(urls)],
+    )
+    draft = DraftVerdict(
+        hypotheses=["fabricated"], target_hypothesis="fabricated", action="verify",
+        central_claim="X donated to campaign Y",
+        headline_finding="FALSE — no record of the donation exists.",
+        justification="FEC and state records show no such donation.",
+        primary_sources=[DraftSource(url="https://fec.gov/x", display_name="FEC")],
+        load_bearing_facts=["no FEC record"],
+        evidence_refs=[EvidenceRef(row=0, stance="refutes", on_point=True)],
+        verdict_derivation="row 0 → false", confidence="high", verdict_leaning="refuted",
+    )
+    rows = [EvidenceRow(0, "https://fec.gov/x", "FEC search", "", "No results.", "2026-01-01", "fetch")]
+    fv = assemble_frozen(
+        draft, rows, invocation_id="i", invocation_time=datetime(2026, 7, 15, tzinfo=timezone.utc),
+        target_tweet_id="t", backend_name="b",
+        verifier_report=VerifierReport(passed=True),
+    )
+    assert fv.action_outcome == "verified_refuted"   # promoted; not silently verified_nei
+
+
+def test_assemble_keeps_nei_when_no_verifier_report():
+    # no verifier_report (default None) → no promotion → conservative label preserved
+    from agent.factcheck.schema import SourceQualityEntry as SQE
+    import agent.factcheck.draft as d
+    orig = d.build_quality_table
+    d.build_quality_table = lambda urls: [SQE(url=u, tier="unknown", tier_source="model-prior", rationale="t") for u in dict.fromkeys(urls)]
+    try:
+        draft = DraftVerdict(
+            hypotheses=["h"], target_hypothesis="h", action="verify", central_claim="c",
+            headline_finding="FALSE", justification="j",
+            primary_sources=[DraftSource(url="https://x.test/a", display_name="X")],
+            load_bearing_facts=[], evidence_refs=[EvidenceRef(row=0, stance="refutes")],
+            verdict_derivation="d", confidence="high", verdict_leaning="refuted",
+        )
+        rows = [EvidenceRow(0, "https://x.test/a", "t", "", "b", "2026-01-01", "fetch")]
+        fv = assemble_frozen(draft, rows, invocation_id="i",
+                             invocation_time=datetime(2026, 7, 15, tzinfo=timezone.utc),
+                             target_tweet_id="t", backend_name="b")
+        assert fv.action_outcome == "verified_nei"   # unchanged without a passed verifier
+    finally:
+        d.build_quality_table = orig
