@@ -80,3 +80,32 @@ def test_run_verified_loop_retries_mechanically_failed_revision():
     assert rev.call_count == 2
     assert "resubmit the COMPLETE corrected draft" in rev.call_args_list[1].args[1]
     assert got.justification == "j2" and report.passed and report.revision_used
+
+
+def test_scrub_temporal_leak_neutralizes_payload():
+    from agent.factcheck.verifier import scrub_temporal_leak
+    src = DraftVerdict(**{**_D, "verdict_leaning": "refuted", "context_note": "leaky note",
+                          "load_bearing_facts": ["post-cutoff fact"],
+                          "load_bearing_evidence_snippet": "leaked quote"})
+    out = scrub_temporal_leak(src)
+    assert out.verdict_leaning == "insufficient" and out.confidence == "low"
+    assert out.context_note is None and out.load_bearing_evidence_snippet == ""
+    assert out.load_bearing_facts == []
+    assert "time it was posted" in out.headline_finding
+    assert "leaky" not in (out.justification + out.headline_finding + (out.context_note or ""))
+
+
+def test_run_verified_loop_scrubs_on_unfixed_temporal_leak():
+    d1 = DraftVerdict(**{**_D, "verdict_leaning": "refuted"})
+    leak = VerifierOutput(passed=False, required_revisions="fix leak",
+                          temporal_leaks=["cites a source published after the cutoff"])
+    with mock.patch("agent.factcheck.verifier.run_loop",
+                    return_value=(d1, mock.MagicMock(rows=[]), mock.MagicMock(), [])), \
+         mock.patch("agent.factcheck.verifier.revise_in_loop",
+                    return_value=(d1, mock.MagicMock())), \
+         mock.patch("agent.factcheck.verifier.verify_draft", return_value=leak):
+        got, _, report, _ = run_verified_loop("p", client=object(), ctx=None,
+                                              as_of=None, cutoff=None, model="m")
+    assert got.verdict_leaning == "insufficient"       # scrubbed (not advisory)
+    assert "time it was posted" in got.headline_finding
+    assert report.temporal_leaks and report.downgrade

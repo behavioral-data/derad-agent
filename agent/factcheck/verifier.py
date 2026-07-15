@@ -74,6 +74,38 @@ def apply_downgrade(draft: DraftVerdict) -> DraftVerdict:
     return draft.model_copy(update={"confidence": "low"})
 
 
+_LEAK_HEADLINE = ("This post could not be verified against sources available at "
+                  "the time it was posted.")
+_LEAK_JUSTIFICATION = ("The available contemporaneous evidence did not support a "
+                       "clean verdict, and the strongest supporting material post-dates "
+                       "the post. No contemporaneous fact-check is asserted.")
+
+
+def scrub_temporal_leak(draft: DraftVerdict) -> DraftVerdict:
+    """Collapse the reply-facing payload to a temporally-safe hedge.
+
+    Applied ONLY when the verifier confirms a temporal leak that the revision
+    round could not fix — the one case where shipping the substantive payload
+    would show a study participant a fact that post-dates the post. Unlike the
+    advisory downgrade, this DOES neutralize the outcome (verdict_leaning →
+    insufficient) and strip the detail carriers, because the alternative is a
+    visible anachronism. Free-text headline/justification can't be scrubbed
+    surgically, so they are replaced wholesale rather than risk leaving the
+    leaking clause in place."""
+    return draft.model_copy(update={
+        "confidence": "low",
+        "verdict_leaning": "insufficient",
+        "headline_finding": _LEAK_HEADLINE,
+        "justification": _LEAK_JUSTIFICATION,
+        "counter_fact": None,
+        "context_note": None,
+        "load_bearing_evidence_snippet": "",
+        "load_bearing_facts": [],
+        "counterpoints": [],
+        "perspectives": [],
+    })
+
+
 def _to_report(out: VerifierOutput, revision_used: bool) -> VerifierReport:
     return VerifierReport(
         passed=out.passed,
@@ -130,4 +162,11 @@ def run_verified_loop(
 
     # Still failing (or nothing revisable) → downgrade, never loop.
     out.downgrade = True
+    if out.temporal_leaks:
+        # A confirmed temporal leak that revision couldn't fix: neutralize the
+        # reply-facing payload so no post-cutoff fact reaches a study participant.
+        # Narrow exception to the advisory-downgrade rule (see scrub_temporal_leak).
+        logger.warning("run_verified_loop: unfixed temporal leak(s) — scrubbing payload: %s",
+                       "; ".join(out.temporal_leaks)[:300])
+        return scrub_temporal_leak(draft), runtime, _to_report(out, revision_used), stats
     return apply_downgrade(draft), runtime, _to_report(out, revision_used), stats
