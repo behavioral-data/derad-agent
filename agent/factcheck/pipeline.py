@@ -1,4 +1,4 @@
-"""End-to-end orchestrator for the fact-check pipeline (design v0.5).
+"""End-to-end orchestrator for the LEGACY staged fact-check pipeline (the v0.7 loop is the validated engine; select via DERAD_FACTCHECK_ENGINE).
 
 Runs all stages from the design spec: Stage 1.5 multimodal extraction →
 Stage 2+3 claim extraction & check-worthiness gate → Stage 4 iterative

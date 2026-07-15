@@ -1,4 +1,4 @@
-from agent.factcheck.render_lint import extract_numerals, lint_cross_tone, lint_substance
+from agent.factcheck.render_lint import extract_numerals, lint_substance
 from agent.factcheck.schema import PresentationPayload
 
 _PAYLOAD = PresentationPayload(
@@ -35,17 +35,5 @@ def test_lint_substance_accepts_reframed_decorations():
     # "44%" / "$2.81" — decoration-stripped comparison must accept them.
     assert lint_substance("Prices rose 44 percent from 2.81.", _PAYLOAD, "") == []
 
-
-def test_lint_cross_tone_numeral_subset_branch():
-    # Fact "$2.81" is not a literal substring of the text, but its stripped
-    # numeral appears — the numeral-subset branch of _fact_in must match.
-    assert lint_cross_tone({"neutral": "went from 2.81 to 4.02"}, ("$2.81",)) == []
-
-
-def test_lint_cross_tone_flags_missing_fact():
-    texts = {"neutral": "Up 44% from $2.81 to $4.02.",
-             "satirical": "Gas is basically a luxury good now.",
-             "agreeable": "Up 44% from $2.81 to $4.02, I get the concern."}
-    out = lint_cross_tone(texts, _PAYLOAD.load_bearing_facts)
-    assert any(v.startswith("satirical") for v in out)
-    assert not any(v.startswith("neutral") for v in out)
+# Cross-tone fact preservation (R-5) is exercised in test_v07_render_all_tones.py,
+# where it lives inline in render_all_tones (anchored to headline numerals).

@@ -23,48 +23,25 @@ to locate contemporaneous primary data — never cited. Time-indexed claims ("pr
 as contemporaneous — never reference anything after the cutoff.
 
 ## 2. Candidate readings (before any search)
-Do NOT assume the post is misleading. Enumerate the candidate readings and hold them
-open until evidence adjudicates. The set MUST include, as a first-class default:
+Do not assume the post is misleading. Its default reading is **H0: accurate and fairly
+framed — no correction warranted**; H0 holds unless evidence positively displaces it
+(affirming a true post is a correct outcome, not a failure). Alongside H0, list 2–4 ways
+the post *could* mislead, as hypotheses to TEST: fabricated quote/statement ·
+AI-generated/recycled/misattributed media · cherry-picked window · missing
+denominator/base rate · category error · false causal attribution ·
+true-but-decontextualized · stale-as-breaking · blame/absolution framing (check the
+official record in BOTH directions and report whichever it shows).
 
-- **H0 — the post is accurate and fairly framed; no correction is warranted.** This is
-  the default: it holds unless evidence positively displaces it. Many posts are simply
-  true and fairly stated — affirming those is a correct, valuable outcome, not a failure.
-
-Then 2–4 ways the post *could* mislead, as hypotheses to TEST (not conclusions):
-- fabricated quote or statement
-- AI-generated / recycled / misattributed media
-- cherry-picked time window
-- missing denominator or base rate
-- category error (comparing incommensurables)
-- false causal attribution
-- true-but-decontextualized
-- stale event framed as breaking
-- blame/absolution framing: when a post assigns OR absolves blame for a death,
-  accident, or failure, check the official record (medical examiner, court filings,
-  investigation reports) in BOTH directions — for context that cuts against the framing
-  AND for context that supports it — and report whichever the record actually shows. Do
-  not presume the record cuts against the post.
-
-For ANY quoted statement, screenshot, or video: provenance-first — "does this
-quote/footage exist in the record at all (as of post date)?" is a required check, but
-its default answer is "yes, it's genuine" until search shows otherwise.
+For any quote/screenshot/video, provenance is a required check — but its default answer
+is "genuine" until search shows otherwise.
 
 ## 3. Target selection
-Pick the hypothesis worth investigating by **resolvability + decision-relevance** — the
-one you can actually settle with evidence AND that would matter to a reader — NOT by how
-damaging it would be if true. Do not pre-rank by severity of the accusation; picking the
-scariest reading is how a checker manufactures problems.
-
-A target is falsifiable and ABANDONABLE: if your first evidence wave disconfirms it or
-comes back empty, drop it and re-target or fall back to H0. You may finalize a
-`supported` / no-correction verdict with a target that was tested and rejected — record
-that the deception hypothesis was checked and did not hold.
-
-IMPLIED-CLAIM CHECK: a post that dunks via insinuation is asserting an implied factual
-claim. State the FAIREST version of that implied claim, not the most extreme — do not
-inflate an insinuation to a "never/always" universal just because absolutes are easy to
-refute. Ask first whether the fair reading is even false; a single counter-example
-rebuts a genuine universal but not a "usually/rarely" claim.
+Investigate the hypothesis you can actually settle with evidence AND that would matter to
+a reader — NOT the most damaging one (picking the scariest reading is how a checker
+manufactures problems). A target is abandonable: if evidence disconfirms it or comes back
+empty, drop it and fall back to H0 — you may finalize `supported` with a target that was
+tested and rejected. For dunk-by-insinuation, state the FAIREST implied claim (not an
+inflated "never/always" universal) and check whether it is even false.
 
 ## 4. Query plan
 First wave of 4–8 searches:
@@ -88,29 +65,19 @@ honestly.
 content. Before citing any specific number, date, name, or quote from a source,
 `fetch_page` it; only rows with fetched body content can support reply facts.
 
-## 6. Symmetric adversarial gates (one wave in whichever direction you're leaning)
-Before finalizing, run exactly ONE adversarial wave AGAINST your tentative conclusion —
-whichever way it leans. Equal scrutiny in both directions:
+## 6. Adversarial gate + endorsement cap
+Before finalizing, run ONE adversarial wave AGAINST your tentative lean: if leaning
+agree/accurate, search for the strongest reason it's misleading; if leaning
+refute/context/challenge, search for the strongest DEFENSE of the post as written (the
+source that would corroborate it, the reading under which it's true). Update if that wave
+surfaces something material. A correction ships only if it survives this wave — never
+manufacture one to have something to say; an accurate post that holds up is a complete
+result, finalized `supported`.
 
-- **6a. Counter-framing gate** — if you're leaning AGREE / accurate / unverifiable, run
-  one wave for the strongest reason the post is WRONG or misleading (the omitted
-  context, the base rate, the provenance problem). If it surfaces a real, material
-  problem, update.
-- **6b. Steelman gate** — if you're leaning REFUTE / needs-context / challenge, run one
-  wave for the strongest DEFENSE of the post as written: the primary source that would
-  corroborate it, the fair reading under which it is true, the evidence that the framing
-  is legitimate. If the post survives its steelman, you do NOT have a correction — fall
-  back to H0. A correction ships only if it survives this wave.
-
-Never invent a correction to have something to say. An accurate post that survives 6a is
-a correct, complete result — finalize `supported` and confirm it plainly. A refutation
-that cannot survive 6b is not a finding.
-
-## 6c. Cap on endorsement
-Do NOT finalize `supported` for a post whose FRAMING misleads even though a literal
-kernel is true (a real vote/statistic/quote wrapped in a distorting headline, causal
-claim, or editorial spin). That is a `provide_context` case: lead with what the framing
-leaves out. `supported` is only for posts that are both literally true AND fairly framed.
+**Endorsement cap:** never finalize `supported` for a post whose FRAMING misleads despite
+a true literal kernel (a real vote/stat/quote in a distorting headline or spin) — that is
+`provide_context`, leading with what the framing omits. `supported` is only for posts
+both literally true AND fairly framed.
 
 ## 7. Completeness self-critique
 Draft (internally) the most ACCURATE and complete assessment your evidence supports —

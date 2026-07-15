@@ -1,9 +1,11 @@
-"""R-4 / R-5 mechanical render lints (v0.7).
+"""Mechanical render lint — R-4 substance check (renderer-safe, no LLM).
 
 R-4 (substance): every numeral in a rendered reply must exist in the frozen
-payload/justification; internal pipeline vocabulary must never reach the user.
-R-5 (cross-tone): every load-bearing fact must appear in EVERY tone variant.
-Pure string functions — no LLM, no imports from search/loop (renderer-safe)."""
+payload/justification, and internal pipeline vocabulary must never reach the
+user. R-5 (cross-tone fact preservation) lives inline in
+render.render_all_tones — it requires a majority of the headline's
+verdict-critical numerals to survive each register, not every load-bearing
+fact. Pure string functions — no imports from search/loop."""
 from __future__ import annotations
 
 import json
@@ -55,20 +57,8 @@ def lint_substance(text: str, payload: PresentationPayload, justification: str) 
     return violations
 
 
-def _fact_in(fact: str, text: str) -> bool:
-    if fact.casefold() in text.casefold():
-        return True
-    fact_nums = {_strip_decoration(tok) for tok in extract_numerals(fact)}
-    text_nums = {_strip_decoration(tok) for tok in extract_numerals(text)}
-    if fact_nums and fact_nums <= text_nums:
-        return True
-    return False
-
-
-def lint_cross_tone(texts: dict[str, str], load_bearing_facts) -> list[str]:
-    violations: list[str] = []
-    for tone, text in texts.items():
-        for fact in load_bearing_facts:
-            if not _fact_in(fact, text):
-                violations.append(f"{tone} missing fact {fact!r}")
-    return violations
+# NOTE: cross-tone fact preservation (R-5) is enforced inline in
+# render.render_all_tones, anchored to the headline_finding's verdict-critical
+# numerals (a majority must survive each register) rather than to every
+# load_bearing_fact. The earlier generic `lint_cross_tone`/`_fact_in` helpers
+# were removed when that inline check replaced them.

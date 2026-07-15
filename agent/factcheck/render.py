@@ -38,7 +38,6 @@ from agent.shared.text import URL_RE, X_TWEET_LIMIT, x_weighted_length
 
 from .freeze import RendererView
 from .llm import call_claude_json
-from .prompt_store import load_prompt
 from .render_lint import _strip_decoration, extract_numerals, lint_substance
 from .schema import Action, Tone
 
@@ -516,56 +515,7 @@ def render(
     raise RuntimeError("render produced no output and no error")
 
 
-# ── v0.7 neutral-first rendering + register transformation ─────────────────
-#
-# WHY this exists: tone variants used to be three INDEPENDENT generations from
-# the payload, and they diverged — the satirical variant dropped load-bearing
-# facts, and variants asserted conflicting numbers. Neutral-first fixes the
-# fact set once (the neutral render is the source of truth) and derives the
-# other registers by TRANSFORMING that text, holding substance constant while
-# changing only voice. The Task-10 lints (R-4 substance, R-5 cross-tone) are
-# the gate: a variant that can't pass after retries falls back to the neutral
-# text rather than shipping divergent substance.
-
-def _transform_register(neutral_text: str, tone: Tone, view: RendererView,
-                        feedback: str = "") -> str:
-    """One register-transformation call: neutral text in, same-substance
-    re-voiced text out. Enforces the standard invariance checks.
-
-    Substance is held fixed by construction — the prompt feeds the neutral
-    reply (the source of truth) plus the frozen fact list and instructs the
-    model to change only voice. `feedback`, when set, is the prior attempt's
-    lint/invariance violations, appended so the retry can self-correct."""
-    system = load_prompt("render_transform") + "\n\n" + _TONE_REGISTERS[tone]
-    max_chars = min(_LENGTH_PROFILES[_DEFAULT_LENGTH][1], X_TWEET_LIMIT)
-    # Length parity with the source reply is a study requirement: a satirical
-    # variant that runs 3x longer than neutral is both a length confound and a
-    # cap violation that forces a neutral-fallback (observed 74% fallback before
-    # this guidance). Give the model the source length as an explicit budget so
-    # the comedic/empathetic voice REPLACES words rather than adding them.
-    src_len = len(neutral_text)
-    budget = min(max_chars, max(src_len + 60, 320))
-    prompt = (
-        f"NEUTRAL REPLY (source of truth, {src_len} chars):\n{neutral_text}\n\n"
-        f"TARGET REGISTER: {tone}\n"
-        f"LENGTH BUDGET: your rewrite MUST be at most {budget} characters — aim for "
-        f"about the same length as the source reply. The register is carried by word "
-        f"choice and framing, not by adding sentences; comedic/empathetic economy means "
-        f"the voice replaces words, it does not append them. Do not tack on an extra "
-        f"paragraph.\n\n"
-        f"FACT LIST (must survive):\n"
-        + "\n".join(f"- {f}" for f in view.presentation_payload.load_bearing_facts)
-        + (f"\n\nPREVIOUS ATTEMPT FAILED THESE CHECKS:\n{feedback}" if feedback else "")
-    )
-    reply = call_claude_json(
-        prompt=prompt, schema=RenderedReply, system=system,
-        reasoning_effort="medium" if tone == "satirical" else None,
-        max_tokens=4096, timeout=60.0,
-    )
-    text = reply.text.strip()
-    _enforce_invariance(text, view, _state_for(view), max_chars)
-    return text
-
+# ── Tone rendering — direct per-tone, lint-gated ───────────────────────────
 
 def render_all_tones(
     view: RendererView, *, length_key: Optional[str] = None, max_lint_retries: int = 2,
