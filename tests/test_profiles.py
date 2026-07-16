@@ -68,3 +68,11 @@ def test_claim_order_permuted_blocks():
     for b in range(0, 228, 4):
         block = order[b:b + 4]
         assert Counter(cond_of[x] for x in block) == {c: 1 for c in conds}
+
+
+def test_claim_order_requires_equal_pools():
+    import pytest
+    conds = ("neutral", "agreeable", "satirical", "control")
+    bad = {"neutral": ["a", "b"], "agreeable": ["c"], "satirical": ["d", "e"], "control": ["f", "g"]}
+    with pytest.raises(AssertionError):
+        P.claim_order(bad, conds, random.Random(0))

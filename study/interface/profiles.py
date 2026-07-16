@@ -85,7 +85,10 @@ def party_targets(n_templates, conditions, rng):
 
 def claim_order(ids_by_condition, conditions, rng):
     """Permuted-block order: block i = one profile from each condition (shuffled)
-    so condition stays balanced at every multiple of len(conditions) claims."""
+    so condition stays balanced at every multiple of len(conditions) claims.
+
+    Precondition: all condition pools must be equal-sized; the function asserts
+    this and fails loudly if not."""
     pools = {c: list(ids_by_condition[c]) for c in conditions}
     for c in conditions:
         rng.shuffle(pools[c])
