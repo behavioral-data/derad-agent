@@ -76,3 +76,41 @@ def test_claim_order_requires_equal_pools():
     bad = {"neutral": ["a", "b"], "agreeable": ["c"], "satirical": ["d", "e"], "control": ["f", "g"]}
     with pytest.raises(AssertionError):
         P.claim_order(bad, conds, random.Random(0))
+
+
+def _code(post_id, condition):
+    return f"{post_id}~{condition}"[:24]
+
+
+def test_generate_profiles_full_balance():
+    profiles, orders = P.generate_profiles(CELLS, _code, seed=20260716)
+    conds = ("neutral", "agreeable", "satirical", "control")
+    assert len(profiles) == 456
+    assert Counter(p.condition for p in profiles) == {c: 114 for c in conds}
+    # party x condition == 57
+    assert Counter((p.target_party, p.condition) for p in profiles) == {
+        (party, c): 57 for party in ("D", "R") for c in conds}
+    # per participant: 36 posts, 6/topic, 12/polarity, 3x12 blocks
+    for p in profiles:
+        flat = [x for b in p.blocks for x in b]
+        assert len(flat) == 36 and len(p.access_codes) == 36
+        assert Counter(POST_TOPIC[x] for x in flat) == {t: 6 for t in TOPICS}
+        assert Counter(POST_POL[x] for x in flat) == {pol: 12 for pol in POLS}
+        assert len(p.blocks) == 3 and all(len(b) == 12 for b in p.blocks)
+    # each post 38x per condition
+    per_cond = {c: Counter() for c in conds}
+    for p in profiles:
+        for x in (x for b in p.blocks for x in b):
+            per_cond[p.condition][x] += 1
+    for c in conds:
+        assert set(per_cond[c].values()) == {38} and len(per_cond[c]) == 108
+    # claim orders cover every profile once, split by party
+    assert len(orders["D"]) == 228 and len(orders["R"]) == 228
+    assert set(orders["D"]) | set(orders["R"]) == {p.profile_id for p in profiles}
+    # determinism
+    again, _ = P.generate_profiles(CELLS, _code, seed=20260716)
+    assert [p.profile_id for p in again] == [p.profile_id for p in profiles]
+    assert [p.blocks for p in again] == [p.blocks for p in profiles]
+
+    rep = P.verify_balance(profiles, CELLS)
+    assert rep["ok"] is True

@@ -14,6 +14,10 @@ from itertools import combinations
 from .db import CONDITIONS
 
 SEED = 20260716
+N_TEMPLATES = 114
+PER_CELL = 2
+DAYS = 3
+PER_DAY = 12
 
 
 def build_templates(cells, n_templates, per_cell, rng):
@@ -100,3 +104,66 @@ def claim_order(ids_by_condition, conditions, rng):
         rng.shuffle(block)
         order.extend(block)
     return order
+
+
+@dataclass
+class Profile:
+    profile_id: str
+    template_id: int
+    condition: str
+    target_party: str
+    blocks: list          # list[list[str]] of post_ids (same across a template's 4 conditions)
+    access_codes: list    # list[str], flattened blocks order, condition-specific
+
+
+def generate_profiles(cells, code_lookup, *, n_templates=N_TEMPLATES, per_cell=PER_CELL,
+                      days=DAYS, per_day=PER_DAY, conditions=CONDITIONS, seed=SEED):
+    assert n_templates % 2 == 0 and n_templates % 6 == 0
+    assert (n_templates * per_cell) % 6 == 0 and per_day % 3 == 0
+    rng = random.Random(seed)
+    post_pol = {pid: pol for (t, pol), ids in cells.items() for pid in ids}
+    post_topic = {pid: t for (t, pol), ids in cells.items() for pid in ids}
+
+    templates = build_templates(cells, n_templates, per_cell, rng)
+    layouts = [day_layout(t, post_pol, post_topic, days, per_day, rng) for t in templates]
+    ptargets = party_targets(n_templates, conditions, rng)
+
+    profiles = []
+    by_party_cond = {"D": {c: [] for c in conditions}, "R": {c: [] for c in conditions}}
+    for tid in range(n_templates):
+        for cond in conditions:
+            party = ptargets[tid][cond]
+            pid = f"P{len(profiles) + 1:03d}"
+            codes = [code_lookup(post, cond) for blk in layouts[tid] for post in blk]
+            profiles.append(Profile(pid, tid, cond, party, layouts[tid], codes))
+            by_party_cond[party][cond].append(pid)
+
+    claim_orders = {p: claim_order(by_party_cond[p], conditions, rng) for p in ("D", "R")}
+    return profiles, claim_orders
+
+
+def verify_balance(profiles, cells, conditions=CONDITIONS):
+    """Recompute every §5 guarantee from the generated pool. Returns a report
+    dict with an `ok` bool and the individual check results."""
+    from collections import Counter
+    post_pol = {pid: pol for (t, pol), ids in cells.items() for pid in ids}
+    post_topic = {pid: t for (t, pol), ids in cells.items() for pid in ids}
+    checks = {}
+    checks["count"] = len(profiles) == len(conditions) * (len(profiles) // len(conditions))
+    checks["per_condition"] = (Counter(p.condition for p in profiles)
+                               == {c: len(profiles) // len(conditions) for c in conditions})
+    checks["party_x_condition"] = len(set(
+        Counter((p.target_party, p.condition) for p in profiles).values())) == 1
+    per_ppt = []
+    for p in profiles:
+        flat = [x for b in p.blocks for x in b]
+        per_ppt.append(len(set(Counter(post_topic[x] for x in flat).values())) == 1
+                       and len(set(Counter(post_pol[x] for x in flat).values())) == 1)
+    checks["per_participant_balance"] = all(per_ppt)
+    per_cond = {c: Counter() for c in conditions}
+    for p in profiles:
+        for x in (x for b in p.blocks for x in b):
+            per_cond[p.condition][x] += 1
+    checks["post_exposure_even"] = all(len(set(per_cond[c].values())) == 1 for c in conditions)
+    checks["ok"] = all(checks.values())
+    return checks
