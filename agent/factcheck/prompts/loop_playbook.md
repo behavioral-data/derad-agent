@@ -37,7 +37,9 @@ From what the sweep returns, name the **1–3 load-bearing threads** that actual
 the claim, and run targeted follow-up searches + `fetch_page` on those. This is where you
 apply lenses to what you found — is a quote fabricated, a window cherry-picked, a
 denominator missing, a category conflated, a cause misattributed? — as questions ABOUT the
-evidence, not as a pre-committed list of ways the post is guilty. Prefer **reputable
+evidence, not as a pre-committed list of ways the post is guilty. For a dunk-by-insinuation,
+state the FAIREST `implied_claim` (not an inflated never/always universal) and test whether
+it is even false. Prefer **reputable
 sources** (`fetch_page` reports each source's `source_tier`): a central fact should rest on
 a fact-checker, reputable-news, or primary-source tier. Fetch and READ pages before citing
 any number, date, name, or quote.

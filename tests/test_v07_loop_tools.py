@@ -77,6 +77,11 @@ def test_curated_tier_unknown_domain_no_model_call():
     ("https://www.bbc.com/news/x", "reputable-news"),
     ("https://gasprices.aaa.com/", "primary-source"),
     ("https://www.factcheck.org/2024/x/", "fact-checker"),
+    # Task-6 coverage lock: primary-data + reference domains + a known low-quality site.
+    ("https://www.bls.gov/x", "primary-source"),
+    ("https://www.eia.gov/x", "primary-source"),
+    ("https://newsroom.aaa.com/x", "primary-source"),
+    ("https://grokipedia.com/x", "low-quality"),
 ])
 def test_curated_tier_covers_common_reference_domains(url, expected):
     tier, _ = curated_tier(url)

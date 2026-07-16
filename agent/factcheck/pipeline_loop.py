@@ -59,8 +59,11 @@ def run_pipeline_loop(
         model=model)
 
     if draft is None:
-        # Loop never finalized — freeze an honest NEI record. All 9 decision
-        # fields on DraftVerdict are required (Task-6 ruling), so pass them
+        # Loop never finalized — freeze an honest NEI record. The 7 required
+        # decision fields on DraftVerdict carry no defaults — central_claim,
+        # headline_finding, justification, load_bearing_facts, verdict_derivation,
+        # confidence, verdict_leaning (hypotheses/target_hypothesis were retired;
+        # central_question/peripheral_facts are now defaulted) — so pass them
         # explicitly rather than relying on defaults.
         from .draft import DraftVerdict
         draft = DraftVerdict(
