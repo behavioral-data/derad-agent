@@ -29,3 +29,21 @@ def test_verifier_prompt_covers_scoped_drops_and_tiers():
     assert "central" in text.lower()
     # reputable-source enforcement for central facts
     assert "reputable" in text.lower() or "fact-checker" in text.lower()
+
+
+def test_playbook_is_evidence_first_not_hypothesis_first():
+    from agent.factcheck.prompt_store import load_prompt
+    text = load_prompt("loop_playbook")
+    low = text.lower()
+    # evidence-first flow present
+    assert "broad" in low and "deepen" in low
+    assert "central_question" in text
+    assert "peripheral" in low
+    # bias guards retained
+    assert "h0" in low or "accurate and fairly framed" in low
+    assert "endorsement cap" in low
+    # temporal + untrusted retained (existing invariants)
+    assert "UNTRUSTED" in text
+    assert "Temporal contract" in text or "TEMPORAL" in text.upper()
+    # hypothesis-first enumeration removed
+    assert "list 2–4 ways" not in text and "list 2-4 ways" not in text
