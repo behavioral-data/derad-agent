@@ -34,7 +34,10 @@ def build_templates(cells, n_templates, per_cell, rng):
 
 def day_layout(template_posts, post_pol, post_topic, days, per_day, rng):
     """Split a template's posts into `days` daily blocks, each balanced across
-    polarity (per_day//3 each) with topics rotated so no day is topic-heavy."""
+    polarity (per_day//3 each) with topics rotated so no day is topic-heavy.
+
+    Precondition: each polarity must contribute exactly days * (per_day // 3) posts.
+    Fails loudly if a polarity has more posts (extras would be silently dropped)."""
     topics = sorted({post_topic[p] for p in template_posts})
     n_topics = len(topics)
     per_pol_day = per_day // 3
@@ -54,6 +57,9 @@ def day_layout(template_posts, post_pol, post_topic, days, per_day, rng):
             for t in ordered:
                 if i < len(by_topic.get(t, [])):
                     seq.append(by_topic[t][i])
+        assert len(seq) == days * per_pol_day, (
+            f"day_layout: polarity has {len(seq)} posts, expected {days * per_pol_day} "
+            f"(days*per_day//3) — would drop/duplicate posts")
         for d in range(days):
             blocks[d].extend(seq[d * per_pol_day:(d + 1) * per_pol_day])
     for d in range(days):
