@@ -34,11 +34,10 @@ class DraftSource(BaseModel):
 
 
 class DraftVerdict(BaseModel):
-    """The `finalize` tool input. Decision fields are REQUIRED — the loop
-    must commit to hypotheses, evidence references, and a derivation; only
-    genuinely optional presentation extras carry defaults."""
-    hypotheses: list[str]
-    target_hypothesis: str
+    """The `finalize` tool input. Decision fields are REQUIRED — the loop must
+    commit to a central claim, evidence references, and a derivation;
+    presentation extras and peripheral facts carry defaults."""
+    central_question: str = ""
     implied_claim: str = ""
     action: Action
     central_claim: str
@@ -50,7 +49,8 @@ class DraftVerdict(BaseModel):
     perspectives: list[dict] = Field(default_factory=list)    # {"label", "summary", "source_urls"}
     primary_sources: list[DraftSource]
     load_bearing_evidence_snippet: str = ""
-    load_bearing_facts: list[str]
+    load_bearing_facts: list[str]          # CENTRAL facts: must be pre-cutoff + reputable
+    peripheral_facts: list[str] = Field(default_factory=list)  # droppable / hedgeable
     evidence_refs: list[EvidenceRef]
     knowledge_state_at_post_date: str = ""
     verdict_derivation: str
@@ -136,7 +136,7 @@ def assemble_frozen(
     by_idx = {r.idx: r for r in rows}
     refs = [er for er in draft.evidence_refs if er.row in by_idx]
     evidence = tuple(
-        Evidence(question=draft.target_hypothesis or draft.central_claim,
+        Evidence(question=draft.central_question or draft.central_claim,
                  source_url=by_idx[er.row].url,
                  snippet=by_idx[er.row].snippet or by_idx[er.row].title,
                  stance=er.stance,
@@ -200,8 +200,7 @@ def assemble_frozen(
         presentation_payload=payload,
         overall_state="checked",
         engine="loop",
-        hypotheses=tuple(draft.hypotheses),
-        target_hypothesis=draft.target_hypothesis,
+        central_question=draft.central_question,
         implied_claim=draft.implied_claim,
         knowledge_state_at_post_date=draft.knowledge_state_at_post_date,
         verdict_derivation=draft.verdict_derivation,

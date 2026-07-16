@@ -349,6 +349,7 @@ class FrozenVerdict(_Frozen):
     engine: Literal["staged", "loop"] = "staged"
     hypotheses: tuple[str, ...] = Field(default_factory=tuple)
     target_hypothesis: str = ""
+    central_question: str = ""
     implied_claim: str = ""
     knowledge_state_at_post_date: str = ""
     verdict_derivation: str = ""

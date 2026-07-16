@@ -6,7 +6,7 @@ from agent.factcheck.loop_tools import ToolRuntime
 from agent.factcheck.pipeline_loop import run_pipeline_loop
 from agent.factcheck.schema import VerifierReport
 
-_D = dict(hypotheses=["h"], target_hypothesis="h", action="verify", central_claim="c",
+_D = dict(central_question="h", action="verify", central_claim="c",
           headline_finding="hf", justification="j", primary_sources=[],
           load_bearing_facts=["42%"], evidence_refs=[], verdict_derivation="d",
           confidence="high", verdict_leaning="insufficient")

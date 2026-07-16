@@ -64,7 +64,7 @@ def run_pipeline_loop(
         # explicitly rather than relying on defaults.
         from .draft import DraftVerdict
         draft = DraftVerdict(
-            hypotheses=[], target_hypothesis="", action="verify",
+            action="verify",
             central_claim=claim_text[:280],
             headline_finding="Not enough reliable evidence to verify this claim.",
             justification="The evidence loop did not produce a verdict within budget.",

@@ -18,7 +18,7 @@ _ROWS = [
 ]
 
 _DRAFT = DraftVerdict(
-    hypotheses=["cherry-picked window"], target_hypothesis="cherry-picked window",
+    central_question="cherry-picked window",
     action="provide_context", central_claim="Gas prices fell 8 straight days",
     headline_finding="True but prices are up 44% since January.",
     justification="EIA series shows $2.81 January vs $4.04 April.",
@@ -68,11 +68,29 @@ def test_on_point_primary_source_counts_double():
 
 
 def test_draft_verdict_requires_decision_fields():
-    # finalize must force commitment: hypotheses, target_hypothesis, action,
-    # primary_sources, load_bearing_facts, evidence_refs, verdict_derivation,
-    # confidence, verdict_leaning are all required.
+    # finalize must force commitment: action, central_claim, primary_sources,
+    # load_bearing_facts, evidence_refs, verdict_derivation, confidence,
+    # verdict_leaning are all required.
     with pytest.raises(ValidationError):
         DraftVerdict(central_claim="c", headline_finding="h", justification="j")
+
+
+def test_draftverdict_has_central_question_and_peripheral_facts():
+    d = DraftVerdict(
+        central_question="Were gas prices down on May 8, 2026?",
+        action="verify", central_claim="Gas prices were way down",
+        headline_finding="Gas prices rose, not fell.",
+        justification="AAA shows a rise.",
+        primary_sources=[DraftSource(url="https://gasprices.aaa.com/", display_name="AAA")],
+        load_bearing_facts=["national average $4.55 on May 8"],
+        peripheral_facts=["S&P 500 +0.84%"],
+        evidence_refs=[], verdict_derivation="…",
+        confidence="high", verdict_leaning="refuted",
+    )
+    assert d.central_question.startswith("Were gas prices")
+    assert d.peripheral_facts == ["S&P 500 +0.84%"]
+    assert not hasattr(d, "hypotheses")
+    assert not hasattr(d, "target_hypothesis")
 
 
 # ---- label-fidelity reconciliation (PS-4/EV-14 fix) ----
@@ -114,7 +132,7 @@ def test_assemble_promotes_label_for_verifier_passed_weakly_sourced_refutation(m
                       for u in dict.fromkeys(urls)],
     )
     draft = DraftVerdict(
-        hypotheses=["fabricated"], target_hypothesis="fabricated", action="verify",
+        central_question="fabricated", action="verify",
         central_claim="X donated to campaign Y",
         headline_finding="FALSE — no record of the donation exists.",
         justification="FEC and state records show no such donation.",
@@ -140,7 +158,7 @@ def test_assemble_keeps_nei_when_no_verifier_report():
     d.build_quality_table = lambda urls: [SQE(url=u, tier="unknown", tier_source="model-prior", rationale="t") for u in dict.fromkeys(urls)]
     try:
         draft = DraftVerdict(
-            hypotheses=["h"], target_hypothesis="h", action="verify", central_claim="c",
+            central_question="h", action="verify", central_claim="c",
             headline_finding="FALSE", justification="j",
             primary_sources=[DraftSource(url="https://x.test/a", display_name="X")],
             load_bearing_facts=[], evidence_refs=[EvidenceRef(row=0, stance="refutes")],
