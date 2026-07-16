@@ -19,3 +19,13 @@ def test_unknown_prompt_raises():
     import pytest
     with pytest.raises(FileNotFoundError):
         prompt_store.load_prompt("nope")
+
+
+def test_verifier_prompt_covers_scoped_drops_and_tiers():
+    from agent.factcheck.prompt_store import load_prompt
+    text = load_prompt("verifier")
+    assert "scoped_drops" in text
+    assert "peripheral" in text.lower()
+    assert "central" in text.lower()
+    # reputable-source enforcement for central facts
+    assert "reputable" in text.lower() or "fact-checker" in text.lower()

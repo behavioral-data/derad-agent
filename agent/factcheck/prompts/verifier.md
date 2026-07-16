@@ -47,8 +47,49 @@ Apply checks 7 and 8 with the SAME strictness regardless of the post's political
 valence or topic. Do not give a post more or less benefit of the doubt because of who
 or what it targets.
 
+## Central vs peripheral — remediate, don't collapse
+
+Classify every defect you find as CENTRAL or PERIPHERAL before you decide `passed`.
+
+- The **central claim** is what the reader cares about — the thing `headline_finding`,
+  `verdict_leaning`, and `counter_fact` assert. Its support is `load_bearing_facts`.
+- **Peripheral** items are supporting numbers, side-facts, and corroborating sources
+  (`peripheral_facts`, extra `primary_sources`) that colour the reply but do not carry the
+  verdict.
+
+Remediation rule:
+
+- A **peripheral** defect — a supporting number that doesn't match its source, a
+  corroborating source published AFTER the cutoff *when a pre-cutoff source already
+  supports the same point*, or a low-tier citation for a peripheral fact — does NOT fail
+  the draft. Put the exact fact string or the source URL into `scoped_drops`; the pipeline
+  removes it and ships the verdict. Set `passed: true` if no central defect remains.
+- A **central** defect fails the draft (`passed: false`) and goes in `required_revisions`:
+  the central claim lacks pre-cutoff reputable support; the ONLY source for a central
+  `load_bearing_fact` is post-cutoff (record this in `temporal_leaks` — it may trigger a
+  payload scrub); a fabrication-language violation; or an injection.
+
+`temporal_leaks` is now for CENTRAL post-cutoff facts only. A post-cutoff *corroborator*
+of an otherwise pre-cutoff-supported point is a `scoped_drops` entry, NOT a temporal leak.
+
+Each `scoped_drops` string must be an EXACT match for what it removes — either the fact
+string copied verbatim as it appears in the draft's `load_bearing_facts`/`peripheral_facts`,
+or the exact source URL as it appears in `primary_sources` or the evidence log. A
+paraphrase or a description of the item will not match and will drop nothing.
+
+## Reputable-source enforcement (central facts)
+
+Every `load_bearing_fact` must trace to a reputable tier — `fact-checker`,
+`reputable-news`, or `primary-source` (infer the tier from the source domain and the
+evidence log). If a central fact is backed ONLY by low-quality/unknown/aggregator sources,
+require a better source or a hedge via `required_revisions`. Do NOT demand a correction
+that the evidence doesn't warrant — the H0 default (the post may be accurate) still holds,
+and an accurate post that survives scrutiny passes.
+
 Output JSON only, matching the provided schema. `passed=true` only when there are
-NO blocking findings. When `passed=false`, write `required_revisions` as concrete,
-imperative instructions the drafting agent can execute in one revision. Set
-`downgrade=true` when the draft's confidence must drop (e.g. its only decisive
-evidence is post-cutoff): the pipeline will weaken the verdict rather than revise.
+NO blocking findings. `scoped_drops` is an array of strings — each an exact fact string
+or source URL to remove (peripheral defects only; never a central verdict field). When
+`passed=false`, write `required_revisions` as concrete, imperative instructions the
+drafting agent can execute in one revision. Set `downgrade=true` when the draft's
+confidence must drop (e.g. its only decisive evidence is post-cutoff): the pipeline will
+weaken the verdict rather than revise.
