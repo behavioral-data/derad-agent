@@ -382,6 +382,25 @@ def _lookup_curated(host: str) -> tuple[SourceTier, TierSource, str] | None:
     return None
 
 
+def curated_tier(url: str) -> tuple[SourceTier, TierSource]:
+    """Fast, model-call-free tier lookup for LIVE loop use (fetch_page).
+
+    Returns the curated ``(tier, tier_source)`` for the URL's domain, or
+    ``("unknown", "model-prior")`` when no curated list covers it. This never
+    makes a Claude call — full model-prior classification of unknowns happens
+    later, once, at freeze time in ``build_quality_table``. Subdomain → parent
+    fallback matches ``build_quality_table``'s behavior.
+    """
+    host = _registered_domain(_normalize_domain(canonicalize_url(url)))
+    if not host:
+        return ("unknown", "model-prior")
+    hit = _lookup_curated(host)
+    if hit is not None:
+        tier, tier_source, _rationale = hit
+        return (tier, tier_source)
+    return ("unknown", "model-prior")
+
+
 def build_quality_table(urls: list[str]) -> list[SourceQualityEntry]:
     """Build the source_quality_table for a set of URLs, de-duplicated in
     input order. Non-evidentiary domains (stock-image / shopping / UGC-farm)
