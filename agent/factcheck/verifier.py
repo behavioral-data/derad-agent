@@ -27,6 +27,7 @@ class VerifierOutput(BaseModel):
     derivation_gaps: list[str] = Field(default_factory=list)
     lint_violations: list[str] = Field(default_factory=list)
     injection_flags: list[str] = Field(default_factory=list)
+    scoped_drops: list[str] = Field(default_factory=list)
     fabrication_language_ok: bool = True
     required_revisions: str = ""
     downgrade: bool = False
@@ -106,6 +107,29 @@ def scrub_temporal_leak(draft: DraftVerdict) -> DraftVerdict:
     })
 
 
+def apply_scoped_drops(draft: DraftVerdict, drops: list[str],
+                       rows: list[EvidenceRow]) -> DraftVerdict:
+    """Remove verifier-flagged PERIPHERAL items from the reply-facing draft
+    without touching the verdict. Each drop string is either an exact fact
+    string (matched against load_bearing_facts / peripheral_facts) or a source
+    URL (matched against primary_sources and the row backing an evidence_ref).
+    Central verdict fields (verdict_leaning, headline_finding, counter_fact,
+    verdict_derivation) are never modified here."""
+    if not drops:
+        return draft
+    dropset = set(drops)
+    by_idx = {r.idx: r for r in rows}
+    lb = [f for f in draft.load_bearing_facts if f not in dropset]
+    pf = [f for f in draft.peripheral_facts if f not in dropset]
+    ps = [s for s in draft.primary_sources if s.url not in dropset]
+    er = [e for e in draft.evidence_refs
+          if by_idx.get(e.row) is None or by_idx[e.row].url not in dropset]
+    return draft.model_copy(update={
+        "load_bearing_facts": lb, "peripheral_facts": pf,
+        "primary_sources": ps, "evidence_refs": er,
+    })
+
+
 def _to_report(out: VerifierOutput, revision_used: bool) -> VerifierReport:
     return VerifierReport(
         passed=out.passed,
@@ -117,6 +141,7 @@ def _to_report(out: VerifierOutput, revision_used: bool) -> VerifierReport:
         required_revisions=out.required_revisions,
         downgrade=out.downgrade,
         revision_used=revision_used,
+        scoped_drops=tuple(out.scoped_drops),
     )
 
 
@@ -133,9 +158,12 @@ def run_verified_loop(
                            required_revisions="loop never finalized"), False), stats
 
     out = verify_draft(draft, runtime.rows, post_text=post_text, as_of=as_of, cutoff=cutoff)
+    # Peripheral defects are auto-applied and never block the verdict.
+    draft = apply_scoped_drops(draft, out.scoped_drops, runtime.rows)
     if out.passed:
         return draft, runtime, _to_report(out, False), stats
 
+    # Central defect path: one revision round, then re-verify.
     revision_used = False
     if out.required_revisions.strip():
         revision_used = True
@@ -157,16 +185,18 @@ def run_verified_loop(
             draft = revised
             out = verify_draft(draft, runtime.rows, post_text=post_text,
                                as_of=as_of, cutoff=cutoff)
+            draft = apply_scoped_drops(draft, out.scoped_drops, runtime.rows)
             if out.passed:
                 return draft, runtime, _to_report(out, True), stats
 
-    # Still failing (or nothing revisable) → downgrade, never loop.
+    # Still failing on a CENTRAL defect → downgrade, never loop.
     out.downgrade = True
     if out.temporal_leaks:
-        # A confirmed temporal leak that revision couldn't fix: neutralize the
-        # reply-facing payload so no post-cutoff fact reaches a study participant.
-        # Narrow exception to the advisory-downgrade rule (see scrub_temporal_leak).
-        logger.warning("run_verified_loop: unfixed temporal leak(s) — scrubbing payload: %s",
+        # temporal_leaks now means a CENTRAL post-cutoff fact the revision
+        # could not re-source — the one case that warrants neutralizing the
+        # reply-facing payload (a peripheral post-cutoff corroborator would
+        # have been a scoped_drop instead).
+        logger.warning("run_verified_loop: unfixed CENTRAL temporal leak — scrubbing payload: %s",
                        "; ".join(out.temporal_leaks)[:300])
         return scrub_temporal_leak(draft), runtime, _to_report(out, revision_used), stats
     return apply_downgrade(draft), runtime, _to_report(out, revision_used), stats

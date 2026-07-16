@@ -314,6 +314,7 @@ class VerifierReport(_Frozen):
     required_revisions: str = ""
     downgrade: bool = False
     revision_used: bool = False
+    scoped_drops: tuple[str, ...] = Field(default_factory=tuple)
 
 
 class FrozenVerdict(_Frozen):

@@ -1,13 +1,32 @@
 # tests/test_v07_verifier.py
 from unittest import mock
 
-from agent.factcheck.draft import DraftVerdict
-from agent.factcheck.verifier import VerifierOutput, apply_downgrade, run_verified_loop
+import agent.factcheck.verifier as vmod
+from agent.factcheck.draft import DraftSource, DraftVerdict, EvidenceRef
+from agent.factcheck.loop_tools import EvidenceRow, ToolRuntime
+from agent.factcheck.verifier import (
+    VerifierOutput, _to_report, apply_downgrade, apply_scoped_drops, run_verified_loop,
+)
 
-_D = dict(hypotheses=[], target_hypothesis="", action="verify", central_claim="c",
+_D = dict(central_question="", action="verify", central_claim="c",
           headline_finding="h", justification="j", primary_sources=[],
           load_bearing_facts=[], evidence_refs=[], verdict_derivation="d",
           confidence="high", verdict_leaning="refuted")
+
+
+def _draft(**kw):
+    base = dict(
+        central_question="q", action="verify", central_claim="c",
+        headline_finding="h", justification="j",
+        primary_sources=[DraftSource(url="https://fbi.gov/x", display_name="FBI"),
+                         DraftSource(url="https://americanprogress.org/y", display_name="AP")],
+        load_bearing_facts=["13,000 is a category error"],
+        peripheral_facts=["US had ~16,935 homicides in 2024"],
+        evidence_refs=[EvidenceRef(row=0, stance="refutes", on_point=True)],
+        verdict_derivation="d", confidence="high", verdict_leaning="refuted",
+    )
+    base.update(kw)
+    return DraftVerdict(**base)
 
 
 def test_apply_downgrade_is_advisory():
@@ -109,3 +128,45 @@ def test_run_verified_loop_scrubs_on_unfixed_temporal_leak():
     assert got.verdict_leaning == "insufficient"       # scrubbed (not advisory)
     assert "time it was posted" in got.headline_finding
     assert report.temporal_leaks and report.downgrade
+
+
+def test_apply_scoped_drops_removes_peripheral_fact_and_source():
+    rows = [EvidenceRow(idx=0, url="https://americanprogress.org/y", title="", snippet="",
+                        body_markdown="b", published_at="2026-05-05", origin="fetch")]
+    d = _draft()
+    out = apply_scoped_drops(
+        d,
+        ["US had ~16,935 homicides in 2024", "https://americanprogress.org/y"],
+        rows,
+    )
+    assert "US had ~16,935 homicides in 2024" not in out.peripheral_facts
+    assert all(s.url != "https://americanprogress.org/y" for s in out.primary_sources)
+    assert all(r.row != 0 for r in out.evidence_refs)   # ref to dropped url removed
+    # central fact + verdict untouched
+    assert out.load_bearing_facts == ["13,000 is a category error"]
+    assert out.verdict_leaning == "refuted"
+
+
+def test_to_report_carries_scoped_drops():
+    out = VerifierOutput(passed=True, scoped_drops=["drop me"])
+    rep = _to_report(out, False)
+    assert rep.scoped_drops == ("drop me",)
+    assert rep.passed is True
+
+
+def test_run_verified_loop_scoped_fix_passes_without_scrub(monkeypatch):
+    # Verifier returns a PERIPHERAL-only defect: passed=True + a scoped drop,
+    # no central temporal leak. Expect: verdict kept, drop applied, no scrub.
+    d = _draft()
+    rt = ToolRuntime(cutoff=None)
+    rt.rows = [EvidenceRow(idx=0, url="https://americanprogress.org/y", title="", snippet="",
+                           body_markdown="b", published_at="2026-05-05", origin="fetch")]
+    monkeypatch.setattr(vmod, "run_loop", lambda *a, **k: (d, rt, object(), []))
+    monkeypatch.setattr(vmod, "verify_draft", lambda *a, **k: VerifierOutput(
+        passed=True, scoped_drops=["US had ~16,935 homicides in 2024"]))
+    draft, runtime, report, stats = vmod.run_verified_loop(
+        "post", client=None, ctx=None, as_of=None, cutoff=None)
+    assert report.passed is True
+    assert draft.verdict_leaning == "refuted"                 # NOT scrubbed to insufficient
+    assert "US had ~16,935 homicides in 2024" not in draft.peripheral_facts
+    assert report.scoped_drops == ("US had ~16,935 homicides in 2024",)
