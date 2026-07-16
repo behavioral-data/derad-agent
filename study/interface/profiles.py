@@ -81,3 +81,19 @@ def party_targets(n_templates, conditions, rng):
     for tid, dem_idx in enumerate(assignment):
         out[tid] = {conditions[i]: ("D" if i in dem_idx else "R") for i in idx}
     return out
+
+
+def claim_order(ids_by_condition, conditions, rng):
+    """Permuted-block order: block i = one profile from each condition (shuffled)
+    so condition stays balanced at every multiple of len(conditions) claims."""
+    pools = {c: list(ids_by_condition[c]) for c in conditions}
+    for c in conditions:
+        rng.shuffle(pools[c])
+    n = len(pools[conditions[0]])
+    assert all(len(pools[c]) == n for c in conditions), "conditions must be equal-sized"
+    order = []
+    for i in range(n):
+        block = [pools[c][i] for c in conditions]
+        rng.shuffle(block)
+        order.extend(block)
+    return order

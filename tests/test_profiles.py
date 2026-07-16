@@ -50,3 +50,21 @@ def test_party_targets_balanced():
         assert Counter(m.values()) == {"D": 2, "R": 2}     # 2D/2R per template
     dem_per_cond = Counter(c for m in pt.values() for c, party in m.items() if party == "D")
     assert dem_per_cond == {c: 57 for c in conds}          # 57 Dem-targeted / condition
+
+
+def test_claim_order_permuted_blocks():
+    rng = random.Random(3)
+    conds = ("neutral", "agreeable", "satirical", "control")
+    cond_of = {}
+    ids_by_cond = {}
+    for c in conds:
+        ids = [f"{c}-{i}" for i in range(57)]
+        ids_by_cond[c] = ids
+        for x in ids:
+            cond_of[x] = c
+    order = P.claim_order(ids_by_cond, conds, rng)
+    assert len(order) == 228 and len(set(order)) == 228
+    # each block of 4 has one of each condition
+    for b in range(0, 228, 4):
+        block = order[b:b + 4]
+        assert Counter(cond_of[x] for x in block) == {c: 1 for c in conds}
