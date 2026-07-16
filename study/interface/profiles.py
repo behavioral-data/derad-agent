@@ -65,3 +65,19 @@ def day_layout(template_posts, post_pol, post_topic, days, per_day, rng):
     for d in range(days):
         rng.shuffle(blocks[d])
     return blocks
+
+
+def party_targets(n_templates, conditions, rng):
+    """Assign 2 Dem + 2 Rep conditions per template, balanced so each condition
+    is Dem-targeted in n_templates//2 templates. Uses each C(4,2)=6 Dem-pair
+    equally (n_templates must be divisible by 6)."""
+    idx = list(range(len(conditions)))
+    pairs = list(combinations(idx, 2))               # 6 pairs of Dem-condition indices
+    assert n_templates % len(pairs) == 0, "n_templates must be divisible by C(k,2)"
+    reps = n_templates // len(pairs)
+    assignment = [pr for pr in pairs for _ in range(reps)]
+    rng.shuffle(assignment)
+    out = {}
+    for tid, dem_idx in enumerate(assignment):
+        out[tid] = {conditions[i]: ("D" if i in dem_idx else "R") for i in idx}
+    return out

@@ -39,3 +39,14 @@ def test_day_layout_polarity_and_topic_balance():
             assert set(pol.values()) == {4}          # 4/4/4 per polarity
             top = Counter(POST_TOPIC[p] for p in day)
             assert max(top.values()) <= 2            # topics spread, <=2/topic/day
+
+
+def test_party_targets_balanced():
+    rng = random.Random(20260716)
+    conds = ("neutral", "agreeable", "satirical", "control")
+    pt = P.party_targets(114, conds, rng)
+    assert len(pt) == 114
+    for tid, m in pt.items():
+        assert Counter(m.values()) == {"D": 2, "R": 2}     # 2D/2R per template
+    dem_per_cond = Counter(c for m in pt.values() for c, party in m.items() if party == "D")
+    assert dem_per_cond == {c: 57 for c in conds}          # 57 Dem-targeted / condition
