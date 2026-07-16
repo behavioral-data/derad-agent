@@ -24,3 +24,18 @@ def test_build_templates_exact_exposure_and_per_cell():
     usage = Counter(p for tmpl in templates for p in tmpl)
     assert set(usage.values()) == {38}
     assert len(usage) == 108
+
+
+def test_day_layout_polarity_and_topic_balance():
+    rng = random.Random(1)
+    templates = P.build_templates(CELLS, 114, 2, random.Random(20260716))
+    for tmpl in templates[:10]:
+        blocks = P.day_layout(tmpl, POST_POL, POST_TOPIC, days=3, per_day=12, rng=rng)
+        assert len(blocks) == 3 and all(len(b) == 12 for b in blocks)
+        # union of all days == the template (no loss/dupe)
+        assert sorted(p for b in blocks for p in b) == sorted(tmpl)
+        for day in blocks:
+            pol = Counter(POST_POL[p] for p in day)
+            assert set(pol.values()) == {4}          # 4/4/4 per polarity
+            top = Counter(POST_TOPIC[p] for p in day)
+            assert max(top.values()) <= 2            # topics spread, <=2/topic/day

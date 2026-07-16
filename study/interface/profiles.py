@@ -30,3 +30,32 @@ def build_templates(cells, n_templates, per_cell, rng):
                 chosen.append(p)
         templates.append(chosen)
     return templates
+
+
+def day_layout(template_posts, post_pol, post_topic, days, per_day, rng):
+    """Split a template's posts into `days` daily blocks, each balanced across
+    polarity (per_day//3 each) with topics rotated so no day is topic-heavy."""
+    topics = sorted({post_topic[p] for p in template_posts})
+    n_topics = len(topics)
+    per_pol_day = per_day // 3
+    by_pol = {}
+    for p in template_posts:
+        by_pol.setdefault(post_pol[p], []).append(p)
+    blocks = [[] for _ in range(days)]
+    for k, pol in enumerate(sorted(by_pol)):
+        by_topic = {}
+        for p in by_pol[pol]:
+            by_topic.setdefault(post_topic[p], []).append(p)
+        rot = (per_pol_day * k) % n_topics          # rotate topic order per polarity
+        ordered = topics[rot:] + topics[:rot]
+        seq = []
+        depth = max(len(v) for v in by_topic.values())
+        for i in range(depth):
+            for t in ordered:
+                if i < len(by_topic.get(t, [])):
+                    seq.append(by_topic[t][i])
+        for d in range(days):
+            blocks[d].extend(seq[d * per_pol_day:(d + 1) * per_pol_day])
+    for d in range(days):
+        rng.shuffle(blocks[d])
+    return blocks
