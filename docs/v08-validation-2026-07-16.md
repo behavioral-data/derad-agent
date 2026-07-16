@@ -110,3 +110,43 @@ For reference, the original (pre-redesign) July-8 baseline was 56% engaged / 9% 
 **Still open (pre-existing, not v0.8's scope):** the entity-property blind spot (nurses post)
 → human review, or a future targeted fix. Off-point context on a minority of unseen posts is
 fact-checking-quality headroom, separate from the tone study.
+
+## Refinement round (2026-07-16, commit 3660afb) — anti-overfitting validated
+
+Two GENERAL fixes (no post-specific tuning): **Fix A** — endorsement cap tests a post's
+FALSE FACTUAL PREMISE about an actor/entity (motive/identity/category); **Fix B** —
+`reconcile_outcome_with_finding` extends advisory-downgrade coherence to non-verify actions
+(a substantive challenge/context finding survives an advisory downgrade instead of collapsing
+to `*_unavailable`).
+
+Validated on 3 cohorts (23 posts): FIXED (5 previously-defective), REGRESSION (3 strong
+priors), and **FRESH (15, seed 7, DISJOINT from the explorer-10 and the seen-15)** — the
+generalization gate.
+
+| cohort | buckets | judge (aligned/partial/missed) |
+|---|---|---|
+| FIXED (5) | 3 engaged / 1 miss / 1 endorsed | 1 / 1 / 3 |
+| REGRESSION (3) | 3 engaged / 0 / 0 | 3 / 0 / 0 |
+| **FRESH (15)** | **15 engaged / 0 miss / 0 endorsed** | 6 / 5 / 4 |
+
+Pre-refinement held-out (seen 15) was 11 engaged / 3 miss / 1 endorsed. **FRESH went to
+15 / 0 / 0 — strictly better on an unseen set → the fixes GENERALIZE, they are not overfit.**
+No regressions on the strong priors.
+
+**What Fix B fixed:** the label-granularity punts. The Fourth-Amendment reply went
+`challenge_unavailable` → `context_provided` (judge aligned); a second punt likewise engaged.
+FRESH shows 0 punts.
+
+**What did NOT get fixed — the nurses endorsement (`2025036200113766559`), honestly:** still
+`verified_supported`. Diagnosis: `verifier passed=False, downgrade=True` — the verifier DID
+object, but the **endorsement cap is enforced only advisorily** (`apply_downgrade` lowers
+confidence without re-casting `supported`→`provide_context`), so the flagged verdict still
+ships. Compounded by the agent never gathering NYP's nonprofit status (evidence gap). This is
+the documented **entity-property blind spot** — a 3-layer issue (evidence-gathering +
+recognition + enforcement) that resists a clean general fix; forcing it further risks
+overfitting to this one case. Recommended: human review, or a separate (general) change to
+make the endorsement cap ENFORCED rather than advisory — which has live-deployment
+implications and warrants its own validation.
+
+**Net:** the refinement resolved the label-bug punts and generalized cleanly (fresh 15/0/0);
+the single endorsement is the deep, documented blind spot, deliberately not chased further.
