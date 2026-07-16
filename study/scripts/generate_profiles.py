@@ -31,7 +31,11 @@ def run(db_path, out_dir):
         def code_lookup(post_id, condition):
             key = (post_id, condition)
             if key not in code_cache:
-                code_cache[key] = dbmod.code_for(conn, post_id, condition)
+                code = dbmod.code_for(conn, post_id, condition)
+                if code is None:
+                    raise LookupError(
+                        f"no access code in study.db for post {post_id} / condition {condition}")
+                code_cache[key] = code
             return code_cache[key]
 
         profiles, claim_orders = generate_profiles(cells, code_lookup, seed=SEED)
