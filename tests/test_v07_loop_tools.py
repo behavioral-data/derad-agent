@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest import mock
 
+import pytest
+
 import agent.factcheck.loop_tools as lt
 from agent.factcheck.loop_tools import ToolRuntime, UNTRUSTED_CLOSE, UNTRUSTED_OPEN
 from agent.factcheck.search import FetchedPage
@@ -69,6 +71,16 @@ def test_curated_tier_unknown_domain_no_model_call():
     tier, source = curated_tier("https://some-random-blog-xyz-9999.example/post")
     assert tier == "unknown"
     assert source == "model-prior"
+
+
+@pytest.mark.parametrize("url,expected", [
+    ("https://www.bbc.com/news/x", "reputable-news"),
+    ("https://gasprices.aaa.com/", "primary-source"),
+    ("https://www.factcheck.org/2024/x/", "fact-checker"),
+])
+def test_curated_tier_covers_common_reference_domains(url, expected):
+    tier, _ = curated_tier(url)
+    assert tier == expected
 
 
 def test_fetch_page_emits_source_tier(monkeypatch):

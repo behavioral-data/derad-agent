@@ -850,6 +850,7 @@
           "archives.gov",
           "arxiv.org",
           "biorxiv.org",
+          "bls.gov",
           "bmj.com",
           "canada.ca",
           "cdc.gov",
@@ -865,6 +866,7 @@
           "ec.europa.eu",
           "echr.coe.int",
           "ed.gov",
+          "eia.gov",
           "energy.gov",
           "epa.gov",
           "europa.eu",
@@ -872,6 +874,7 @@
           "fbi.gov",
           "fda.gov",
           "ftc.gov",
+          "gasprices.aaa.com",
           "gc.ca",
           "gov.au",
           "gov.nz",
@@ -894,6 +897,7 @@
           "nature.com",
           "ncbi.nlm.nih.gov",
           "nejm.org",
+          "newsroom.aaa.com",
           "nih.gov",
           "noaa.gov",
           "oecd.org",
@@ -1068,6 +1072,9 @@
           "wired.com",
           "wsj.com",
           "zeit.de"
+        ],
+        "low-quality": [
+          "grokipedia.com"
         ]
       }
     },
