@@ -77,6 +77,14 @@ string copied verbatim as it appears in the draft's `load_bearing_facts`/`periph
 or the exact source URL as it appears in `primary_sources` or the evidence log. A
 paraphrase or a description of the item will not match and will drop nothing.
 
+A defective, uncertain, or post-cutoff NUMBER (or name/date) that appears in the
+reply-facing prose — `headline_finding`, `counter_fact`, `context_note`, or
+`justification` — is CENTRAL to the reply and must go in `required_revisions` (the drafter
+re-writes the prose without it), NOT `scoped_drops`. Use `scoped_drops` only for (a) an
+extra cited source to remove, or (b) a `peripheral_facts` list entry the drafter kept OUT
+of the reply prose. A `scoped_drops` entry never edits prose, so anything embedded in the
+reply text must be a revision, not a drop.
+
 ## Reputable-source enforcement (central facts)
 
 Every `load_bearing_fact` must trace to a reputable tier — `fact-checker`,

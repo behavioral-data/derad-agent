@@ -16,6 +16,7 @@ from .llm import call_claude_json
 from .loop import revise_in_loop, run_loop
 from .loop_tools import UNTRUSTED_CLOSE, UNTRUSTED_OPEN, EvidenceRow, ToolRuntime
 from .prompt_store import load_prompt
+from .render_lint import extract_numerals
 from .schema import VerifierReport
 
 logger = logging.getLogger(__name__)
@@ -124,10 +125,46 @@ def apply_scoped_drops(draft: DraftVerdict, drops: list[str],
     ps = [s for s in draft.primary_sources if s.url not in dropset]
     er = [e for e in draft.evidence_refs
           if by_idx.get(e.row) is None or by_idx[e.row].url not in dropset]
+    # Exact-match/URL-drift debugging aid: surface any drop that removed
+    # nothing (not a load_bearing/peripheral fact, not a primary-source or
+    # referenced-row URL). Return behavior is unchanged.
+    matched = ({f for f in draft.load_bearing_facts if f in dropset}
+               | {f for f in draft.peripheral_facts if f in dropset}
+               | {s.url for s in draft.primary_sources if s.url in dropset}
+               | {by_idx[e.row].url for e in draft.evidence_refs
+                  if by_idx.get(e.row) is not None and by_idx[e.row].url in dropset})
+    unmatched = dropset - matched
+    if unmatched:
+        logger.debug("apply_scoped_drops: %d drop string(s) matched nothing "
+                     "(no field/url removed): %s", len(unmatched), sorted(unmatched))
     return draft.model_copy(update={
         "load_bearing_facts": lb, "peripheral_facts": pf,
         "primary_sources": ps, "evidence_refs": er,
     })
+
+
+def _warn_prose_residual(drops: list[str], draft: DraftVerdict) -> None:
+    """VISIBILITY-ONLY defense-in-depth for the prose-residual gap.
+
+    `scoped_drops` never edits reply prose. If a dropped string's numeral(s)
+    still appear in the concatenated reply-facing prose (`headline_finding` +
+    `counter_fact` + `context_note` + `justification`), the verifier mis-routed
+    a prose-embedded defect through `scoped_drops` instead of
+    `required_revisions`. Log it so the leak is auditable — do NOT scrub here:
+    auto-scrubbing would re-introduce the NEI collapse this feature exists to
+    fix."""
+    if not drops:
+        return
+    prose = " ".join(p for p in (draft.headline_finding, draft.counter_fact,
+                                 draft.context_note, draft.justification) if p)
+    prose_numerals = extract_numerals(prose)
+    for drop in drops:
+        leaked = extract_numerals(drop) & prose_numerals
+        if leaked:
+            logger.warning(
+                "run_verified_loop: scoped_drop %r left numeral(s) %s in reply prose "
+                "— a prose-embedded defect must be a required_revision, not a drop",
+                drop, sorted(leaked))
 
 
 def _to_report(out: VerifierOutput, revision_used: bool) -> VerifierReport:
@@ -161,6 +198,7 @@ def run_verified_loop(
     # Peripheral defects are auto-applied and never block the verdict.
     draft = apply_scoped_drops(draft, out.scoped_drops, runtime.rows)
     if out.passed:
+        _warn_prose_residual(out.scoped_drops, draft)
         return draft, runtime, _to_report(out, False), stats
 
     # Central defect path: one revision round, then re-verify.
@@ -187,6 +225,7 @@ def run_verified_loop(
                                as_of=as_of, cutoff=cutoff)
             draft = apply_scoped_drops(draft, out.scoped_drops, runtime.rows)
             if out.passed:
+                _warn_prose_residual(out.scoped_drops, draft)
                 return draft, runtime, _to_report(out, True), stats
 
     # Still failing on a CENTRAL defect → downgrade, never loop.

@@ -153,6 +153,9 @@ exact-homicide-total is a peripheral fact → dropped from the reply. No NEI.
 - `VerifierReport` (`agent/factcheck/schema.py`): add `scoped_drops: tuple[str, ...]`
   recording what was removed, for freeze transparency. `passed` now means "central claim
   stands" (possibly after scoped drops); `downgrade` remains for central failures.
+- `scoped_drops` removes structured entries (extra sources + `peripheral_facts` list items);
+  it does NOT edit reply prose — a defective value embedded in prose is handled by
+  `required_revisions`, not a drop.
 
 ### C4 — Reputable-source list: wired into the loop + expanded
 

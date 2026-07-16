@@ -1,4 +1,5 @@
 # tests/test_v07_verifier.py
+import logging
 from unittest import mock
 
 import agent.factcheck.verifier as vmod
@@ -169,4 +170,70 @@ def test_run_verified_loop_scoped_fix_passes_without_scrub(monkeypatch):
     assert report.passed is True
     assert draft.verdict_leaning == "refuted"                 # NOT scrubbed to insufficient
     assert "US had ~16,935 homicides in 2024" not in draft.peripheral_facts
+    assert report.scoped_drops == ("US had ~16,935 homicides in 2024",)
+
+
+def test_prose_residual_warning_fires_when_dropped_numeral_stays_in_prose(monkeypatch, caplog):
+    # FIX 1 defense-in-depth: a scoped_drop whose numeral is embedded in the
+    # reply prose (justification) can't be scrubbed by apply_scoped_drops — the
+    # numeral survives. Assert the VISIBILITY warning fires (verdict unchanged).
+    d = _draft(justification="The US had roughly 16,935 homicides in 2024, per FBI UCR.")
+    rt = ToolRuntime(cutoff=None)
+    rt.rows = [EvidenceRow(idx=0, url="https://americanprogress.org/y", title="", snippet="",
+                           body_markdown="b", published_at="2026-05-05", origin="fetch")]
+    monkeypatch.setattr(vmod, "run_loop", lambda *a, **k: (d, rt, object(), []))
+    monkeypatch.setattr(vmod, "verify_draft", lambda *a, **k: VerifierOutput(
+        passed=True, scoped_drops=["US had ~16,935 homicides in 2024"]))
+    with caplog.at_level(logging.WARNING, logger="agent.factcheck.verifier"):
+        draft, _, report, _ = vmod.run_verified_loop(
+            "post", client=None, ctx=None, as_of=None, cutoff=None)
+    assert report.passed is True
+    assert draft.verdict_leaning == "refuted"                 # behavior UNCHANGED (no scrub)
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("left numeral" in m and "US had ~16,935 homicides in 2024" in m for m in warnings)
+
+
+def test_prose_residual_warning_silent_when_numeral_not_in_prose(monkeypatch, caplog):
+    # Same scoped drop, but the numeral is NOT in the reply prose (default
+    # justification "j"): the drop cleanly removes the peripheral fact, so no
+    # warning should fire.
+    d = _draft()  # justification="j", no numeral; drop targets a peripheral fact
+    rt = ToolRuntime(cutoff=None)
+    rt.rows = [EvidenceRow(idx=0, url="https://americanprogress.org/y", title="", snippet="",
+                           body_markdown="b", published_at="2026-05-05", origin="fetch")]
+    monkeypatch.setattr(vmod, "run_loop", lambda *a, **k: (d, rt, object(), []))
+    monkeypatch.setattr(vmod, "verify_draft", lambda *a, **k: VerifierOutput(
+        passed=True, scoped_drops=["US had ~16,935 homicides in 2024"]))
+    with caplog.at_level(logging.WARNING, logger="agent.factcheck.verifier"):
+        _, _, report, _ = vmod.run_verified_loop(
+            "post", client=None, ctx=None, as_of=None, cutoff=None)
+    assert report.passed is True
+    assert not any("left numeral" in r.getMessage() for r in caplog.records)
+
+
+def test_run_verified_loop_scoped_drop_on_post_revision_reverify(monkeypatch):
+    # FIX 2: second apply point. First verify FAILS with required_revisions;
+    # revise_in_loop yields a revised draft; the SECOND verify PASSES with a
+    # scoped drop targeting a peripheral fact present in the revised draft.
+    # Expect: passed, verdict kept (not scrubbed), drop applied to the revised
+    # draft, and report.scoped_drops reflects it.
+    d1 = _draft()
+    d2 = _draft(justification="revised: category-error stands on FBI + fact-checker rows")
+    rt = ToolRuntime(cutoff=None)
+    rt.rows = [EvidenceRow(idx=0, url="https://americanprogress.org/y", title="", snippet="",
+                           body_markdown="b", published_at="2026-05-05", origin="fetch")]
+    outs = iter([
+        VerifierOutput(passed=False, required_revisions="rewrite the prose without the total"),
+        VerifierOutput(passed=True, scoped_drops=["US had ~16,935 homicides in 2024"]),
+    ])
+    monkeypatch.setattr(vmod, "run_loop", lambda *a, **k: (d1, rt, object(), []))
+    monkeypatch.setattr(vmod, "verify_draft", lambda *a, **k: next(outs))
+    monkeypatch.setattr(vmod, "revise_in_loop", lambda *a, **k: (d2, object()))
+    draft, _, report, _ = vmod.run_verified_loop(
+        "post", client=None, ctx=None, as_of=None, cutoff=None)
+    assert report.passed is True
+    assert report.revision_used is True
+    assert draft.verdict_leaning == "refuted"                 # verdict kept, not scrubbed
+    assert draft.justification == "revised: category-error stands on FBI + fact-checker rows"
+    assert "US had ~16,935 homicides in 2024" not in draft.peripheral_facts  # drop applied
     assert report.scoped_drops == ("US had ~16,935 homicides in 2024",)
