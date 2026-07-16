@@ -8,6 +8,7 @@ docs/superpowers/specs/2026-07-16-participant-profiles-design.md.
 from __future__ import annotations
 
 import random
+from collections import Counter
 from dataclasses import dataclass
 from itertools import combinations
 
@@ -135,35 +136,56 @@ def generate_profiles(cells, code_lookup, *, n_templates=N_TEMPLATES, per_cell=P
             party = ptargets[tid][cond]
             pid = f"P{len(profiles) + 1:03d}"
             codes = [code_lookup(post, cond) for blk in layouts[tid] for post in blk]
-            profiles.append(Profile(pid, tid, cond, party, layouts[tid], codes))
+            profiles.append(Profile(pid, tid, cond, party, [list(b) for b in layouts[tid]], codes))
             by_party_cond[party][cond].append(pid)
 
     claim_orders = {p: claim_order(by_party_cond[p], conditions, rng) for p in ("D", "R")}
     return profiles, claim_orders
 
 
-def verify_balance(profiles, cells, conditions=CONDITIONS):
-    """Recompute every §5 guarantee from the generated pool. Returns a report
-    dict with an `ok` bool and the individual check results."""
-    from collections import Counter
+def verify_balance(profiles, cells, *, n_templates=N_TEMPLATES, per_cell=PER_CELL,
+                   days=DAYS, per_day=PER_DAY, conditions=CONDITIONS):
+    """Recompute every §5 guarantee against the SPEC constants (not the pool's
+    own values, which would be tautological). Returns {check: bool, ..., ok: bool}."""
     post_pol = {pid: pol for (t, pol), ids in cells.items() for pid in ids}
     post_topic = {pid: t for (t, pol), ids in cells.items() for pid in ids}
+    all_posts = set(post_pol)
+    posts_per_cell = len(next(iter(cells.values())))
+    topics = {t for (t, _p) in cells}
+    pols = {p for (_t, p) in cells}
+    expected_exposure = n_templates * per_cell // posts_per_cell
     checks = {}
-    checks["count"] = len(profiles) == len(conditions) * (len(profiles) // len(conditions))
+    checks["count"] = len(profiles) == n_templates * len(conditions)
+    checks["n_templates"] = len({p.template_id for p in profiles}) == n_templates
     checks["per_condition"] = (Counter(p.condition for p in profiles)
-                               == {c: len(profiles) // len(conditions) for c in conditions})
-    checks["party_x_condition"] = len(set(
-        Counter((p.target_party, p.condition) for p in profiles).values())) == 1
-    per_ppt = []
+                               == {c: n_templates for c in conditions})
+    checks["party_x_condition"] = (
+        Counter((p.target_party, p.condition) for p in profiles)
+        == {(party, c): n_templates // 2 for party in ("D", "R") for c in conditions})
+    by_template = {}
+    for p in profiles:
+        by_template.setdefault(p.template_id, Counter())[p.target_party] += 1
+    half = len(conditions) // 2
+    checks["party_per_template"] = all(
+        cnt == {"D": half, "R": half} for cnt in by_template.values())
+    ok_ppt = True
+    exp_topic = {t: per_cell * len(pols) for t in topics}
+    exp_pol = {pl: per_cell * len(topics) for pl in pols}
     for p in profiles:
         flat = [x for b in p.blocks for x in b]
-        per_ppt.append(len(set(Counter(post_topic[x] for x in flat).values())) == 1
-                       and len(set(Counter(post_pol[x] for x in flat).values())) == 1)
-    checks["per_participant_balance"] = all(per_ppt)
+        if (len(flat) != per_cell * len(cells) or len(p.blocks) != days
+                or any(len(b) != per_day for b in p.blocks)
+                or Counter(post_topic[x] for x in flat) != exp_topic
+                or Counter(post_pol[x] for x in flat) != exp_pol):
+            ok_ppt = False
+            break
+    checks["per_participant_balance"] = ok_ppt
     per_cond = {c: Counter() for c in conditions}
     for p in profiles:
         for x in (x for b in p.blocks for x in b):
             per_cond[p.condition][x] += 1
-    checks["post_exposure_even"] = all(len(set(per_cond[c].values())) == 1 for c in conditions)
-    checks["ok"] = all(checks.values())
+    checks["post_exposure_even"] = all(
+        set(per_cond[c]) == all_posts and set(per_cond[c].values()) == {expected_exposure}
+        for c in conditions)
+    checks["ok"] = all(v for k, v in checks.items() if k != "ok")
     return checks

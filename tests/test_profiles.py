@@ -114,3 +114,13 @@ def test_generate_profiles_full_balance():
 
     rep = P.verify_balance(profiles, CELLS)
     assert rep["ok"] is True
+
+
+def test_verify_balance_detects_imbalance():
+    import dataclasses
+    profiles, _ = P.generate_profiles(CELLS, _code, seed=20260716)
+    assert P.verify_balance(profiles, CELLS)["ok"] is True            # good pool passes
+    all_dem = [dataclasses.replace(p, target_party="D") for p in profiles]
+    assert P.verify_balance(all_dem, CELLS)["ok"] is False            # party imbalance caught
+    two_templates = [p for p in profiles if p.template_id < 2]
+    assert P.verify_balance(two_templates, CELLS)["ok"] is False      # under-generation caught
