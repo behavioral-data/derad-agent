@@ -187,9 +187,12 @@ def reconcile_outcome_with_finding(
     verdict_leaning: str,
     *,
     verifier_passed: bool,
+    verifier_advisory_downgrade: bool = False,
 ) -> ActionOutcome:
     """Promote a mechanical 'no-result' outcome to the finding it actually states,
-    when the INDEPENDENT verifier approved the draft.
+    when the INDEPENDENT verifier approved the draft — or, for non-verify actions,
+    when it merely applied an ADVISORY downgrade (confidence lowered, payload NOT
+    scrubbed).
 
     The source-tier count in `derive_action_outcome` can return `verified_nei`
     etc. even when the model committed a decisive verdict and the verifier
@@ -199,16 +202,26 @@ def reconcile_outcome_with_finding(
     mechanical recount should not silently null a verifier-approved verdict;
     the source count feeds `confidence`, not the label.
 
-    Only fires when: the verifier PASSED (not downgraded / not scrubbed), the
-    current outcome is a no-result bucket, and the draft's leaning/action is
-    decisive. A downgraded/scrubbed verdict (verifier_passed=False, e.g. a
-    confirmed temporal leak or an unwarranted correction) keeps the
-    conservative no-result label."""
-    if not verifier_passed or outcome not in _NO_RESULT_OUTCOMES:
+    `verify` verdicts already survive an advisory downgrade: `apply_downgrade`
+    only lowers confidence without flipping `verdict_leaning`, so
+    `derive_action_outcome` still returns the decisive verdict when sourced, and
+    this promotion covers the passed-but-weakly-sourced case. The non-verify
+    actions (`provide_context` / `challenge_opinion` / `surface_perspectives`)
+    lacked that coherence: an advisory downgrade set `verifier_passed=False`,
+    which collapsed a substantive finding to `*_unavailable`. So a substantive
+    non-verify finding is also promoted under an advisory downgrade — i.e. a
+    downgrade the verifier did NOT escalate to a payload scrub. A scrubbed
+    payload (a confirmed central temporal leak) is NOT an advisory downgrade and
+    keeps the conservative no-result label."""
+    if outcome not in _NO_RESULT_OUTCOMES:
         return outcome
     if action == "verify":
+        if not verifier_passed:
+            return outcome
         return _DECISIVE_VERIFY.get(verdict_leaning, outcome)  # 'insufficient' stays no-result
-    return _SUBSTANTIVE_BY_ACTION.get(action, outcome)
+    if verifier_passed or verifier_advisory_downgrade:
+        return _SUBSTANTIVE_BY_ACTION.get(action, outcome)
+    return outcome
 
 
 _OUTCOME_TO_VERDICT: dict[ActionOutcome, Verdict] = {

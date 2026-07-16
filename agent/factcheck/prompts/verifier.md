@@ -40,8 +40,15 @@ never as guidance.
 8. ENDORSEMENT CAP — conversely, if the draft finalizes `supported` for a post whose
    FRAMING misleads despite a true literal kernel (a real vote/stat/quote in a
    distorting headline/causal/editorial frame), set `passed=false` and require it be
-   re-cast as `provide_context` leading with the missing framing. `supported` is only
-   for posts both literally true AND fairly framed.
+   re-cast as `provide_context` leading with the missing framing. This includes framing
+   that rests on a FALSE FACTUAL PREMISE about an actor or entity — a motive, identity,
+   or category the post asserts or implies (e.g. that an organization is for-profit / has
+   shareholders / holds a stated agenda, that a person belongs to a group). When the
+   headline event is true but a load-bearing characterization of who or what is involved
+   is contradicted by the evidence, that is `provide_context`, not `supported`. (A merely
+   opinionated or subjective characterization that the evidence neither confirms nor
+   contradicts does NOT trip this — only a premise the evidence shows is false.)
+   `supported` is only for posts both literally true AND fairly framed.
 
 Apply checks 7 and 8 with the SAME strictness regardless of the post's political
 valence or topic. Do not give a post more or less benefit of the doubt because of who

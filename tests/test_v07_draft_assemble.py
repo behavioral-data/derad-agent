@@ -121,6 +121,31 @@ def test_reconcile_leaves_conservative_labels_when_verifier_did_not_pass():
                                           verifier_passed=True) == "verified_supported"
 
 
+def test_reconcile_non_verify_survives_advisory_downgrade():
+    # A substantive challenge/context finding survives an ADVISORY downgrade
+    # (confidence lowered, payload not scrubbed) the same way a verify verdict
+    # does — it must not collapse to *_unavailable on a minor verifier concern.
+    assert reconcile_outcome_with_finding(
+        "challenge_unavailable", "challenge_opinion", "insufficient",
+        verifier_passed=False, verifier_advisory_downgrade=True) == "challenged"
+    assert reconcile_outcome_with_finding(
+        "context_unavailable", "provide_context", "insufficient",
+        verifier_passed=False, verifier_advisory_downgrade=True) == "context_provided"
+
+
+def test_reconcile_advisory_downgrade_does_not_rescue_verify_or_scrub():
+    # verify does NOT get promoted by an advisory downgrade (it already has
+    # advisory-downgrade coherence via apply_downgrade keeping verdict_leaning).
+    assert reconcile_outcome_with_finding(
+        "verified_nei", "verify", "refuted",
+        verifier_passed=False, verifier_advisory_downgrade=True) == "verified_nei"
+    # No pass and no advisory downgrade (e.g. a scrub → advisory flag is False) →
+    # non-verify keeps the conservative no-result label.
+    assert reconcile_outcome_with_finding(
+        "challenge_unavailable", "challenge_opinion", "insufficient",
+        verifier_passed=False, verifier_advisory_downgrade=False) == "challenge_unavailable"
+
+
 def test_assemble_promotes_label_for_verifier_passed_weakly_sourced_refutation(monkeypatch):
     from agent.factcheck.schema import VerifierReport
     monkeypatch.setattr(

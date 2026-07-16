@@ -157,9 +157,16 @@ def assemble_frozen(
     # derivable + warranted, so a mechanical no-result label (from the source
     # count) shouldn't contradict a decisive reply. Promote it to match the
     # finding; a downgraded/scrubbed verdict keeps the conservative label.
+    # An advisory downgrade = confidence lowered but the payload was NOT scrubbed
+    # (a scrub is the only hard no-result, and it is signalled by a confirmed
+    # central temporal leak). A substantive non-verify finding survives it.
+    advisory_downgrade = bool(
+        verifier_report and verifier_report.downgrade and not verifier_report.temporal_leaks
+    )
     action_outcome = reconcile_outcome_with_finding(
         action_outcome, draft.action, draft.verdict_leaning,
         verifier_passed=bool(verifier_report and verifier_report.passed),
+        verifier_advisory_downgrade=advisory_downgrade,
     )
     payload = PresentationPayload(
         headline_finding=draft.headline_finding,

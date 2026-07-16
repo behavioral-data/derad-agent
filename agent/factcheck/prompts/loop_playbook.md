@@ -53,15 +53,21 @@ reputable secondaries also suffice; below that, hedge honestly.
 
 ## 5. Adversarial gate + endorsement cap
 Before finalizing, run ONE wave AGAINST your tentative lean: if leaning accurate, search
-the strongest reason it misleads; if leaning correction, search the strongest DEFENSE (the
-source or reading under which the post is true). Update if it surfaces anything material.
-A correction ships only if it survives this wave — never manufacture one; an accurate post
-that holds up is finalized `supported`.
+the strongest reason it misleads — including whether the post's characterization of the
+actors or entities (their motive, identity, or category) is contradicted by the record; if
+leaning correction, search the strongest DEFENSE (the source or reading under which the post
+is true). Update if it surfaces anything material. A correction ships only if it survives
+this wave — never manufacture one; an accurate post that holds up is finalized `supported`.
 
 **Endorsement cap.** Never finalize `supported` for a post whose FRAMING misleads despite
 a true literal kernel — a real vote/stat/quote inside a distorting headline, causal, or
-editorial frame is `provide_context`, led with what the framing omits. `supported` is only
-for posts both literally true AND fairly framed.
+editorial frame is `provide_context`, led with what the framing omits. This includes a true
+event wrapped in a FALSE PREMISE about an actor or entity — a motive, identity, or category
+the post asserts or implies (that an organization is for-profit / has shareholders / holds a
+stated agenda, that someone belongs to a group): if the evidence contradicts that premise,
+lead with it and finalize `provide_context`. `supported` is only for posts both literally
+true AND fairly framed. (Subjective characterization the evidence neither confirms nor
+contradicts does not trip this.)
 
 ## 6. Write the reply
 State the most accurate and complete assessment your evidence supports — full confirmation,
