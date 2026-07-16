@@ -680,7 +680,6 @@ from __future__ import annotations
 from collections import Counter
 from study.interface.study_store import InMemoryStudyStore, StoredProfile
 
-CONडS = ("neutral", "agreeable", "satirical", "control")
 CONDS = ("neutral", "agreeable", "satirical", "control")
 
 
@@ -780,7 +779,7 @@ class StoredProfile:
                     break
 ```
 
-(Delete the stray `CONडS` line if you copied the test verbatim — it is a decoy to confirm you read the test; keep only `CONDS`.)
+(In the test above, `CONDS` is the single condition tuple — no other spelling.)
 
 - [ ] **Step 4: Run test to verify it passes**
 
