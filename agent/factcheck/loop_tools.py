@@ -33,7 +33,6 @@ class EvidenceRow:
     published_at: Optional[str]
     origin: str            # "search" | "fetch" | "post_link"
     via_snapshot: bool = False
-    tier: str = "unknown"
 
 
 @dataclass
@@ -48,12 +47,10 @@ class ToolRuntime:
 
     def record_search_results(self, query: str, results: list[dict]) -> None:
         for r in results:
-            url = r.get("url", "")
-            tier, _ = curated_tier(url) if url else ("unknown", "model-prior")
             self._append(
-                url=url, title=r.get("title", ""),
+                url=r.get("url", ""), title=r.get("title", ""),
                 snippet=(r.get("snippet") or "")[:400], body_markdown="",
-                published_at=None, origin="search", tier=tier,
+                published_at=None, origin="search",
             )
 
     def fetch_page(self, url: str, *, origin: str = "fetch") -> str:
@@ -64,18 +61,18 @@ class ToolRuntime:
             via_snapshot = page is not None
         if page is None:
             page = _fetch_clean_page(url)
-        tier, tier_source = curated_tier(url)
+        tier, tier_source = curated_tier(url)  # for the live source_tier signal below
         if page.status is None or (page.status or 0) >= 400 or not page.body_markdown:
             self._append(url=url, title=page.title or "", snippet="",
                          body_markdown="", published_at=page.published_date,
-                         origin=origin, via_snapshot=via_snapshot, tier=tier)
+                         origin=origin, via_snapshot=via_snapshot)
             return (f"FETCH FAILED for {url} (status={page.status}). The URL may be "
                     "paywalled/blocked; try another source or a search instead.")
         row = self._append(
             url=url, title=page.title or "", snippet="",
             body_markdown=page.body_markdown[:_BODY_CAP],
             published_at=page.published_date, origin=origin,
-            via_snapshot=via_snapshot, tier=tier,
+            via_snapshot=via_snapshot,
         )
         return (
             f"evidence_row: {row.idx}\n"

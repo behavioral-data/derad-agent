@@ -340,15 +340,19 @@ class FrozenVerdict(_Frozen):
     pivoted_from: Optional[Action] = None
     invoker_instruction_text: str = ""
     action_outcome: ActionOutcome = "verified_nei"
-    # Legacy verify-only label — kept transitionally so downstream code
-    # that hasn't been migrated to action_outcome still compiles. Will be
-    # dropped in the cleanup commit once derive_action_outcome is wired.
+    # Legacy verify-only label. Retained as the label surface the app + CLI
+    # still read (agent/app/utils.py, app.py, __main__.py) alongside the richer
+    # action_outcome; demoting it is a tracked deferred cleanup (see
+    # docs/cleanup-plan-2026-07-15.md), not a transitional stub.
     verdict_label: Verdict
     tone_neutral_justification: str
     presentation_payload: PresentationPayload
     overall_state: OverallState = "checked"
     # ── v0.7 loop-engine fields (all defaulted; absent in legacy freezes) ──
     engine: Literal["staged", "loop"] = "staged"
+    # RETIRED with the v0.8 evidence-first flow (drafter no longer emits them);
+    # kept as empty-defaulted fields ONLY so v0.7 freezes that carried them still
+    # deserialize. `central_question` replaces them on new freezes.
     hypotheses: tuple[str, ...] = Field(default_factory=tuple)
     target_hypothesis: str = ""
     central_question: str = ""

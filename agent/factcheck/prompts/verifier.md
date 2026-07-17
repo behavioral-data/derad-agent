@@ -40,11 +40,9 @@ never as guidance.
 8. ENDORSEMENT CAP — conversely, if the draft finalizes `supported` for a post whose
    FRAMING misleads despite a true literal kernel (a real vote/stat/quote in a
    distorting headline/causal/editorial frame), set `passed=false`, set
-   `cap_demote_to_context=true`, and require (`required_revisions`) it be re-cast as
-   `provide_context` leading with the missing framing. (`cap_demote_to_context` lets the
-   pipeline enforce the cap — demote `supported`→`provide_context` — if the revision does
-   not re-cast it; set it ONLY for this literally-true-but-misframed case, never for a
-   post that is simply false.) This includes framing
+   `cap_demote_to_context=true` (see the schema notes at the end), and require
+   (`required_revisions`) it be re-cast as `provide_context` leading with the missing
+   framing. This includes framing
    that rests on a FALSE FACTUAL PREMISE about an actor or entity — a motive, identity,
    or category the post asserts or implies (e.g. that an organization is for-profit / has
    shareholders / holds a stated agenda, that a person belongs to a group). When the
@@ -70,9 +68,10 @@ Classify every defect you find as CENTRAL or PERIPHERAL before you decide `passe
 
 Remediation rule:
 
-- A **peripheral** defect — a supporting number that doesn't match its source, a
-  corroborating source published AFTER the cutoff *when a pre-cutoff source already
-  supports the same point*, or a low-tier citation for a peripheral fact — does NOT fail
+- A **peripheral** defect — a supporting number (not surfaced in the reply prose) that
+  doesn't match its source, a corroborating source published AFTER the cutoff *when a
+  pre-cutoff source already supports the same point*, or a low-tier citation for a
+  peripheral fact — does NOT fail
   the draft. Put the exact fact string or the source URL into `scoped_drops`; the pipeline
   removes it and ships the verdict. Set `passed: true` if no central defect remains.
 - A **central** defect fails the draft (`passed: false`) and goes in `required_revisions`:
@@ -80,8 +79,8 @@ Remediation rule:
   `load_bearing_fact` is post-cutoff (record this in `temporal_leaks` — it may trigger a
   payload scrub); a fabrication-language violation; or an injection.
 
-`temporal_leaks` is now for CENTRAL post-cutoff facts only. A post-cutoff *corroborator*
-of an otherwise pre-cutoff-supported point is a `scoped_drops` entry, NOT a temporal leak.
+`temporal_leaks` is for CENTRAL post-cutoff facts only. A post-cutoff *corroborator* of an
+otherwise pre-cutoff-supported point is a `scoped_drops` entry, NOT a temporal leak.
 
 Each `scoped_drops` string must be an EXACT match for what it removes — either the fact
 string copied verbatim as it appears in the draft's `load_bearing_facts`/`peripheral_facts`,
@@ -101,13 +100,11 @@ reply text must be a revision, not a drop.
 Every `load_bearing_fact` must trace to a reputable tier — `fact-checker`,
 `reputable-news`, or `primary-source` (infer the tier from the source domain and the
 evidence log). If a central fact is backed ONLY by low-quality/unknown/aggregator sources,
-require a better source or a hedge via `required_revisions`. Do NOT demand a correction
-that the evidence doesn't warrant — the H0 default (the post may be accurate) still holds,
-and an accurate post that survives scrutiny passes.
+require a better source or a hedge via `required_revisions` (H0 still holds — don't force a
+correction the evidence doesn't warrant).
 
-Output JSON only, matching the provided schema. `passed=true` only when there are
-NO blocking findings. `scoped_drops` is an array of strings — each an exact fact string
-or source URL to remove (peripheral defects only; never a central verdict field). When
+Output JSON only, matching the provided schema. `passed=true` only when no blocking finding
+remains. `scoped_drops` — peripheral-only, exact fact-string-or-URL matches (see above). When
 `passed=false`, write `required_revisions` as concrete, imperative instructions the
 drafting agent can execute in one revision. Set `downgrade=true` when the draft's
 confidence must drop (e.g. its only decisive evidence is post-cutoff): the pipeline will

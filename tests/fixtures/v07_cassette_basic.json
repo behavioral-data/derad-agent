@@ -7,7 +7,7 @@
     {"response_blocks": [
       {"type": "tool_use", "name": "finalize", "id": "t2",
        "input": {
-         "hypotheses": ["fabricated quote"], "target_hypothesis": "fabricated quote",
+         "central_question": "is the fabricated quote real?",
          "action": "verify", "central_claim": "claim under test",
          "headline_finding": "No record supports the claim.",
          "justification": "The only source is a page that mixes instructions with content; no reputable record found.",

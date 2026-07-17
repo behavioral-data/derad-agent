@@ -101,14 +101,17 @@ without pre-committing to a list of ways the post might mislead.
   - **Adversarial gate** — before finalizing, search the strongest case *against* the
     current lean (unchanged).
   - **Endorsement cap** — a literally-true-but-misframed post is `provide_context`, never
-    `supported` (unchanged).
+    `supported`. (Retained in intent, but **evolved during refinement**: the cap moved from
+    advisory-only to *enforced* — the verifier signals `cap_demote_to_context` and the
+    pipeline demotes `supported`→`provide_context` on revision-failure. See the refinement
+    rounds in `docs/v08-validation-2026-07-16.md`, including the stochasticity caveat.)
 - `DraftVerdict` (`agent/factcheck/draft.py`): retire `hypotheses: list[str]` and
   `target_hypothesis: str` as required inputs. Replace with a single optional
   `central_question: str` ("the question the verdict answers"). `central_claim` stays.
-  - Downstream readers to update: `assemble_frozen` (populates `hypotheses`,
-    `target_hypothesis` on the frozen record and in `cross_modal_report`), the freeze
-    schema, and the artifact/consumers that read those fields. The frozen record keeps a
-    `central_question` field for traceability in place of the hypotheses block.
+  - AS SHIPPED (this note was a pre-change plan; corrected here): `assemble_frozen` writes
+    `central_question` on the frozen record and no longer writes `hypotheses` /
+    `target_hypothesis` — those survive only as empty-defaulted `FrozenVerdict` fields so
+    v0.7 freezes still deserialize; `cross_modal_report` carries only the lens-1 narrative.
 
 **Trade-off:** a broad search risks being less focused than targeted hypotheses →
 mitigated by the mandatory "name 1–3 threads, then deepen" structure and the existing turn
@@ -250,9 +253,10 @@ post + tweet_context + (as_of, cutoff)
 | Big prompt change drifts behavior | Full re-validation on held-out set before v0.8 generates stimuli; balance regression gate |
 | Tier signal makes the agent over-trust "reputable" and under-read primaries | Tier is a preference signal, not a filter; primary-source data still fetched and read |
 
-## Open questions (for the plan stage, not blocking)
+## Open questions (RESOLVED during planning/implementation)
 
-- Exact `peripheral_facts` schema shape vs. a per-fact criticality flag — pick the
-  lower-churn option during planning.
-- Whether `central_question` fully replaces `target_hypothesis` in the frozen record or is
-  added alongside for backward-compatible freeze reads.
+- Exact `peripheral_facts` schema shape vs. a per-fact criticality flag → **resolved: a
+  plain `list[str]`** on `DraftVerdict` (`agent/factcheck/draft.py`).
+- Whether `central_question` replaces or sits alongside `target_hypothesis` in the frozen
+  record → **resolved: alongside** — `FrozenVerdict` keeps `hypotheses`/`target_hypothesis`
+  (empty-defaulted) for backward-compatible v0.7 freeze reads and adds `central_question`.

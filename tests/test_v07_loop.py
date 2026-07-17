@@ -7,7 +7,7 @@ from agent.factcheck.loop import LoopStats, revise_in_loop, run_loop
 from agent.factcheck.loop_tools import ToolRuntime
 
 _DRAFT_INPUT = {
-    "hypotheses": ["h1"], "target_hypothesis": "h1", "action": "verify",
+    "central_question": "q", "action": "verify",
     "central_claim": "c", "headline_finding": "h", "justification": "j",
     "primary_sources": [], "load_bearing_facts": [],
     "evidence_refs": [], "verdict_derivation": "d",

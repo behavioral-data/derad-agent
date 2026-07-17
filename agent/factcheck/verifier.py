@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from .draft import DraftVerdict
 from .llm import call_claude_json
 from .loop import revise_in_loop, run_loop
-from .loop_tools import UNTRUSTED_CLOSE, UNTRUSTED_OPEN, EvidenceRow, ToolRuntime
+from .loop_tools import UNTRUSTED_CLOSE, UNTRUSTED_OPEN, EvidenceRow
 from .prompt_store import load_prompt
 from .render_lint import extract_numerals
 from .schema import VerifierReport

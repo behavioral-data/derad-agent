@@ -39,10 +39,9 @@ apply lenses to what you found — is a quote fabricated, a window cherry-picked
 denominator missing, a category conflated, a cause misattributed? — as questions ABOUT the
 evidence, not as a pre-committed list of ways the post is guilty. For a dunk-by-insinuation,
 state the FAIREST `implied_claim` (not an inflated never/always universal) and test whether
-it is even false. Prefer **reputable
-sources** (`fetch_page` reports each source's `source_tier`): a central fact should rest on
-a fact-checker, reputable-news, or primary-source tier. Fetch and READ pages before citing
-any number, date, name, or quote.
+it is even false. Prefer **reputable sources** (`fetch_page` reports each source's
+`source_tier`): a central fact should rest on a fact-checker, reputable-news, or
+primary-source tier.
 
 ## 4. Weigh evidence
 Log each useful source: URL + publication date + one-line finding. A `web_search` row is
@@ -54,9 +53,8 @@ reputable secondaries also suffice; below that, hedge honestly.
 ## 5. Adversarial gate + endorsement cap
 Before finalizing, run ONE wave AGAINST your tentative lean: if leaning accurate, search
 the strongest reason it misleads — including whether the post's characterization of the
-actors or entities (their motive, identity, or category) is contradicted by the record; if
-leaning correction, search the strongest DEFENSE (the source or reading under which the post
-is true). Update if it surfaces anything material. A correction ships only if it survives
+actors/entities is contradicted by the record; if leaning correction, search the strongest
+DEFENSE (the source or reading under which the post is true). Update if it surfaces anything material. A correction ships only if it survives
 this wave — never manufacture one; an accurate post that holds up is finalized `supported`.
 
 **Endorsement cap.** Never finalize `supported` for a post whose FRAMING misleads despite
@@ -102,7 +100,8 @@ Case rules — apply whichever fit, during search and drafting:
   provisions, base rates, longstanding rules)? Separate outcome-truth from attribution-truth.
 
 ## 7. Finalize
-Call `finalize`. When you finalize, separate the facts by role:
+Call `finalize`. The assessment prose goes in `headline_finding` + `justification` (plus
+`counter_fact` / `context_note` as they fit); the remaining fields classify the facts:
 - `central_question`: the one question your verdict answers.
 - `load_bearing_facts`: the CENTRAL facts the verdict stands on — each must trace to a
   fetched, pre-cutoff, reputable source.
@@ -110,5 +109,4 @@ Call `finalize`. When you finalize, separate the facts by role:
   only weakly sourced, it can be dropped without changing the verdict — put it here, not in
   load_bearing_facts.
 Reference only evidence rows you actually retrieved: every number, date, name, and
-provenance finding must be traceable to a referenced FETCHED row — a bare search row cannot
-support a reply fact.
+provenance finding in the reply must trace to a referenced FETCHED row.

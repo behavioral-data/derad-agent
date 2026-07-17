@@ -1,6 +1,6 @@
 # v0.8 Evidence-First Loop — Validation Results (2026-07-16)
 
-Branch `video-path-t9`, feature commits `562ac0d..468d99c`, `prompt_version=033f142ff7df`,
+Branch `video-path-t9`, feature commits `562ac0d..80edfac` (code) + docs, `prompt_version=033f142ff7df`,
 `DERAD_FACTCHECK_ENGINE=loop`, study mode (per-post evidence cutoff = post + 48h).
 
 ## Acceptance bar (from the spec) — verdict: **PASS** (essential set)

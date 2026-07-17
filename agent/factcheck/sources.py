@@ -342,7 +342,7 @@ def _normalize_domain(url: str) -> str:
 
 
 def _registered_domain(host: str) -> str:
-    """Strip www. and other common subdomain prefixes."""
+    """Strip a leading ``www.`` (deeper subdomain fallback lives in _lookup_curated)."""
     if not host:
         return ""
     if host.startswith("www."):

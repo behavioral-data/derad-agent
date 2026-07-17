@@ -94,7 +94,6 @@ def test_fetch_page_emits_source_tier(monkeypatch):
         published_date="2026-05-08"))
     rt = lt.ToolRuntime(cutoff=None)
     out = rt.fetch_page("https://gasprices.aaa.com/2026/05/")
-    assert "source_tier:" in out
-    # AAA's fuel site is a primary source in the editorial list; at minimum the
-    # line is present and the row stored the tier.
-    assert rt.rows[-1].tier  # non-empty tier recorded on the row
+    # The live tier signal is the source_tier line in the returned page block,
+    # with the curated tier + its source (gasprices.aaa.com is primary-source).
+    assert "source_tier: primary-source" in out
