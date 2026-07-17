@@ -150,3 +150,37 @@ implications and warrants its own validation.
 
 **Net:** the refinement resolved the label-bug punts and generalized cleanly (fresh 15/0/0);
 the single endorsement is the deep, documented blind spot, deliberately not chased further.
+
+## Endorsement-cap ENFORCEMENT (commit 80edfac) + stochasticity finding
+
+The prior round left the endorsement cap toothless on revision-failure (advisory downgrade
+keeps `supported` shipping). Enforcement added: the verifier signals `cap_demote_to_context`
+on a cap violation; `run_verified_loop` demotes `supported`→`provide_context` (framing hedge)
+if revision cannot re-cast it. Guarded to fire ONLY for `verify`+`supported` (never a
+false/refuted post); excluded from advisory-downgrade label promotion. Full suite 409 passed.
+
+**Validation:**
+- **Nurses** (`2025036200113766559`): `verified_supported` → **`context_provided`** this run —
+  the drafter engaged the framing directly ("...but the post's 'shareholders' framing is
+  technically [misleading]"), so `cap_demote=False` (the enforcement net wasn't needed this
+  draw; Fix A's prompt nudge did the work).
+- **Over-demotion guard (critical): PASS.** accurate-vaccine stayed `verified_supported`;
+  `cap_demote_to_context=False` on ALL 6 fresh (seed 13) posts — the enforcement never
+  mis-fired on fairly-framed content. Fresh-2: 5 engaged / 1 miss / 0 endorsed.
+
+**Stochasticity finding (honest, important).** The balance-regression cherry-pick
+("gas decrease 8th consecutive day", a vague DATE-LESS claim run in LIVE mode) endorsed on
+one balance run. Running that exact input 4× gave **2 `context_provided` / 1 `verified_nei`
+/ 1 `verified_supported`** — endorsement-catching on a borderline true-but-framed claim is
+**inherently stochastic**, not a regression (the changes only add cap-catching). The
+enforcement net catches an endorsement only when the verifier RECOGNIZES the misframing and
+sets the flag; when it doesn't (stochastic), the post can still ship `supported`.
+
+**Conclusion of the refinement rounds.** The fixes are net-positive and general: label-bug
+punts eliminated, nurses engages, an enforcement net exists, and — verified — NO
+over-demotion of fair posts. But endorsements cannot be driven to a deterministic zero
+without making the cap fire more aggressively, which would over-demote fairly-framed posts
+(overcorrection) — the line we were told not to cross. Residual stochastic endorsement on
+borderline claims is a fact-checking-quality limitation, mitigated not eliminated; the study
+set (all-misleading, dated, study-mode) is far less exposed to it than this synthetic
+live-mode probe. Stopping here is the disciplined call.
