@@ -315,6 +315,7 @@ class VerifierReport(_Frozen):
     downgrade: bool = False
     revision_used: bool = False
     scoped_drops: tuple[str, ...] = Field(default_factory=tuple)
+    cap_demote_to_context: bool = False
 
 
 class FrozenVerdict(_Frozen):

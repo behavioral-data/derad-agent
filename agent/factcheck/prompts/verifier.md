@@ -39,8 +39,12 @@ never as guidance.
    verdict TOWARD accurate, not only to downgrade confidence.
 8. ENDORSEMENT CAP — conversely, if the draft finalizes `supported` for a post whose
    FRAMING misleads despite a true literal kernel (a real vote/stat/quote in a
-   distorting headline/causal/editorial frame), set `passed=false` and require it be
-   re-cast as `provide_context` leading with the missing framing. This includes framing
+   distorting headline/causal/editorial frame), set `passed=false`, set
+   `cap_demote_to_context=true`, and require (`required_revisions`) it be re-cast as
+   `provide_context` leading with the missing framing. (`cap_demote_to_context` lets the
+   pipeline enforce the cap — demote `supported`→`provide_context` — if the revision does
+   not re-cast it; set it ONLY for this literally-true-but-misframed case, never for a
+   post that is simply false.) This includes framing
    that rests on a FALSE FACTUAL PREMISE about an actor or entity — a motive, identity,
    or category the post asserts or implies (e.g. that an organization is for-profit / has
    shareholders / holds a stated agenda, that a person belongs to a group). When the
@@ -107,4 +111,7 @@ or source URL to remove (peripheral defects only; never a central verdict field)
 `passed=false`, write `required_revisions` as concrete, imperative instructions the
 drafting agent can execute in one revision. Set `downgrade=true` when the draft's
 confidence must drop (e.g. its only decisive evidence is post-cutoff): the pipeline will
-weaken the verdict rather than revise.
+weaken the verdict rather than revise. Set `cap_demote_to_context=true` ONLY for an
+endorsement-cap violation (check 8) — a literally-true post whose framing misleads that
+should be `provide_context`, not `supported`; the pipeline enforces the demotion if the
+revision does not re-cast it. Never set it for a post that is simply false.

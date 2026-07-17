@@ -6,7 +6,7 @@ import agent.factcheck.verifier as vmod
 from agent.factcheck.draft import DraftSource, DraftVerdict, EvidenceRef
 from agent.factcheck.loop_tools import EvidenceRow, ToolRuntime
 from agent.factcheck.verifier import (
-    VerifierOutput, _to_report, apply_downgrade, apply_scoped_drops, run_verified_loop,
+    VerifierOutput, _to_report, apply_downgrade, apply_scoped_drops, demote_endorsement, run_verified_loop,
 )
 
 _D = dict(central_question="", action="verify", central_claim="c",
@@ -237,3 +237,53 @@ def test_run_verified_loop_scoped_drop_on_post_revision_reverify(monkeypatch):
     assert draft.justification == "revised: category-error stands on FBI + fact-checker rows"
     assert "US had ~16,935 homicides in 2024" not in draft.peripheral_facts  # drop applied
     assert report.scoped_drops == ("US had ~16,935 homicides in 2024",)
+
+
+def test_to_report_carries_cap_demote_flag():
+    r = _to_report(VerifierOutput(passed=False, cap_demote_to_context=True), False)
+    assert r.cap_demote_to_context is True
+
+
+def test_demote_endorsement_recasts_supported_to_context():
+    d = _draft(action="verify", verdict_leaning="supported",
+               headline_finding="Confirmed: X happened.", counter_fact="cf")
+    out = demote_endorsement(d)
+    assert out.action == "provide_context"
+    assert out.verdict_leaning == "insufficient"
+    assert out.confidence == "low"
+    assert out.counter_fact is None
+    assert "Confirmed" not in out.headline_finding  # endorsing prose replaced
+
+
+def test_run_verified_loop_enforces_endorsement_cap_on_revision_failure():
+    # verifier fails a SUPPORTED verdict on the endorsement cap and the revision
+    # cannot re-cast it -> the pipeline demotes supported -> provide_context
+    # (advisory downgrade alone would keep `supported` shipping).
+    supported = _draft(action="verify", verdict_leaning="supported",
+                       headline_finding="Confirmed: the event happened.")
+    cap = VerifierOutput(passed=False, cap_demote_to_context=True,
+                         required_revisions="re-cast as provide_context")
+    with mock.patch("agent.factcheck.verifier.run_loop",
+                    return_value=(supported, mock.MagicMock(rows=[]), mock.MagicMock(), [])), \
+         mock.patch("agent.factcheck.verifier.verify_draft", side_effect=[cap, cap]), \
+         mock.patch("agent.factcheck.verifier.revise_in_loop", return_value=(supported, None)):
+        got, _, report, _ = run_verified_loop("p", client=object(), ctx=None,
+                                              as_of=None, cutoff=None, model="m")
+    assert got.action == "provide_context"
+    assert got.verdict_leaning == "insufficient"
+    assert "Confirmed" not in got.headline_finding
+    assert report.cap_demote_to_context is True
+
+
+def test_cap_demotion_guard_does_not_fire_for_false_post():
+    # cap flag set but the draft REFUTES (not supported) -> demotion guard blocks
+    # it; a false post is never re-cast to provide_context by the cap path.
+    refuted = _draft(action="verify", verdict_leaning="refuted")
+    cap = VerifierOutput(passed=False, cap_demote_to_context=True)  # no required_revisions -> skip revision
+    with mock.patch("agent.factcheck.verifier.run_loop",
+                    return_value=(refuted, mock.MagicMock(rows=[]), mock.MagicMock(), [])), \
+         mock.patch("agent.factcheck.verifier.verify_draft", return_value=cap):
+        got, _, report, _ = run_verified_loop("p", client=object(), ctx=None,
+                                              as_of=None, cutoff=None, model="m")
+    assert got.action == "verify"
+    assert got.verdict_leaning == "refuted"

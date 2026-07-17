@@ -32,6 +32,7 @@ class VerifierOutput(BaseModel):
     fabrication_language_ok: bool = True
     required_revisions: str = ""
     downgrade: bool = False
+    cap_demote_to_context: bool = False
 
 
 def verify_draft(
@@ -108,6 +109,37 @@ def scrub_temporal_leak(draft: DraftVerdict) -> DraftVerdict:
     })
 
 
+_ENDORSE_DEMOTE_HEADLINE = (
+    "This post's literal claim holds up, but its framing rests on a characterization the "
+    "available evidence does not establish — treat the framing, not the underlying event, "
+    "with caution.")
+_ENDORSE_DEMOTE_JUSTIFICATION = (
+    "The underlying event checks out, but the post frames it with a characterization the "
+    "contemporaneous evidence does not substantiate. The framing is not endorsed; the "
+    "literal event is not disputed.")
+
+
+def demote_endorsement(draft: DraftVerdict) -> DraftVerdict:
+    """Enforce the endorsement cap when revision could not re-cast a `supported`
+    verdict the verifier judged misleadingly framed.
+
+    An advisory downgrade alone keeps `supported` shipping — so the cap was
+    toothless on revision-failure. This re-casts the draft to `provide_context`
+    and neutralizes the endorsing prose to a framing hedge. Like the temporal
+    scrub, the specific missing framing is not reliably in the evidence log at
+    this point, so the free prose is replaced wholesale rather than left
+    endorsing. The result ships as a non-endorsement, never as `supported`."""
+    return draft.model_copy(update={
+        "action": "provide_context",
+        "verdict_leaning": "insufficient",
+        "confidence": "low",
+        "headline_finding": _ENDORSE_DEMOTE_HEADLINE,
+        "justification": _ENDORSE_DEMOTE_JUSTIFICATION,
+        "counter_fact": None,
+        "context_note": _ENDORSE_DEMOTE_HEADLINE,
+    })
+
+
 def apply_scoped_drops(draft: DraftVerdict, drops: list[str],
                        rows: list[EvidenceRow]) -> DraftVerdict:
     """Remove verifier-flagged PERIPHERAL items from the reply-facing draft
@@ -179,6 +211,7 @@ def _to_report(out: VerifierOutput, revision_used: bool) -> VerifierReport:
         downgrade=out.downgrade,
         revision_used=revision_used,
         scoped_drops=tuple(out.scoped_drops),
+        cap_demote_to_context=out.cap_demote_to_context,
     )
 
 
@@ -238,4 +271,12 @@ def run_verified_loop(
         logger.warning("run_verified_loop: unfixed CENTRAL temporal leak — scrubbing payload: %s",
                        "; ".join(out.temporal_leaks)[:300])
         return scrub_temporal_leak(draft), runtime, _to_report(out, revision_used), stats
+    if out.cap_demote_to_context and draft.action == "verify" and draft.verdict_leaning == "supported":
+        # Endorsement-cap enforcement: the verifier judged this `supported`
+        # verdict misleadingly framed and revision could not re-cast it. Advisory
+        # downgrade would keep `supported` shipping, so demote to provide_context
+        # rather than endorse a misframed post.
+        logger.warning("run_verified_loop: endorsement cap unresolved by revision — "
+                       "demoting supported -> provide_context")
+        return demote_endorsement(draft), runtime, _to_report(out, revision_used), stats
     return apply_downgrade(draft), runtime, _to_report(out, revision_used), stats

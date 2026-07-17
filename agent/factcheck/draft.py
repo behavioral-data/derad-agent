@@ -159,9 +159,13 @@ def assemble_frozen(
     # finding; a downgraded/scrubbed verdict keeps the conservative label.
     # An advisory downgrade = confidence lowered but the payload was NOT scrubbed
     # (a scrub is the only hard no-result, and it is signalled by a confirmed
-    # central temporal leak). A substantive non-verify finding survives it.
+    # central temporal leak) and NOT an endorsement-cap demotion (which is a hard
+    # re-cast to a framing hedge, not a substantive finding to promote). A
+    # substantive non-verify finding survives an advisory downgrade.
     advisory_downgrade = bool(
-        verifier_report and verifier_report.downgrade and not verifier_report.temporal_leaks
+        verifier_report and verifier_report.downgrade
+        and not verifier_report.temporal_leaks
+        and not verifier_report.cap_demote_to_context
     )
     action_outcome = reconcile_outcome_with_finding(
         action_outcome, draft.action, draft.verdict_leaning,
