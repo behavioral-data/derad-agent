@@ -26,15 +26,17 @@ from scoring.mf_core_scorer import MFCoreScorer            # noqa: E402
 SCORERS = {"expansion": MFExpansionScorer, "core": MFCoreScorer}
 
 
-def run(sample_ratings=0.0, model="expansion", out_dir=OUT_DIR):
+def run(sample_ratings=0.0, model="expansion", out_dir=OUT_DIR, cn_data=CN_DATA):
     os.makedirs(out_dir, exist_ok=True)
 
     # --- load once (normalized participant IDs; consistent across factors & join) ---
+    # notesPath/ratingsPath accept a single TSV or a directory of TSVs (CN scorer
+    # concatenates dirs); pass a single concatenated notes-00000.tsv here.
     loader = LocalDataLoader(
-        notesPath=f"{CN_DATA}/notes-00000.tsv",
-        ratingsPath=f"{CN_DATA}/ratings",
-        noteStatusHistoryPath=f"{CN_DATA}/noteStatusHistory-00000.tsv",
-        userEnrollmentPath=f"{CN_DATA}/userEnrollment-00000.tsv",
+        notesPath=f"{cn_data}/notes-00000.tsv",
+        ratingsPath=f"{cn_data}/ratings",
+        noteStatusHistoryPath=f"{cn_data}/noteStatusHistory-00000.tsv",
+        userEnrollmentPath=f"{cn_data}/userEnrollment-00000.tsv",
         headers=True,
     )
     notes, ratings, nsh, userEnrollment = loader.get_data()
@@ -92,8 +94,11 @@ def main():
     ap.add_argument("--sample-ratings", type=float, default=0.0)
     ap.add_argument("--model", choices=list(SCORERS), default="expansion")
     ap.add_argument("--out-dir", default=OUT_DIR)
+    ap.add_argument("--cn-data", default=CN_DATA,
+                    help="Input data root (contains notes-00000.tsv, ratings/, "
+                         "noteStatusHistory-00000.tsv, userEnrollment-00000.tsv).")
     args = ap.parse_args()
-    run(args.sample_ratings, args.model, args.out_dir)
+    run(args.sample_ratings, args.model, args.out_dir, args.cn_data)
 
 
 if __name__ == "__main__":
