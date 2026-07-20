@@ -14,33 +14,51 @@ agent/person. Nothing here has been provisioned yet.
 ## 1. What gets deployed & how it's used
 
 ```
-Prolific ──(PROLIFIC_PID)──▶ Qualtrics survey
+Prolific (two party-filtered studies: D / R) ──(PROLIFIC_PID + party)──▶ Qualtrics survey
   Day 1: pre-survey
-  Each day D (1..6):
-    Qualtrics "Web Service" ──▶ GET /api/session?pid=<PID>&day=<D>  ──▶ { "codes": [9 opaque codes] }
-    Loop & Merge over the 9 codes:
+  Each day D (1..3):
+    Qualtrics "Web Service" ──▶ GET /api/session?pid=<PID>&party=<D|R>&day=<D>
+                              ──▶ { "pid", "day", "codes": [12 opaque codes] }
+    Loop & Merge over the 12 codes:
        ┌ <iframe src="https://<APP_HOST>/?v=<code>&pid=<PID>&day=<D>"> ┐   ← full-chrome X thread
        └ + that post's reaction questions (Qualtrics)                  ┘
        (interface beacons exposure → Azure Table: pid, post, condition, day, dwell)
-  Day 6: post-survey ──▶ Prolific completion code
+  Day 3: post-survey ──▶ Prolific completion code
 ```
 
 Key properties already implemented in code:
 - **Condition never leaves the server.** `/api/session` returns only opaque 12-char codes; no
   `condition`/`post_id` in any client-visible URL or response. Researchers join condition later by
-  `pid` from the assignments table.
-- **Assignment** (`study/interface/assignment.py`) is **idempotent per `pid`**, balances the
-  4 conditions across enrollees, and draws **54 posts = 3 per (topic × polarity) cell** → exactly
-  9/topic and 18/polarity, split into **6 daily blocks of 9**.
+  `pid` from the `studyassignments` table.
+- **Recruitment is party-filtered.** Run two Prolific studies (or one study with a screener /
+  embedded-data field) so each participant's `party` (Democrat/Republican) is known before their
+  first `/api/session` call — the endpoint requires `party` and does not infer it.
+- **Claiming** (`/api/session`, backed by `study/interface/profiles.py` +
+  `StudyStore.claim_profile`) is **idempotent per `pid`**: the first call for a new `pid` claims
+  the next unused profile for that participant's party, walking a permuted-block order across the
+  4 conditions (balance holds after every complete block of 4 claims), drawn from the pre-generated
+  pool committed at `study/data/profiles/profiles.json` — **456 profiles** (114 matched templates ×
+  4 conditions, **228 Democrat / 228 Republican**), each **36 posts** laid out as **3 days × 12**.
+  Repeat calls for the same `pid` return that same claimed profile. The pool is generated offline
+  (`python3 -m study.scripts.generate_profiles`) and committed — nothing is computed on the fly at
+  claim time. When a party's pool is exhausted, `/api/session` returns **409**.
+- **Attrition**: `StudyStore.release_profile(pid)` frees a claimed profile back to the pool. There
+  is no HTTP endpoint for it yet — call it from a Python shell/operator script against the same
+  store if a participant needs to be released.
+- **The old on-the-fly `study/interface/assignment.py::assign()`** (54 posts, 6 days × 9, no
+  party) is **legacy** — still in the repo and still covered by its own tests, but the server no
+  longer calls it.
 - **Writable state** (`study/interface/study_store.py`) → **Azure Table Storage** in prod
-  (`studyassignments`, `studyexposures`), auto-created on first write.
+  (`studyassignments`, `studyexposures`, `studyprofiles`), auto-created on first write. The profile
+  pool itself is loaded into `studyprofiles` once at app startup (idempotent no-op if the table
+  already holds rows).
 - **Embeddable**: `Content-Security-Policy: frame-ancestors` allows the Qualtrics iframe.
 
 Endpoints (see `study/interface/server.py`):
 | Route | Purpose |
 |---|---|
 | `GET /healthz` | health probe |
-| `GET /api/session?pid=&day=` | idempotent assign; returns that day's 9 opaque codes |
+| `GET /api/session?pid=&party=&day=` | claims (idempotent) this pid's profile for `party` (`Democrat`\|`Republican`\|`D`\|`R`, required); `day` (1..3) validated **before** claiming; returns that day's 12 opaque codes; 409 if the party's pool is exhausted |
 | `GET /?v=<code>&pid=&day=` | renders the thread (participant-facing); beacons exposure |
 | `POST /api/exposure` | logs `{code,pid,day,dwell_ms}` (same-origin beacon from the thread page) |
 | `GET /browse` | operator/demo gallery (all posts × conditions → `/?v=` links) — **not** for participants |
@@ -141,7 +159,7 @@ CMD ["gunicorn", "study.interface.server:create_app()", \
    - `linuxFxVersion`/container image: `azacrspzdzrbtv3v4o.azurecr.io/derad-study-interface:latest`,
    - `appSettings`: the env in §5 (drop the agent-only secrets),
    - `acrUseManagedIdentityCreds: true` + `acrUserManagedIdentityID: uami.properties.clientId`.
-   Optionally declare the two tables (`studyassignments`, `studyexposures`) like the existing
+   Optionally declare the three tables (`studyassignments`, `studyexposures`, `studyprofiles`) like the existing
    `tableServices/tables` resources (otherwise they're auto-created at first write).
 2. `azd provision` (creates the new app; existing resources are idempotent).
 3. Build & push the image, then restart (see §4c). *`azd deploy` does not rebuild the image — use
@@ -219,37 +237,63 @@ Data-plane env alternative: `DERAD_STUDY_TABLES_ENDPOINT` also works and takes p
 ## 6. Verify after deploy
 ```bash
 H=https://$APP.azurewebsites.net
-curl -s $H/healthz                                   # -> ok
-curl -s "$H/api/session?pid=TESTPID&day=1" | jq .    # -> {codes:[9 …]}, NO "condition"
-CODE=$(curl -s "$H/api/session?pid=TESTPID&day=1" | jq -r .codes[0])
+curl -s $H/healthz                                          # -> ok
+curl -s "$H/api/session?pid=TESTPID&party=D&day=1" | jq .   # -> {pid,day,codes:[12 …]}, NO "condition"
+CODE=$(curl -s "$H/api/session?pid=TESTPID&party=D&day=1" | jq -r .codes[0])  # same claim (idempotent per pid)
 curl -s -o /dev/null -w '%{http_code}\n' "$H/?v=$CODE&pid=TESTPID&day=1"   # -> 200
 curl -s -X POST -H 'Content-Type: application/json' \
   -d "{\"code\":\"$CODE\",\"pid\":\"TESTPID\",\"day\":1,\"dwell_ms\":1234}" $H/api/exposure  # -> {"ok":true}
 curl -s -D- -o /dev/null "$H/?v=$CODE" | grep -i content-security-policy   # frame-ancestors … qualtrics.com
+curl -s "$H/api/session?pid=TESTPID&party=D&day=4" | jq .   # -> 400 day out of range 1..3
 ```
-Then confirm rows appear in the `studyassignments` + `studyexposures` tables (Portal → Storage
-account → Storage browser → Tables), and open `$H/browse` to sanity-check the stimuli.
-Clean up the `TESTPID` test rows before going live.
+Then confirm rows appear in the `studyassignments` + `studyexposures` tables, and a `claimed_by`
+row in `studyprofiles` (Portal → Storage account → Storage browser → Tables), and open `$H/browse`
+to sanity-check the stimuli. Clean up the `TESTPID` test rows (including releasing its
+`studyprofiles` claim — see `release_profile`) before going live.
+
+**Staging check (pending).** Before enrollment opens, run the concurrency check from a session
+with `DERAD_STUDY_TABLES_ENDPOINT` pointed at the Tables emulator/staging (see the implementation
+plan's Task 10 Step 4 — deferred to the deployment session, not yet executed as of this doc
+update). It must fire **both**: (a) ~50 concurrent `/api/session?...&party=D` calls for **distinct**
+pids, asserting no two pids share a `profile_id` and that condition counts stay within one block of
+balanced; **and** (b) duplicate near-simultaneous first claims for the **same** pid. (b) matters
+because of a known TOCTOU gap in `TablesStudyStore.claim_profile`: it reads `get_assignment(pid)`
+before claiming, so two racing first-time calls for one pid can both see "no existing assignment,"
+each then claim a *different* free profile via its own ETag-guarded write (which only guards against
+two claimers taking the *same* profile, not two claims by the same pid), and the second
+`put_assignment` upsert silently overwrites the first — leaking one profile slot that no assignment
+points back to. It is recoverable via `release_profile(pid)` (which clears `claimed_by` on any
+profile held by that pid) but the check should confirm the leak rate is what's expected before
+relying on the pool's stated size for enrollment caps.
 
 ---
 
 ## 7. Qualtrics wiring
 
-1. **Capture the Prolific ID.** Prolific appends `?PROLIFIC_PID=...` to the study URL; capture it in
-   Qualtrics **Survey Flow → Embedded Data** as `PROLIFIC_PID` (set from the URL param).
+1. **Capture the Prolific ID and party.** Prolific appends `?PROLIFIC_PID=...` to the study URL;
+   capture it in Qualtrics **Survey Flow → Embedded Data** as `PROLIFIC_PID`. `party` needs to be
+   known before the first `/api/session` call, so either:
+   - run **two separate Prolific studies** — one for Democrat-registered participants, one for
+     Republican — each with its own Qualtrics survey flow that sets embedded data `PARTY=D` /
+     `PARTY=R` as a literal constant, or
+   - use **one study** with a Prolific pre-screener for party affiliation and pass it through as a
+     URL param / embedded data field (`?party=D|R`) that Qualtrics captures the same way as
+     `PROLIFIC_PID`.
 2. **Get the day's codes.** Add a **Web Service** element (Survey Flow), GET
-   `https://<APP_HOST>/api/session?pid=${e://Field/PROLIFIC_PID}&day=<D>`, and pipe the JSON `codes`
-   array into embedded data. (`<D>` = the day for this Qualtrics survey; in a 6-part longitudinal
-   Prolific study each day is typically its own Qualtrics survey, so `day` is a constant per survey.)
-   Server-side Web Service calls need **no CORS**.
-3. **Loop & Merge** over the 9 codes. In each loop iteration embed the thread and ask the reaction
+   `https://<APP_HOST>/api/session?pid=${e://Field/PROLIFIC_PID}&party=${e://Field/PARTY}&day=<D>`,
+   and pipe the JSON `codes` array into embedded data. (`<D>` = the day for this Qualtrics survey;
+   in a 3-day longitudinal Prolific study each day is typically its own Qualtrics survey, so `day`
+   is a constant per survey.) A non-200 response (e.g. `409` if that party's pool is exhausted)
+   should branch to an "unable to continue" end-of-survey message rather than looping over an
+   empty `codes` array. Server-side Web Service calls need **no CORS**.
+3. **Loop & Merge** over the 12 codes. In each loop iteration embed the thread and ask the reaction
    questions. Embed HTML (a "Text/Graphic" question):
    ```html
    <iframe src="https://<APP_HOST>/?v=${lm://Field/1}&pid=${e://Field/PROLIFIC_PID}&day=<D>"
            style="width:100%;height:820px;border:0;overflow:hidden" title="Post"></iframe>
    ```
    (Full X chrome wants a wide frame — set the Qualtrics question/column width wide, ~1000px+.)
-4. **Pre-survey** (day 1) and **post-survey** (day 6) are ordinary Qualtrics blocks.
+4. **Pre-survey** (day 1) and **post-survey** (day 3) are ordinary Qualtrics blocks.
 5. The interface logs exposure automatically (the iframe beacons on load + on pagehide).
 
 > If you prefer a client-side fetch of `/api/session` instead of the Web Service element, the
@@ -259,16 +303,23 @@ Clean up the `TESTPID` test rows before going live.
 ---
 
 ## 8. Prolific wiring
-- Set up a **longitudinal / multi-part study** (6 days). Each day points at that day's Qualtrics
+- Set up a **longitudinal / multi-part study** (3 days). Each day points at that day's Qualtrics
   survey URL with `?PROLIFIC_PID={{%PROLIFIC_PID%}}` passthrough.
+- Recruit via **two party-filtered studies** (Democrat / Republican), or one study with a party
+  pre-screener — see §7 step 1. `/api/session` requires `party` and will 400 without it.
 - Set each day's **completion URL/code** in Qualtrics' end-of-survey → Prolific redirect.
 - Screen for **desktop** (the interface is desktop-only; full X chrome needs width).
 
 ---
 
 ## 9. Data & analysis
-- **`studyassignments`** table: `RowKey = PROLIFIC_PID`, `condition`, `blocks` (JSON: 6×9 post_ids),
-  `created_at`. This is where condition lives — join to Qualtrics responses by `PROLIFIC_PID`.
+- **`studyassignments`** table: `RowKey = PROLIFIC_PID`, `condition`, `blocks` (JSON: 3×12
+  post_ids), `created_at`. This is where condition lives — join to Qualtrics responses by
+  `PROLIFIC_PID`. Party is known from recruitment (§7/§8), not stored on this row.
+- **`studyprofiles`** table: the committed profile pool loaded at startup — `PartitionKey = party`
+  (`D`/`R`), `RowKey` = claim-order index, `profile_id`, `condition`, `blocks`, `claimed_by`
+  (empty until claimed, then the `PROLIFIC_PID` that holds it). Useful for auditing pool exhaustion
+  and confirming party × condition balance.
 - **`studyexposures`** table: `PartitionKey = PROLIFIC_PID`, `RowKey = <code>_<day>`, `post_id`,
   `condition`, `day`, `dwell_ms`, `viewed_at` (upserted — one row per participant-post).
 - Export via Azure Storage Explorer / `az storage entity query` / the Tables SDK.
@@ -278,9 +329,10 @@ Clean up the `TESTPID` test rows before going live.
 ## 10. Notes / caveats
 - **PII / IRB.** Prolific IDs + assignments + exposures are stored in Azure Tables (same storage
   account the agent already uses for research events). Confirm the IRB protocol covers this.
-- **Assignment concurrency.** `assign()` reads current counts then writes; under heavy simultaneous
-  first-time enrollment the 4-way balance can drift by a little (self-corrects). Fine for gradual
-  Prolific enrollment. If strict balance is critical, add an atomic counter entity.
+- **Claim concurrency.** `claim_profile()` guards each profile's claim with an ETag
+  (`update_entity(..., match_condition=...)`), so two participants racing for the *same* profile
+  can't both win it. There is a narrower gap for duplicate near-simultaneous first claims by the
+  *same* `pid` — see the "Staging check (pending)" note under §6.
 - **`:latest` tag.** App Service re-pulls on restart. For reproducibility, consider tagging images
   by date/commit and pinning the app to that tag.
 - **Cost.** A `B1` Linux plan is ~\$13/mo; reusing the existing `B2` adds nothing. Set a budget alert
@@ -295,8 +347,12 @@ Clean up the `TESTPID` test rows before going live.
 - [ ] `study/data/media/` (incl. mp4s) is in the Docker build context (check `.dockerignore`).
 - [ ] `requirements-interface.txt` + `study/interface/Dockerfile` created (from §3).
 - [ ] Global-unique web app name chosen.
-- [ ] Confirm study parameters still match code: 4 conditions, 54 posts (3/cell), 6 days × 9.
+- [ ] Confirm study parameters still match code: 4 conditions, 456 profiles (114 templates ×
+      4 conditions, 228 Democrat / 228 Republican), 36 posts/profile as 3 days × 12, pool committed
+      at `study/data/profiles/profiles.json`.
+- [ ] Two party-filtered Prolific studies (or a party pre-screener field) are set up per §7/§8.
 - [ ] Confirm the Qualtrics host is covered by `DERAD_FRAME_ANCESTORS`.
 - [ ] Decide: reuse `B2` plan vs new `B1`.
-- [ ] After deploy: run §6 verification; delete test rows; then open to Prolific.
+- [ ] After deploy: run §6 verification (including the pending staging concurrency check once
+      staging/Tables-emulator access is available); delete test rows; then open to Prolific.
 ```

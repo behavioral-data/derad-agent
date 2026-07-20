@@ -25,9 +25,21 @@ python -m study.interface.extract_notes
 # only needs re-running if the post set changes. Requires X creds in agent/llm/.env.
 python -m study.interface.fetch_media
 
-# Fast: build the read-only study.db (71 posts x 4 conditions = 284 rows).
+# Fast: build the read-only study.db (108 posts x 4 conditions = 432 rows).
 python -m study.interface.build_db
 ```
+
+## Profile pool
+
+Participants don't get an on-the-fly assignment — they claim a pre-generated **profile** from a
+committed pool. `python3 -m study.scripts.generate_profiles` deterministically builds
+**456 profiles** (114 matched templates x 4 conditions, party-balanced 228 Democrat / 228
+Republican) and commits them to `study/data/profiles/profiles.json`. Each profile is **36 posts**
+laid out as **3 days x 12**. `GET /api/session?pid=&party=&day=` claims the next unused profile
+for that participant's party (permuted-block order, so condition balance holds after every block)
+and returns that day's 12 opaque access codes; repeat calls for the same `pid` return the same
+profile. See `docs/interface_azure_deployment.md` for the deployed claim flow and
+`study/interface/profiles.py` for the generation algorithm.
 
 ## Run
 
