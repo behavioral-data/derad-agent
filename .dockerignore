@@ -50,3 +50,14 @@ tests/
 # Docker / CI config not needed inside the image
 Dockerfile
 .dockerignore
+
+# Study-interface image: keep the build context lean. study/data/** must stay
+# INCLUDED (CSVs + media + profiles are baked into study.db at build time).
+tsv_generation/
+.claude/
+.superpowers/
+.venv*/
+**/.venv*/
+study/paper/
+study/data_analysis/
+*.out
