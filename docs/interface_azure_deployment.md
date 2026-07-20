@@ -267,15 +267,18 @@ with `DERAD_STUDY_TABLES_ENDPOINT` pointed at the Tables emulator/staging (see t
 plan's Task 10 Step 4 — deferred to the deployment session, not yet executed as of this doc
 update). It must fire **both**: (a) ~50 concurrent `/api/session?...&party=D` calls for **distinct**
 pids, asserting no two pids share a `profile_id` and that condition counts stay within one block of
-balanced; **and** (b) duplicate near-simultaneous first claims for the **same** pid. (b) matters
-because of a known TOCTOU gap in `TablesStudyStore.claim_profile`: it reads `get_assignment(pid)`
+balanced; **and** (b) duplicate near-simultaneous first claims for the **same** pid, to validate
+convergence in `TablesStudyStore.claim_profile`. `claim_profile` still reads `get_assignment(pid)`
 before claiming, so two racing first-time calls for one pid can both see "no existing assignment,"
-each then claim a *different* free profile via its own ETag-guarded write (which only guards against
-two claimers taking the *same* profile, not two claims by the same pid), and the second
-`put_assignment` upsert silently overwrites the first — leaking one profile slot that no assignment
-points back to. It is recoverable via `release_profile(pid)` (which clears `claimed_by` on any
-profile held by that pid) but the check should confirm the leak rate is what's expected before
-relying on the pool's stated size for enrollment caps.
+and each go on to claim a *different* free profile via its own ETag-guarded write (which only guards
+against two claimers taking the *same* profile, not two claims by the same pid). What no longer
+happens is a silent overwrite: the assignment itself is written with an insert-only `create_entity`,
+so only one of the two racing writes can land. The loser's `create_entity` raises
+`ResourceExistsError`; it then releases the profile it had just claimed back to the pool (clearing
+`claimed_by`) and returns the winner's assignment via `get_assignment(pid)`. Check (b) should assert
+both concurrent responses come back with **identical** codes, and that no profile is left
+`claimed_by` that pid without a matching `studyassignments` row — confirming the race converges
+cleanly rather than measuring a leak rate.
 
 ---
 
@@ -344,8 +347,11 @@ relying on the pool's stated size for enrollment caps.
   account the agent already uses for research events). Confirm the IRB protocol covers this.
 - **Claim concurrency.** `claim_profile()` guards each profile's claim with an ETag
   (`update_entity(..., match_condition=...)`), so two participants racing for the *same* profile
-  can't both win it. There is a narrower gap for duplicate near-simultaneous first claims by the
-  *same* `pid` — see the "Staging check (pending)" note under §6.
+  can't both win it. Duplicate near-simultaneous first claims by the *same* `pid` can still each
+  grab a *different* free profile (the ETag guard doesn't stop that), but the assignment write
+  itself is insert-only (`create_entity`), so only one claim persists — the loser releases the
+  profile it grabbed and hands back the winner's assignment, so both concurrent responses return
+  identical codes. See the "Staging check (pending)" note under §6.
 - **`:latest` tag.** App Service re-pulls on restart. For reproducibility, consider tagging images
   by date/commit and pinning the app to that tag.
 - **Cost.** A `B1` Linux plan is ~\$13/mo; reusing the existing `B2` adds nothing. Set a budget alert

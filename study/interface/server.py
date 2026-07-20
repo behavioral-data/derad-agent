@@ -147,7 +147,7 @@ def create_app(db_path=None):
         # no check. Constant-time compare avoids a timing oracle on the token.
         required_token = app.config.get("DERAD_SESSION_TOKEN") or ""
         if required_token and not hmac.compare_digest(
-                request.args.get("token", ""), required_token):
+                request.args.get("token", "").encode("utf-8"), required_token.encode("utf-8")):
             return jsonify({"error": "invalid or missing token"}), 401
         pid = request.args.get("pid", "").strip()
         day = request.args.get("day", "").strip()
@@ -235,9 +235,11 @@ def create_app(db_path=None):
 
     @app.get("/api/thread")
     def api_thread():
-        # Participant links carry only an opaque code (?v=…); post_id+condition
-        # is the legacy/internal path. Either way the request never exposes the
-        # condition in a readable form.
+        # Participant links carry only an opaque code (?v=…) — that path must
+        # keep working unchanged, always. The legacy post_id+condition form is
+        # a dev/QA convenience that would otherwise serve any condition for a
+        # known post_id on a live host, so it's gated behind the same
+        # DERAD_ENABLE_BROWSE flag as /browse (404 when disabled).
         conn = dbmod.connect(app.config["MOCKX_DB"])
         try:
             code = request.args.get("v", "")
@@ -247,6 +249,8 @@ def create_app(db_path=None):
                     return jsonify({"error": "not found"}), 404
                 post_id, condition = resolved
             else:
+                if not app.config.get("DERAD_ENABLE_BROWSE"):
+                    abort(404)
                 post_id = request.args.get("post_id", "")
                 condition = request.args.get("condition", "")
                 if condition not in dbmod.CONDITIONS:

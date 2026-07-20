@@ -130,6 +130,17 @@ def test_session_token_gate(tmp_path, monkeypatch):
     assert r.status_code == 200 and len(r.get_json()["codes"]) == 12
 
 
+def test_session_rejects_non_ascii_token_cleanly(tmp_path, monkeypatch):
+    """A non-ASCII ?token= must 401, not 500 (hmac.compare_digest needs byte-safe input)."""
+    db = _build_db(tmp_path)
+    _load_pool(db)
+    monkeypatch.setenv("DERAD_SESSION_TOKEN", "s3cret-token")
+    c = create_app(db_path=db).test_client()
+    r = c.get("/api/session?pid=UNIPID&party=D&day=1&token=" + "café")
+    assert r.status_code == 401
+    assert study_store.get_store().get_assignment("UNIPID") is None
+
+
 def test_session_no_token_required_when_env_unset(tmp_path, monkeypatch):
     """Unset DERAD_SESSION_TOKEN -> dev mode, no token check (regression)."""
     db = _build_db(tmp_path)
