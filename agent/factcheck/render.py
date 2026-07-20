@@ -558,10 +558,12 @@ def render_all_tones(
                            fallback: Optional[str]) -> str:
         """Direct render + lint gate. R-4 (lint_substance) always applies; when
         `required_numerals` is given (satirical/agreeable), the render must also
-        contain every one of those numerals (R-5 anchored to neutral). Returns
-        the first clean render; a non-neutral tone falls back to `fallback`
-        (neutral) if none is clean; the neutral tone (fallback=None) ships its
-        fewest-violations attempt."""
+        contain a MAJORITY (~2/3, see the `need` line) of those numerals — not
+        every one — because a witty register legitimately drops the claim's own
+        wrong number while keeping the correction (R-5 anchored to neutral).
+        Returns the first clean render; a non-neutral tone falls back to
+        `fallback` (neutral) if none is clean; the neutral tone (fallback=None)
+        ships its fewest-violations attempt."""
         best, best_v = None, None
         for _ in range(max_lint_retries + 1):
             try:
@@ -579,6 +581,11 @@ def render_all_tones(
                 # figure ("calling the final score at halftime" for "13th"), and
                 # what it drops is typically the claim's own wrong number while
                 # keeping the correction. A gross drop (e.g. 0 kept) still fails.
+                # Threshold is a ~2/3 majority. The 0.67 float form is kept
+                # deliberately over the exact math.ceil(2*n/3): the two DIVERGE at
+                # n = 3, 6, 9, 12 (0.67 rounds those up by one), and this float
+                # form is the shipped/validated behavior — changing it would move
+                # the gate for those numeral counts.
                 need = max(1, math.ceil(0.67 * len(required_numerals)))
                 if len(kept) < need:
                     v.append(f"{tone} kept only {sorted(kept)} of headline numerals "
