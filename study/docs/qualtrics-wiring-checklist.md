@@ -41,8 +41,11 @@ Q2 sits in Trash — leave it there.
    - Method: `GET`
    - ▶ URL:
      ```
-     https://<APP_HOST>/api/session?pid=${e://Field/PROLIFIC_PID}&party=${e://Field/party}&day=${e://Field/day}
+     https://<APP_HOST>/api/session?pid=${e://Field/PROLIFIC_PID}&party=${e://Field/party}&day=${e://Field/day}&token=<DERAD_SESSION_TOKEN value>
      ```
+     Append `&token=` with the exact `DERAD_SESSION_TOKEN` you set on the App Service (deployment
+     runbook §5). This Web Service call runs server-side, so the token never reaches the participant's
+     browser; if the app has a token set and the call omits it, `/api/session` returns `401`.
    - "Set Embedded Data" from the JSON response — add 12 mappings
      (Qualtrics shows the parsed response after you click *Test*; pick the
      array entries):

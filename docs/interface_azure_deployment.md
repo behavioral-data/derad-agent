@@ -61,7 +61,7 @@ Endpoints (see `study/interface/server.py`):
 | `GET /api/session?pid=&party=&day=` | claims (idempotent) this pid's profile for `party` (`Democrat`\|`Republican`\|`D`\|`R`, required); `day` (1..3) validated **before** claiming; returns that day's 12 opaque codes; 409 if the party's pool is exhausted |
 | `GET /?v=<code>&pid=&day=` | renders the thread (participant-facing); beacons exposure |
 | `POST /api/exposure` | logs `{code,pid,day,dwell_ms}` (same-origin beacon from the thread page) |
-| `GET /browse` | operator/demo gallery (all posts × conditions → `/?v=` links) — **not** for participants |
+| `GET /browse` | operator/demo gallery (all posts × conditions → `/?v=` links) — **not** for participants; returns **404 unless `DERAD_ENABLE_BROWSE` is truthy** |
 
 ---
 
@@ -104,7 +104,9 @@ container is self-contained (no runtime dependency on X or on rebuilding the DB)
 ```dockerfile
 # syntax=docker/dockerfile:1.6
 FROM python:3.11-slim
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PORT=8000
+# DERAD_REQUIRE_TABLES=1: refuse to boot on the in-memory store when no Tables
+# endpoint is set (guards the silent per-worker fallback).
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PORT=8000 DERAD_REQUIRE_TABLES=1
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
@@ -131,10 +133,11 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl --fail --silent http://localhost:${PORT}/healthz || exit 1
 
 # Prod uses the Azure Tables store (shared across workers), so >1 worker is safe.
-# gunicorn app-factory syntax calls create_app().
-CMD ["gunicorn", "study.interface.server:create_app()", \
-     "--workers", "2", "--threads", "4", "--timeout", "60", \
-     "--bind", "0.0.0.0:8000", "--access-logfile", "-", "--error-logfile", "-"]
+# gunicorn app-factory syntax calls create_app(). Shell form so ${PORT} expands
+# (keeps the bind in lockstep with the HEALTHCHECK); exec so gunicorn is PID 1.
+CMD exec gunicorn "study.interface.server:create_app()" \
+     --workers 2 --threads 4 --timeout 60 \
+     --bind "0.0.0.0:${PORT}" --access-logfile - --error-logfile -
 ```
 
 > **`.dockerignore`:** make sure it does **not** exclude `study/data/media/` (the mp4s/images must
@@ -228,6 +231,10 @@ az webapp restart -g rg-derad-agent -n $APP     # App Service re-pulls :latest o
 | `AZURE_CLIENT_ID` | `aba3d0e0-872f-4796-8582-45fdb188e50b` | tells `DefaultAzureCredential` to use the user-assigned identity |
 | `DERAD_FRAME_ANCESTORS` | `'self' https://*.qualtrics.com` | who may iframe the interface — add your exact Qualtrics host if it's outside `*.qualtrics.com` |
 | `MOCKX_DB` | *(unset)* | defaults to the baked `study/data/study.db`; only set to override |
+| `DERAD_PROFILES` | *(unset)* | defaults to the baked `study/data/profiles/profiles.json`; only set to override the pool file path |
+| `DERAD_REQUIRE_TABLES` | `1` | **baked into the image** — refuse to boot on the in-memory store when no Tables endpoint is set (guards the silent per-worker fallback). Leave it; only unset for a deliberate single-worker in-memory run |
+| `DERAD_SESSION_TOKEN` | *(set a long random string)* | when set, `/api/session` requires a matching `?token=` (constant-time compared); the Qualtrics Web Service adds it server-side so it never reaches participants. Unset → no auth (dev only) |
+| `DERAD_ENABLE_BROWSE` | *(unset)* | operator gallery gate: `/browse` returns **404** unless this is truthy (`1`/`true`/`yes`). Leave unset in production so participants can't enumerate all conditions |
 
 Data-plane env alternative: `DERAD_STUDY_TABLES_ENDPOINT` also works and takes precedence over
 `AZURE_STORAGE_TABLES_ENDPOINT` (see `study_store._build_default_store`).
@@ -246,10 +253,14 @@ curl -s -X POST -H 'Content-Type: application/json' \
 curl -s -D- -o /dev/null "$H/?v=$CODE" | grep -i content-security-policy   # frame-ancestors … qualtrics.com
 curl -s "$H/api/session?pid=TESTPID&party=D&day=4" | jq .   # -> 400 day out of range 1..3
 ```
+> If you set `DERAD_SESSION_TOKEN` (§5), append `&token=<value>` to every `/api/session` call above —
+> without it they return `401`. `/browse` returns `404` unless `DERAD_ENABLE_BROWSE` is set truthy.
+
 Then confirm rows appear in the `studyassignments` + `studyexposures` tables, and a `claimed_by`
-row in `studyprofiles` (Portal → Storage account → Storage browser → Tables), and open `$H/browse`
-to sanity-check the stimuli. Clean up the `TESTPID` test rows (including releasing its
-`studyprofiles` claim — see `release_profile`) before going live.
+row in `studyprofiles` (Portal → Storage account → Storage browser → Tables). To sanity-check the
+stimuli via `$H/browse`, temporarily set `DERAD_ENABLE_BROWSE=1` (and unset it before opening to
+participants). Clean up the `TESTPID` test rows (including releasing its `studyprofiles` claim —
+see `release_profile`) before going live.
 
 **Staging check (pending).** Before enrollment opens, run the concurrency check from a session
 with `DERAD_STUDY_TABLES_ENDPOINT` pointed at the Tables emulator/staging (see the implementation
@@ -280,8 +291,10 @@ relying on the pool's stated size for enrollment caps.
      URL param / embedded data field (`?party=D|R`) that Qualtrics captures the same way as
      `PROLIFIC_PID`.
 2. **Get the day's codes.** Add a **Web Service** element (Survey Flow), GET
-   `https://<APP_HOST>/api/session?pid=${e://Field/PROLIFIC_PID}&party=${e://Field/PARTY}&day=<D>`,
-   and pipe the JSON `codes` array into embedded data. (`<D>` = the day for this Qualtrics survey;
+   `https://<APP_HOST>/api/session?pid=${e://Field/PROLIFIC_PID}&party=${e://Field/PARTY}&day=<D>&token=<DERAD_SESSION_TOKEN value>`,
+   and pipe the JSON `codes` array into embedded data. Append `&token=` with the exact
+   `DERAD_SESSION_TOKEN` value you set in §5 — this Web Service call is server-side, so the token
+   never reaches the participant's browser; without it the endpoint returns `401`. (`<D>` = the day for this Qualtrics survey;
    in a 3-day longitudinal Prolific study each day is typically its own Qualtrics survey, so `day`
    is a constant per survey.) A non-200 response (e.g. `409` if that party's pool is exhausted)
    should branch to an "unable to continue" end-of-survey message rather than looping over an
