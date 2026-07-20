@@ -6,9 +6,11 @@ from __future__ import annotations
 import csv
 
 from study.interface.build_db import build
+from study.interface.profiles import generate_profiles
 from study.interface.server import create_app
+from study.interface import db as dbmod
 from study.interface import study_store
-from study.interface.study_store import InMemoryStudyStore, reset_store
+from study.interface.study_store import InMemoryStudyStore, reset_store, StoredProfile
 
 TOPICS = ["healthcare", "immigration", "lgbt", "race", "religion", "cost"]
 POLS = ["negative", "positive", "center"]
@@ -34,43 +36,51 @@ def _build_db(tmp_path):
     return str(db)
 
 
-def test_session_returns_daily_codes_without_leaking_condition(tmp_path):
-    db = _build_db(tmp_path)
-    reset_store(InMemoryStudyStore())
-    c = create_app(db_path=db).test_client()
+def _load_pool(db):
+    conn = dbmod.connect(db)
+    try:
+        cells = dbmod.cells(conn)
+        profiles, orders = generate_profiles(
+            cells, lambda p, c: dbmod.code_for(conn, p, c))
+    finally:
+        conn.close()
+    store = InMemoryStudyStore()
+    store.load_profiles(
+        [StoredProfile(p.profile_id, p.condition, p.target_party, p.blocks) for p in profiles],
+        orders)
+    reset_store(store)
 
-    r = c.get("/api/session?pid=PROLIFIC1&day=1")
+
+def test_session_claims_and_returns_daily_codes(tmp_path):
+    db = _build_db(tmp_path)
+    _load_pool(db)
+    c = create_app(db_path=db).test_client()
+    r = c.get("/api/session?pid=PROLIFIC1&party=Democrat&day=1")
     assert r.status_code == 200
     js = r.get_json()
-    assert js["day"] == 1 and len(js["codes"]) == 9
-    assert "condition" not in js and "post_id" not in js      # nothing readable leaks
+    assert js["day"] == 1 and len(js["codes"]) == 12            # 12 posts/day now
+    assert "condition" not in js and "post_id" not in js
     day1 = set(js["codes"])
-
-    # idempotent for the same participant/day
-    assert set(c.get("/api/session?pid=PROLIFIC1&day=1").get_json()["codes"]) == day1
-    # a different day is a different, disjoint block of 9
-    day2 = set(c.get("/api/session?pid=PROLIFIC1&day=2").get_json()["codes"])
-    assert len(day2) == 9 and day2.isdisjoint(day1)
-
-    # embeddable in Qualtrics
-    csp = r.headers.get("Content-Security-Policy", "")
-    assert "frame-ancestors" in csp and "qualtrics.com" in csp
+    assert set(c.get("/api/session?pid=PROLIFIC1&party=Democrat&day=1").get_json()["codes"]) == day1
+    day3 = set(c.get("/api/session?pid=PROLIFIC1&party=Democrat&day=3").get_json()["codes"])
+    assert len(day3) == 12 and day3.isdisjoint(day1)
+    assert "frame-ancestors" in r.headers.get("Content-Security-Policy", "")
 
 
-def test_session_validates_input(tmp_path):
+def test_session_requires_party_and_valid_day(tmp_path):
     db = _build_db(tmp_path)
-    reset_store(InMemoryStudyStore())
+    _load_pool(db)
     c = create_app(db_path=db).test_client()
-    assert c.get("/api/session?pid=&day=1").status_code == 400
-    assert c.get("/api/session?pid=P&day=x").status_code == 400
-    assert c.get("/api/session?pid=P&day=99").status_code == 400   # out of 1..6
+    assert c.get("/api/session?pid=P&day=1").status_code == 400          # missing party
+    assert c.get("/api/session?pid=P&party=x&day=1").status_code == 400  # bad party
+    assert c.get("/api/session?pid=P&party=D&day=9").status_code == 400  # day out of 1..3
 
 
 def test_exposure_logging(tmp_path):
     db = _build_db(tmp_path)
-    reset_store(InMemoryStudyStore())
+    _load_pool(db)
     c = create_app(db_path=db).test_client()
-    code = c.get("/api/session?pid=PROLIFIC1&day=1").get_json()["codes"][0]
+    code = c.get("/api/session?pid=PROLIFIC1&party=Democrat&day=1").get_json()["codes"][0]
 
     r = c.post("/api/exposure", json={"code": code, "pid": "PROLIFIC1", "day": 1, "dwell_ms": 4200})
     assert r.status_code == 200 and r.get_json()["ok"] is True

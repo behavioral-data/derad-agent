@@ -7,7 +7,6 @@ import os
 from flask import Flask, jsonify, request, send_from_directory
 
 from . import db as dbmod
-from .assignment import assign
 from .study_store import Exposure, get_store
 
 # Which parents may embed the interface in an <iframe> (Qualtrics survey).
@@ -95,12 +94,18 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _STUDY = os.path.dirname(_HERE)
 _MEDIA_DIR = os.path.join(_STUDY, "data", "media")
 _DEFAULT_DB = os.path.join(_STUDY, "data", "study.db")
+_DEFAULT_PROFILES = os.path.join(_STUDY, "data", "profiles", "profiles.json")
 
 
 def create_app(db_path=None):
     db_path = db_path or os.environ.get("MOCKX_DB", _DEFAULT_DB)
     app = Flask(__name__, static_folder="static", static_url_path="/static")
     app.config["MOCKX_DB"] = db_path
+
+    profiles_path = os.environ.get("DERAD_PROFILES", _DEFAULT_PROFILES)
+    if os.path.exists(profiles_path):
+        from .pool_loader import load_pool_file
+        load_pool_file(profiles_path, get_store())   # load_profiles is a no-op if already loaded
 
     @app.after_request
     def _allow_qualtrics_iframe(resp):
@@ -115,19 +120,24 @@ def create_app(db_path=None):
 
     @app.get("/api/session")
     def api_session():
-        """Idempotently assign the participant, return that day's opaque codes.
-        The condition is NOT returned — it stays server-side so nothing the
-        client can see reveals the group."""
+        """Claim this participant's profile (first call) and return that day's
+        opaque codes. Condition is never returned — it stays server-side."""
         pid = request.args.get("pid", "").strip()
         day = request.args.get("day", "").strip()
+        raw = request.args.get("party", "").strip().lower()
+        party = {"d": "D", "democrat": "D", "r": "R", "republican": "R"}.get(raw)
         if not pid or not day.isdigit():
             return jsonify({"error": "pid and numeric day are required"}), 400
+        if party is None:
+            return jsonify({"error": "party must be Democrat/Republican (or D/R)"}), 400
         day_i = int(day)
+        a = get_store().claim_profile(pid, party)
+        if a is None:
+            return jsonify({"error": "no profiles available for this party"}), 409
+        if not (1 <= day_i <= len(a.blocks)):
+            return jsonify({"error": f"day out of range 1..{len(a.blocks)}"}), 400
         conn = dbmod.connect(app.config["MOCKX_DB"])
         try:
-            a = assign(pid, get_store(), dbmod.cells(conn))
-            if not (1 <= day_i <= len(a.blocks)):
-                return jsonify({"error": f"day out of range 1..{len(a.blocks)}"}), 400
             codes = [dbmod.code_for(conn, post_id, a.condition)
                      for post_id in a.blocks[day_i - 1]]
         finally:
