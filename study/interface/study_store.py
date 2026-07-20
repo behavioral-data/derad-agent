@@ -23,7 +23,14 @@ log = logging.getLogger(__name__)
 
 ASSIGN_TABLE = "studyassignments"
 EXPOSURE_TABLE = "studyexposures"
+PROFILE_TABLE = "studyprofiles"
 _ASSIGN_PK = "assign"
+
+try:                                    # optional import guard (azure-data-tables is dev-optional)
+    from azure.core import MatchConditions as _MC
+    _IF_MATCH = _MC.IfNotModified
+except ImportError:                     # pragma: no cover - azure-core not installed
+    _IF_MATCH = None
 
 
 def _now_iso() -> str:
@@ -144,6 +151,7 @@ class TablesStudyStore:
         svc = TableServiceClient(endpoint=endpoint, credential=DefaultAzureCredential())
         self._assign = svc.create_table_if_not_exists(ASSIGN_TABLE)
         self._expo = svc.create_table_if_not_exists(EXPOSURE_TABLE)
+        self._prof = svc.create_table_if_not_exists(PROFILE_TABLE)
 
     def get_assignment(self, pid: str) -> Optional[Assignment]:
         from azure.core.exceptions import ResourceNotFoundError
@@ -177,6 +185,66 @@ class TablesStudyStore:
             "condition": e.condition, "post_id": e.post_id, "code": e.code,
             "day": e.day, "dwell_ms": e.dwell_ms, "viewed_at": e.viewed_at,
         })
+
+    def load_profiles(self, profiles: list[StoredProfile], claim_orders: dict[str, list[str]]) -> None:
+        # Idempotent: skip if the table already holds profiles.
+        try:
+            next(iter(self._prof.list_entities(results_per_page=1)))
+            return
+        except StopIteration:
+            pass
+        order_index = {pid: i for party in claim_orders for i, pid in enumerate(claim_orders[party])}
+        by_id = {p.profile_id: p for p in profiles}
+        for pid, p in by_id.items():
+            self._prof.upsert_entity({
+                "PartitionKey": p.target_party,
+                "RowKey": f"{order_index[pid]:04d}",
+                "profile_id": pid, "condition": p.condition,
+                "blocks": json.dumps(p.blocks), "claimed_by": "",
+            })
+
+    def claim_profile(self, pid: str, party: str) -> Optional[Assignment]:
+        from azure.core.exceptions import ResourceModifiedError, ResourceNotFoundError
+        existing = self.get_assignment(pid)
+        if existing is not None:
+            return existing
+        # Walk claim order (RowKey ascending); take the first free profile, guarding
+        # the write with the entity ETag so concurrent claims can't double-book.
+        for _attempt in range(500):
+            free = None
+            for e in self._prof.query_entities(
+                    f"PartitionKey eq '{party}' and claimed_by eq ''",
+                    results_per_page=1):
+                free = e
+                break
+            if free is None:
+                return None
+            free["claimed_by"] = pid
+            try:
+                self._prof.update_entity(free, mode="merge", etag=free.metadata["etag"],
+                                         match_condition=_IF_MATCH)
+            except (ResourceModifiedError, ResourceNotFoundError):
+                continue                                  # someone else took it; retry
+            a = Assignment(pid=pid, condition=free["condition"],
+                           blocks=json.loads(free["blocks"]))
+            self.put_assignment(a)
+            return a
+        return None
+
+    def release_profile(self, pid: str) -> None:
+        a = self.get_assignment(pid)
+        if a is None:
+            return
+        # Clear claimed_by on whichever profile this pid holds.
+        for party in ("D", "R"):
+            for e in self._prof.query_entities(f"PartitionKey eq '{party}' and claimed_by eq '{pid}'"):
+                e["claimed_by"] = ""
+                self._prof.update_entity(e, mode="merge")
+        # Delete the assignment binding.
+        try:
+            self._assign.delete_entity(_ASSIGN_PK, pid)
+        except Exception:
+            pass
 
 
 _STORE: Optional[StudyStore] = None

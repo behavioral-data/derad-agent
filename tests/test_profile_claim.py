@@ -39,3 +39,9 @@ def test_pool_exhaustion_and_release():
     assert all(claimed) and s.claim_profile("Rextra", "R") is None      # exhausted
     s.release_profile("R0")                                             # frees one
     assert s.claim_profile("Rnew", "R") is not None
+
+
+def test_tables_store_has_pool_methods():
+    from study.interface.study_store import TablesStudyStore
+    for m in ("load_profiles", "claim_profile", "release_profile"):
+        assert callable(getattr(TablesStudyStore, m))
