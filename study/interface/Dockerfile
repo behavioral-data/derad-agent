@@ -4,7 +4,9 @@
 #   az acr build -r azacrspzdzrbtv3v4o -t derad-study-interface:latest \
 #       -f study/interface/Dockerfile .
 FROM python:3.11-slim
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PORT=8000
+# DERAD_REQUIRE_TABLES=1: refuse to boot with the in-memory store in this image
+# (prod must have a Tables endpoint set — see study_store._build_default_store).
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PORT=8000 DERAD_REQUIRE_TABLES=1
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
@@ -32,7 +34,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl --fail --silent http://localhost:${PORT}/healthz || exit 1
 
 # Prod uses the Azure Tables store (shared across workers), so >1 worker is safe.
-# gunicorn app-factory syntax calls create_app().
-CMD ["gunicorn", "study.interface.server:create_app()", \
-     "--workers", "2", "--threads", "4", "--timeout", "60", \
-     "--bind", "0.0.0.0:8000", "--access-logfile", "-", "--error-logfile", "-"]
+# gunicorn app-factory syntax calls create_app(). Shell form so ${PORT} expands
+# (keeps the bind in lockstep with the HEALTHCHECK); exec so gunicorn is PID 1
+# and receives SIGTERM directly.
+CMD exec gunicorn "study.interface.server:create_app()" \
+     --workers 2 --threads 4 --timeout 60 \
+     --bind "0.0.0.0:${PORT}" --access-logfile - --error-logfile -
