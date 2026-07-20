@@ -76,6 +76,25 @@ def test_session_requires_party_and_valid_day(tmp_path):
     assert c.get("/api/session?pid=P&party=D&day=9").status_code == 400  # day out of 1..3
 
 
+def test_out_of_range_day_does_not_burn_a_profile(tmp_path):
+    db = _build_db(tmp_path)
+    _load_pool(db)
+    c = create_app(db_path=db).test_client()
+    pid = "FRESHOOR"
+
+    r = c.get(f"/api/session?pid={pid}&party=Democrat&day=9")
+    assert r.status_code == 400
+    # The bad day must not have claimed a pool slot for this first-time pid.
+    assert study_store.get_store().get_assignment(pid) is None
+
+    # Retrying with a valid day succeeds as a fresh, ordinary claim.
+    r2 = c.get(f"/api/session?pid={pid}&party=Democrat&day=1")
+    assert r2.status_code == 200
+    js = r2.get_json()
+    assert js["day"] == 1 and len(js["codes"]) == 12
+    assert study_store.get_store().get_assignment(pid) is not None
+
+
 def test_exposure_logging(tmp_path):
     db = _build_db(tmp_path)
     _load_pool(db)

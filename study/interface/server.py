@@ -7,6 +7,7 @@ import os
 from flask import Flask, jsonify, request, send_from_directory
 
 from . import db as dbmod
+from .profiles import DAYS
 from .study_store import Exposure, get_store
 
 # Which parents may embed the interface in an <iframe> (Qualtrics survey).
@@ -131,10 +132,15 @@ def create_app(db_path=None):
         if party is None:
             return jsonify({"error": "party must be Democrat/Republican (or D/R)"}), 400
         day_i = int(day)
+        # Validate the day range BEFORE claiming: the profile pool is finite, and
+        # claim_profile() permanently burns a slot on a first-time pid. A bad day
+        # (typo, stale client, URL probing) must 400 without cost.
+        if not (1 <= day_i <= DAYS):
+            return jsonify({"error": f"day out of range 1..{DAYS}"}), 400
         a = get_store().claim_profile(pid, party)
         if a is None:
             return jsonify({"error": "no profiles available for this party"}), 409
-        if not (1 <= day_i <= len(a.blocks)):
+        if not (1 <= day_i <= len(a.blocks)):    # belt-and-braces: pool data should match DAYS
             return jsonify({"error": f"day out of range 1..{len(a.blocks)}"}), 400
         conn = dbmod.connect(app.config["MOCKX_DB"])
         try:
