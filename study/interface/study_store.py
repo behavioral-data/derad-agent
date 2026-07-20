@@ -169,6 +169,17 @@ class TablesStudyStore:
             "created_at": a.created_at,
         })
 
+    def _create_assignment(self, a: Assignment) -> None:
+        # Insert-only sibling of put_assignment: makes the first assignment for a
+        # pid exactly-once. Raises ResourceExistsError if a racing first claim for
+        # the same pid already wrote one. (put_assignment stays an upsert for any
+        # other callers.)
+        self._assign.create_entity({
+            "PartitionKey": _ASSIGN_PK, "RowKey": a.pid,
+            "condition": a.condition, "blocks": json.dumps(a.blocks),
+            "created_at": a.created_at,
+        })
+
     def all_assignments(self) -> list[Assignment]:
         out = []
         for e in self._assign.list_entities():
@@ -187,24 +198,41 @@ class TablesStudyStore:
         })
 
     def load_profiles(self, profiles: list[StoredProfile], claim_orders: dict[str, list[str]]) -> None:
-        # Idempotent: skip if the table already holds profiles.
-        try:
-            next(iter(self._prof.list_entities(results_per_page=1)))
-            return
-        except StopIteration:
-            pass
+        # Resume-safe idempotent load. The old skip-if-any-row logic left a
+        # permanently short pool if a first-boot crash interrupted the upserts
+        # (some rows written, load then skipped forever). Instead: enumerate the
+        # RowKeys already present per partition and insert ONLY the missing
+        # entities with create_entity. Existing rows are never touched — they may
+        # already hold a live `claimed_by`.
+        from azure.core.exceptions import ResourceExistsError
         order_index = {pid: i for party in claim_orders for i, pid in enumerate(claim_orders[party])}
         by_id = {p.profile_id: p for p in profiles}
+        existing: dict[str, set] = {}
+        for e in self._prof.list_entities():
+            existing.setdefault(e["PartitionKey"], set()).add(e["RowKey"])
+        inserted, kept = 0, 0
         for pid, p in by_id.items():
-            self._prof.upsert_entity({
-                "PartitionKey": p.target_party,
-                "RowKey": f"{order_index[pid]:04d}",
-                "profile_id": pid, "condition": p.condition,
-                "blocks": json.dumps(p.blocks), "claimed_by": "",
-            })
+            rk = f"{order_index[pid]:04d}"
+            if rk in existing.get(p.target_party, set()):
+                kept += 1
+                continue
+            try:
+                self._prof.create_entity({
+                    "PartitionKey": p.target_party,
+                    "RowKey": rk,
+                    "profile_id": pid, "condition": p.condition,
+                    "blocks": json.dumps(p.blocks), "claimed_by": "",
+                })
+                inserted += 1
+            except ResourceExistsError:               # created concurrently; leave it
+                kept += 1
+        log.info("TablesStudyStore.load_profiles: inserted %d, left %d existing untouched",
+                 inserted, kept)
 
     def claim_profile(self, pid: str, party: str) -> Optional[Assignment]:
-        from azure.core.exceptions import ResourceModifiedError, ResourceNotFoundError
+        from azure.core.exceptions import (ResourceExistsError,
+                                           ResourceModifiedError,
+                                           ResourceNotFoundError)
         existing = self.get_assignment(pid)
         if existing is not None:
             return existing
@@ -227,11 +255,26 @@ class TablesStudyStore:
                 continue                                  # someone else took it; retry
             a = Assignment(pid=pid, condition=free["condition"],
                            blocks=json.loads(free["blocks"]))
-            self.put_assignment(a)
+            # Record the assignment insert-only. The ETag guard above only stops
+            # two claimers taking the SAME profile — it does NOT stop two racing
+            # FIRST claims for the same pid from each claiming a DIFFERENT free
+            # profile. create_entity makes the assignment exactly-once: the loser
+            # releases the profile it just grabbed and returns the winner's
+            # assignment, so both racers hand back identical codes.
+            try:
+                self._create_assignment(a)
+            except ResourceExistsError:
+                free["claimed_by"] = ""
+                try:
+                    self._prof.update_entity(free, mode="merge")   # unconditional release
+                except (ResourceModifiedError, ResourceNotFoundError):
+                    pass
+                return self.get_assignment(pid)
             return a
         return None
 
     def release_profile(self, pid: str) -> None:
+        from azure.core.exceptions import ResourceNotFoundError
         a = self.get_assignment(pid)
         if a is None:
             return
@@ -240,10 +283,10 @@ class TablesStudyStore:
             for e in self._prof.query_entities(f"PartitionKey eq '{party}' and claimed_by eq '{pid}'"):
                 e["claimed_by"] = ""
                 self._prof.update_entity(e, mode="merge")
-        # Delete the assignment binding.
+        # Delete the assignment binding (already-gone is fine; anything else surfaces).
         try:
             self._assign.delete_entity(_ASSIGN_PK, pid)
-        except Exception:
+        except ResourceNotFoundError:
             pass
 
 
@@ -257,6 +300,16 @@ def _build_default_store() -> StudyStore:
     if endpoint:
         log.info("StudyStore: TablesStudyStore at %s", endpoint)
         return TablesStudyStore(endpoint)
+    # Guard against a silent InMemory fallback in production: a missing/typo'd
+    # Tables endpoint would otherwise leave each gunicorn worker with its own
+    # per-process store, so assignments diverge across workers and evaporate on
+    # restart. When DERAD_REQUIRE_TABLES is truthy we refuse to start instead.
+    if os.environ.get("DERAD_REQUIRE_TABLES", "").lower() in ("1", "true", "yes"):
+        raise RuntimeError(
+            "DERAD_REQUIRE_TABLES is set but no Tables endpoint is configured. "
+            "Set DERAD_STUDY_TABLES_ENDPOINT (or AZURE_STORAGE_TABLES_ENDPOINT) "
+            "to the storage account's table endpoint, or unset DERAD_REQUIRE_TABLES "
+            "for the in-memory dev store.")
     log.info("StudyStore: InMemoryStudyStore (no tables endpoint configured)")
     return InMemoryStudyStore()
 
