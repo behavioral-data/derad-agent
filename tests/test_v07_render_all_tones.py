@@ -57,6 +57,39 @@ def test_numeral_invention_is_caught_by_substance_lint():
     assert "27" not in out["satirical"]
 
 
+def test_r5_anchor_ignores_headline_numerals_neutral_dropped():
+    # v0.8 headlines are multi-sentence and sweep in enumeration labels
+    # ("Claim 1/2/3"), statute numbers ("Section 5"), and incidental dates.
+    # Neutral — the substance reference — drops those; a register that carries
+    # the numbers neutral actually kept must PASS, not fall back.
+    view = RendererView(
+        presentation_payload=PresentationPayload(
+            headline_finding=(
+                "Claim 1 is false and Claim 2 is accurate: prices rose 44% "
+                "despite the Section 5 review."
+            ),
+            load_bearing_facts=("44%",),
+        ),
+        tone_neutral_justification="EIA data: a 44% rise.",
+        action="provide_context", action_outcome="context_provided",
+    )
+    neutral = "Contrary to the post's framing, prices are up 44%."
+    good_sat = "A 44% climb, which the post files under 'stable'. Bold accounting."
+    good_agr = "The frustration is fair — and prices really are up 44%."
+    with mock.patch("agent.factcheck.render.render",
+                    side_effect=[neutral, good_sat, good_agr]) as m:
+        out = render_all_tones(view)
+    assert out["satirical"] == good_sat          # NOT a neutral fallback
+    assert out["agreeable"] == good_agr
+    # the register renders are told exactly which numerals they must carry:
+    # headline ∩ neutral = {"44"} — junk labels/statute numbers excluded.
+    sat_kwargs = m.call_args_list[1].kwargs
+    agr_kwargs = m.call_args_list[2].kwargs
+    assert sat_kwargs.get("required_numerals") == {"44"}
+    assert agr_kwargs.get("required_numerals") == {"44"}
+    assert m.call_args_list[0].kwargs.get("required_numerals") is None
+
+
 def test_fewest_violations_kept_when_nothing_clean():
     # Every satirical attempt violates, but the 2nd drops fewer facts than the others;
     # with no clean render and neutral present, fewest-violations is preferred over neutral

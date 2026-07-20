@@ -396,6 +396,7 @@ def _enforce_invariance(
 def render(
     view: RendererView, tone: Tone, *,
     max_invariance_retries: int = 3, length_key: str = _DEFAULT_LENGTH,
+    required_numerals: Optional[set] = None,
 ) -> str:
     """Compose system = action_template + tone_register + hard_constraints,
     call Claude, enforce invariance with retries, fall back to refusal nudge
@@ -416,6 +417,13 @@ def render(
     pivoted = bool(view.pivoted_from and view.pivoted_from != view.action)
     system_prompt = _system_prompt_for(view.action, tone, state, pivoted, length_key)
     base_prompt = _build_prompt(view, state)
+    if required_numerals:
+        base_prompt += (
+            "\n\nCROSS-TONE FACT CONTRACT: weave these verdict-critical numbers into "
+            "your reply verbatim (decoration like $/%/commas may vary): "
+            f"{', '.join(sorted(required_numerals))}. The neutral variant of this reply "
+            "carries them; your register must carry them too."
+        )
     last_error: Exception | None = None
 
     # Pass 1 — normal prompt, invariance-feedback retries
@@ -524,17 +532,18 @@ def render_all_tones(
     gated by two lints — R-4 (no numerals/sources beyond the frozen payload) and
     R-5 (cross-tone consistency). The NEUTRAL render is the substance reference:
     it packs whatever facts fit the cap declaratively; satirical/agreeable must
-    then (a) invent nothing (R-4) and (b) carry the numerals the neutral reply
-    kept (R-5, anchored to neutral — an achievable target since neutral proved
-    those numbers fit the budget). A tone that can't pass falls back to neutral
-    rather than ship a divergent variant.
+    then (a) invent nothing (R-4) and (b) carry a majority of the verdict-critical
+    numerals (R-5, anchored to headline_finding ∩ neutral — verdict-critical AND
+    budget-proven; the register prompts are told this exact set via a cross-tone
+    fact contract). A tone that can't pass falls back to neutral rather than
+    ship a divergent variant.
 
-    R-5 anchors to the neutral reply, NOT to payload.load_bearing_facts: the loop
-    sometimes emits load_bearing_facts as many verbose sentences, and demanding
-    all of them verbatim in a witty ~520-char reply is unsatisfiable (it
-    collapsed fact-dense posts to neutral). Neutral's kept numerals are the
-    load-bearing set that must survive the register change. (Making the loop emit
-    concise fact tokens is the upstream follow-up.)
+    R-5 does NOT anchor to payload.load_bearing_facts or to every neutral
+    numeral: the loop emits verbose fact sentences and neutral packs supporting
+    dates a witty ~520-char reply can't all carry — demanding them collapsed
+    fact-dense posts to neutral. Anchoring to headline-only numerals failed the
+    same way once v0.8's multi-sentence headlines swept in enumeration labels
+    and statute numbers (60% satirical fallback, 2026-07-20 probe).
 
     (Earlier drafts re-voiced the neutral reply via a transform pass; that
     inflated fact-dense replies past the cap and collapsed ~74% of satirical
@@ -556,7 +565,8 @@ def render_all_tones(
         best, best_v = None, None
         for _ in range(max_lint_retries + 1):
             try:
-                cand = render(view, tone, **render_kwargs)
+                cand = render(view, tone, required_numerals=required_numerals,
+                              **render_kwargs)
             except Exception as exc:
                 logger.warning("render_all_tones[%s]: render failed (%s)", tone, exc)
                 continue
@@ -589,14 +599,20 @@ def render_all_tones(
         return ""
 
     neutral = _render_lint_gated("neutral", fallback=None)
-    # R-5 anchor = the headline_finding's numerals (the verdict-critical numbers,
-    # e.g. 13th→5th), NOT every numeral in the neutral reply. Neutral packs
-    # supporting dates/scores a witty register can't all carry; gating on those
-    # collapsed satirical to neutral on fact-dense posts. R-4 (no invention) still
-    # applies to every numeral, so dropped supporting numbers can't become wrong
-    # ones — they simply aren't required in the shorter registers.
+    # R-5 anchor = headline_finding numerals ∩ the numerals neutral actually kept.
+    # Headline-only was the previous anchor, but v0.8's multi-sentence headlines
+    # sweep in enumeration labels ("Claim 1/2/3"), statute numbers ("Section 5"),
+    # and incidental dates — demanding a majority of those collapsed 60% of
+    # satirical renders to neutral (2026-07-20 probe). The intersection keeps
+    # numbers that are both verdict-critical (headline) AND budget-proven
+    # (neutral, the substance reference, fit them in the cap). The register
+    # renders are TOLD this set via the prompt's cross-tone fact contract —
+    # previously the gate demanded numerals the prompt never mentioned. R-4
+    # (no invention) still applies to every numeral in every tone.
+    neutral_nums = {_strip_decoration(t) for t in extract_numerals(neutral)}
     required = {_strip_decoration(t)
-                for t in extract_numerals(payload.headline_finding or "")}
+                for t in extract_numerals(payload.headline_finding or "")
+                } & neutral_nums
     out = {"neutral": neutral}
     for tone in ("satirical", "agreeable"):
         out[tone] = _render_lint_gated(tone, required_numerals=required, fallback=neutral)
