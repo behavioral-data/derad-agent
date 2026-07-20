@@ -43,6 +43,15 @@ class Assignment:
 
 
 @dataclass
+class StoredProfile:
+    profile_id: str
+    condition: str
+    target_party: str
+    blocks: list                       # list[list[str]] of post_ids
+    claimed_by: Optional[str] = None
+
+
+@dataclass
 class Exposure:
     pid: str
     condition: str
@@ -58,12 +67,17 @@ class StudyStore(Protocol):
     def put_assignment(self, a: Assignment) -> None: ...
     def all_assignments(self) -> list[Assignment]: ...
     def log_exposure(self, e: Exposure) -> None: ...
+    def load_profiles(self, profiles: list[StoredProfile], claim_orders: dict[str, list[str]]) -> None: ...
+    def claim_profile(self, pid: str, party: str) -> Optional[Assignment]: ...
+    def release_profile(self, pid: str) -> None: ...
 
 
 class InMemoryStudyStore:
     def __init__(self) -> None:
         self._assign: dict[str, Assignment] = {}
         self._exposures: dict[tuple, Exposure] = {}
+        self._profiles: dict[str, StoredProfile] = {}
+        self._claim_orders: dict[str, list[str]] = {}
         self._lock = threading.Lock()
 
     def get_assignment(self, pid: str) -> Optional[Assignment]:
@@ -88,6 +102,35 @@ class InMemoryStudyStore:
     def exposures(self) -> list[Exposure]:
         with self._lock:
             return list(self._exposures.values())
+
+    def load_profiles(self, profiles: list[StoredProfile], claim_orders: dict[str, list[str]]) -> None:
+        with self._lock:
+            if self._profiles:                       # load once; don't wipe live claims
+                return
+            self._profiles = {p.profile_id: p for p in profiles}
+            self._claim_orders = {k: list(v) for k, v in claim_orders.items()}
+
+    def claim_profile(self, pid: str, party: str) -> Optional[Assignment]:
+        with self._lock:
+            existing = self._assign.get(pid)
+            if existing is not None:
+                return existing
+            for prof_id in self._claim_orders.get(party, []):
+                prof = self._profiles[prof_id]
+                if prof.claimed_by is None:
+                    prof.claimed_by = pid
+                    a = Assignment(pid=pid, condition=prof.condition, blocks=prof.blocks)
+                    self._assign[pid] = a
+                    return a
+            return None
+
+    def release_profile(self, pid: str) -> None:
+        with self._lock:
+            self._assign.pop(pid, None)
+            for prof in self._profiles.values():
+                if prof.claimed_by == pid:
+                    prof.claimed_by = None
+                    break
 
 
 class TablesStudyStore:
