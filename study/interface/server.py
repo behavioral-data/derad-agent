@@ -1,14 +1,21 @@
 """Flask app for the mock-X study interface (local-first)."""
 from __future__ import annotations
 
+import hmac
 import html
 import os
+import re
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, abort, jsonify, request, send_from_directory
 
 from . import db as dbmod
 from .profiles import DAYS
 from .study_store import Exposure, get_store
+
+# Participant ids come from Prolific (?PROLIFIC_PID=…) through a Qualtrics Web
+# Service call. Bound the shape before any store call: it becomes an Azure Table
+# RowKey and feeds an OData filter, so anything outside this set is rejected.
+_PID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 # Which parents may embed the interface in an <iframe> (Qualtrics survey).
 # Override with DERAD_FRAME_ANCESTORS if the survey is hosted elsewhere.
@@ -102,11 +109,22 @@ def create_app(db_path=None):
     db_path = db_path or os.environ.get("MOCKX_DB", _DEFAULT_DB)
     app = Flask(__name__, static_folder="static", static_url_path="/static")
     app.config["MOCKX_DB"] = db_path
+    # Read the env-driven gates once at app creation (mirrors MOCKX_DB/profiles).
+    app.config["DERAD_SESSION_TOKEN"] = os.environ.get("DERAD_SESSION_TOKEN", "")
+    app.config["DERAD_ENABLE_BROWSE"] = (
+        os.environ.get("DERAD_ENABLE_BROWSE", "").lower() in ("1", "true", "yes"))
 
     profiles_path = os.environ.get("DERAD_PROFILES", _DEFAULT_PROFILES)
     if os.path.exists(profiles_path):
         from .pool_loader import load_pool_file
-        load_pool_file(profiles_path, get_store())   # load_profiles is a no-op if already loaded
+        store = get_store()
+        n = load_pool_file(profiles_path, store)   # load_profiles is a no-op if already loaded
+        app.logger.info("Loaded %d profiles from %s into %s",
+                        n, profiles_path, type(store).__name__)
+    else:
+        app.logger.warning(
+            "Profiles pool file not found at %s — /api/session will find an "
+            "empty pool (every claim returns 409)", profiles_path)
 
     @app.after_request
     def _allow_qualtrics_iframe(resp):
@@ -123,12 +141,25 @@ def create_app(db_path=None):
     def api_session():
         """Claim this participant's profile (first call) and return that day's
         opaque codes. Condition is never returned — it stays server-side."""
+        # Auth gate: when DERAD_SESSION_TOKEN is configured, every /api/session
+        # call must carry a matching ?token=. The Qualtrics Web Service adds it
+        # server-side, so the token never reaches participants. Unset → dev mode,
+        # no check. Constant-time compare avoids a timing oracle on the token.
+        required_token = app.config.get("DERAD_SESSION_TOKEN") or ""
+        if required_token and not hmac.compare_digest(
+                request.args.get("token", ""), required_token):
+            return jsonify({"error": "invalid or missing token"}), 401
         pid = request.args.get("pid", "").strip()
         day = request.args.get("day", "").strip()
         raw = request.args.get("party", "").strip().lower()
         party = {"d": "D", "democrat": "D", "r": "R", "republican": "R"}.get(raw)
         if not pid or not day.isdigit():
             return jsonify({"error": "pid and numeric day are required"}), 400
+        # Validate pid shape BEFORE any store call: claim_profile() burns a finite
+        # slot for a first-time pid, and the pid becomes a Table RowKey / OData
+        # filter value. A malformed pid must 400 without cost.
+        if not _PID_RE.match(pid):
+            return jsonify({"error": "pid must match ^[A-Za-z0-9_-]{1,64}$"}), 400
         if party is None:
             return jsonify({"error": "party must be Democrat/Republican (or D/R)"}), 400
         day_i = int(day)
@@ -185,6 +216,12 @@ def create_app(db_path=None):
 
     @app.get("/browse")
     def browse():
+        # Operator-only gallery: it enumerates every post across all four
+        # conditions, so a participant who found it would see the whole design.
+        # Gated behind DERAD_ENABLE_BROWSE; unset (prod default) → 404, which is
+        # indistinguishable from an unknown route.
+        if not app.config.get("DERAD_ENABLE_BROWSE"):
+            abort(404)
         conn = dbmod.connect(app.config["MOCKX_DB"])
         try:
             posts = dbmod.list_posts(conn)

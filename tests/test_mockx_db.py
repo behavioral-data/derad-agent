@@ -82,8 +82,9 @@ def test_resolve_code_roundtrip(mockx_db):
     assert dbmod.get_thread_by_code(conn, "deadbeef0000") is None
 
 
-def test_browse_links_use_opaque_codes_only(mockx_db):
+def test_browse_links_use_opaque_codes_only(mockx_db, monkeypatch):
     from study.interface.server import create_app
+    monkeypatch.setenv("DERAD_ENABLE_BROWSE", "1")   # /browse is gated (operator-only)
     client = create_app(db_path=mockx_db).test_client()
     r = client.get("/browse")
     assert r.status_code == 200

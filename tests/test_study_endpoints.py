@@ -113,3 +113,52 @@ def test_exposure_logging(tmp_path):
     assert len(exps) == 1 and exps[0].dwell_ms == 9000
 
     assert c.post("/api/exposure", json={"code": "zzzzzzzzzzzz", "pid": "x"}).status_code == 404
+
+
+def test_session_token_gate(tmp_path, monkeypatch):
+    """When DERAD_SESSION_TOKEN is set, /api/session needs a matching ?token=."""
+    db = _build_db(tmp_path)
+    _load_pool(db)
+    monkeypatch.setenv("DERAD_SESSION_TOKEN", "s3cret-token")
+    c = create_app(db_path=db).test_client()
+    # missing / wrong token -> 401 (and must not have claimed a slot)
+    assert c.get("/api/session?pid=TOKPID&party=D&day=1").status_code == 401
+    assert c.get("/api/session?pid=TOKPID&party=D&day=1&token=nope").status_code == 401
+    assert study_store.get_store().get_assignment("TOKPID") is None
+    # correct token -> 200, normal claim
+    r = c.get("/api/session?pid=TOKPID&party=D&day=1&token=s3cret-token")
+    assert r.status_code == 200 and len(r.get_json()["codes"]) == 12
+
+
+def test_session_no_token_required_when_env_unset(tmp_path, monkeypatch):
+    """Unset DERAD_SESSION_TOKEN -> dev mode, no token check (regression)."""
+    db = _build_db(tmp_path)
+    _load_pool(db)
+    monkeypatch.delenv("DERAD_SESSION_TOKEN", raising=False)
+    c = create_app(db_path=db).test_client()
+    assert c.get("/api/session?pid=NOTOKPID&party=D&day=1").status_code == 200
+
+
+def test_session_rejects_malformed_pid(tmp_path, monkeypatch):
+    """Bad pid shape -> 400 before any store call (no slot burned)."""
+    db = _build_db(tmp_path)
+    _load_pool(db)
+    monkeypatch.delenv("DERAD_SESSION_TOKEN", raising=False)
+    c = create_app(db_path=db).test_client()
+    # single quote (OData-injection shape) -> 400
+    assert c.get("/api/session?pid=bad'pid&party=D&day=1").status_code == 400
+    # 70-char pid exceeds the 64-char cap -> 400, nothing claimed
+    long_pid = "P" * 70
+    assert c.get(f"/api/session?pid={long_pid}&party=D&day=1").status_code == 400
+    assert study_store.get_store().get_assignment(long_pid) is None
+
+
+def test_browse_gate(tmp_path, monkeypatch):
+    """/browse is 404 unless DERAD_ENABLE_BROWSE is truthy."""
+    db = _build_db(tmp_path)
+    _load_pool(db)
+    monkeypatch.delenv("DERAD_ENABLE_BROWSE", raising=False)
+    assert create_app(db_path=db).test_client().get("/browse").status_code == 404
+    monkeypatch.setenv("DERAD_ENABLE_BROWSE", "1")
+    r = create_app(db_path=db).test_client().get("/browse")
+    assert r.status_code == 200 and b"Mock-X study" in r.data
