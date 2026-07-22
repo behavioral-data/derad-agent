@@ -182,15 +182,39 @@ It sounds like you're worried about a link between vaccines and autism — a con
 """
 
 _SATIRICAL_REGISTER = """# REGISTER:
-Write the reply in a satirical tone. Act like a staff writer for a satirical publication like The Onion or a late night TV show like Last Week Tonight with John Oliver.
+Write the reply in a satirical tone. Act like a staff writer for a satirical
+publication like The Onion or a late night TV show like Last Week Tonight with
+John Oliver.
 
-The action instructions above tell you WHAT to convey (the finding / context / counterpoint / perspective) — they do NOT govern your VOICE. Ignore any "plainly" / "state it directly" / "explain the mechanism" phrasing from them: in this register the satire IS the delivery, not an earnest explanation with a joke bolted on.
+The action instructions above tell you WHAT to convey (the finding / context /
+counterpoint / perspective) — they do NOT govern your VOICE. Ignore any
+"plainly" / "state it directly" / "explain the mechanism" phrasing from them:
+in this register the satire IS the delivery, not an earnest explanation with a
+joke bolted on.
+
+# ACCESSIBILITY:
+- Write a joke such that it is understood by someone who has only the context of the post. Don't write a joke that only works if the reader already knows
+  the fact-check. Deliver the true fact INSIDE the joke / the bit — so a
+  first-time reader gets the fact and the joke in the same pass. The reply as
+  a whole must hand the reader every fact its jokes rely on.
+- Keep sentences short — aim under ~30 words. Make sure the construction of the sentence is simple and easy to parse. If a sentence stacks three clauses, split it.
+  The wit comes from the ideas, not the syntax.
+- Never introduce a number the evidence didn't state — no arithmetic of your own, however tempting the math. Use the payload's own numbers, or make the gap felt without digits.
+- VARY THE VOICE. Worn openers ("Remarkable…", "Incredible…", "Breaking
+  news…", "Ah yes…") and the crutch phrase "doing a lot of heavy lifting" are
+  banned — reach for an opening this specific post earned.
+- EXIT TEST. A skimming reader must finish knowing exactly what is true and
+  what is false. The irony may carry the verdict — but it must be impossible
+  to honestly misread the reply as agreeing with the post.
 
 # STRICT BOUNDARY:
 - NO profanity. NO slurs.
-- NO attack on identity, appearance, demographics, gender, race, religion, nationality, accent, age, body, or personal traits.
-- TARGET is the CLAIM or the SOURCE's credibility — NEVER the person whose image or name appears.
+- NO attack on identity, appearance, demographics, gender, race, religion,
+  nationality, accent, age, body, or personal traits.
+- TARGET is the CLAIM or the SOURCE's credibility — NEVER the person who has posted the parent post.
 - No content that could read as harassment of any specific named person.
+- If the post involves a death or human tragedy, acknowledge the loss plainly
+  and aim the joke ONLY at the claim's logic, framing, or source.
 
 # REASONING PROCESS (internal — think before writing)
 
@@ -212,18 +236,41 @@ STEP 3: Find the angle — resist (c) unless it's genuinely the funniest option:
   (d) Mundane Consequence — a tiny, specific, banal effect of the absurd premise
   (e) Something else entirely — a form that fits this particular gap
 
-STEP 4: Write it. Then ask two questions:
+STEP 4: Write it. Then ask five questions:
   (a) Does this make someone laugh, or just nod? Nodding is not enough.
       Find the specific absurd detail that tips it from ironic to funny.
   (b) Does it feel like a direct reply to THIS tweet, or a standalone article?
       It should feel like a wry remark aimed at what was just said.
-  Rewrite until both are yes.
+  (c) Would someone who has NEVER seen a fact-check of this claim get
+      both the facts and the joke in one read? No homework allowed.
+  (d) Is the funniest moment a concrete, everyday image ("like catching a
+      shoplifter and insisting they also burned the store down") rather than
+      abstract irony ("a bold rhetorical choice")? Concrete wins.
+  (e) Does the last sentence have snap? If the reply trails off on a factual
+      clause, tighten the closer — the last line is the one people remember.
+  Rewrite until all five are yes.
 
-# EXAMPLE:
-CLAIM: Vaccines cause autism.
-
-OUTPUT:
-You're citing the one retracted paper — the 25 years and millions of children confirming the opposite are fine though.\\n\\nThe researchers said they remain available for further questions and have cleared their schedules through 2040.
+# STRATEGIES (a menu, not a formula — pick what fits THIS post, or invent your own):
+- FACT, THEN ANALOGY: deliver the real fact deadpan, then hit it with ONE
+  concrete, everyday, obviously-figurative comparison.
+  CLAIM: "The new stadium seats 500,000 — biggest in history!"
+  OUTPUT: The stadium's own website lists 62,000 seats. Five hundred thousand
+  would make it the first venue with its own climate. It's a big stadium. It
+  is not "everyone in Atlanta shares one bowl" big.
+- TAKE THE CLAIM SERIOUSLY: accept the claim's logic, walk it one step
+  further, and let it collapse under its own weight.
+  CLAIM: "The moon landing was filmed in a Hollywood basement."
+  OUTPUT: Scientists still bounce lasers off the reflector the Apollo crews
+  left on the Moon — you can do it tonight. So for the basement theory to
+  work, the studio had to install a mirror 239,000 miles away. At that point,
+  congratulations: you went to the Moon.
+- COLD OPEN ON THE FRAMING: mock the post's certainty or style first (needs no
+  facts), then bring the receipts.
+- DEADPAN UNDERSTATEMENT: lay out the factual gap, then under-react to it.
+- CONCEDE, THEN CORRECT: when part of the post is true, say so plainly and
+  generously first — the correction lands harder against an honest baseline.
+These are shapes, not a sequence — no strategy is the default, and the joke
+may open, close, or thread through the reply.
 """
 
 
@@ -285,13 +332,17 @@ def _hard_constraints_for(
 
     if tone == "satirical":
         base.append(
-            "- SATIRE DISCIPLINE: the comedic angle IS the delivery. Open on the absurdity or a wry "
-            "observation — never a \"Yes/No/Partly\" verdict header or a \"here's the context\" preamble. "
-            "Land exactly ONE load-bearing fact and name the source once, woven into the bit — do NOT "
-            "append an earnest explanatory paragraph after the joke. If the claim is actually TRUE, or the "
-            "evidence is thin/absent, aim the satire at the FRAMING or the source's self-certainty, not at "
-            "a fact that gives you nothing to work with. Commit to the voice the whole way through — no "
-            "reverting to a straight fact-check for the second half."
+            "- SATIRE DISCIPLINE: the comedic angle IS the delivery. Open however serves the "
+            "bit — a wry observation, a deadpan fact, a mock-quote — but never a \"Yes/No/Partly\" "
+            "verdict header or a \"here's the context\" preamble, and do NOT append an earnest "
+            "explanatory paragraph after the joke. Weave the load-bearing facts into the bit and "
+            "name the source once. Every joke lands for a first-time reader: the reply hands the "
+            "reader every fact its jokes rely on. Never introduce a number the evidence didn't "
+            "state. Keep sentences simple and easy to parse. If the claim is actually TRUE, or "
+            "the evidence is thin/absent, aim the satire at the FRAMING or the source's "
+            "self-certainty, not at a fact that gives you nothing to work with. Commit to the "
+            "voice the whole way through — no reverting to a straight fact-check for the second "
+            "half, and no reply a skimmer could misread as agreeing with the post."
         )
         return "\n".join(base)
 
@@ -411,8 +462,8 @@ def render(
         raise ValueError(f"Unknown action {view.action!r}")
 
     max_chars = min(_LENGTH_PROFILES.get(length_key, _LENGTH_PROFILES[_DEFAULT_LENGTH])[1], X_TWEET_LIMIT)
-    effort = "medium" if tone == "satirical" else None
-    render_timeout = 60.0 if effort else 30.0
+    effort = "high" if tone == "satirical" else None
+    render_timeout = 90.0 if effort else 30.0
     state = _state_for(view)
     pivoted = bool(view.pivoted_from and view.pivoted_from != view.action)
     system_prompt = _system_prompt_for(view.action, tone, state, pivoted, length_key)
