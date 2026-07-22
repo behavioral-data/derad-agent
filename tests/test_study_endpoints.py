@@ -173,3 +173,18 @@ def test_browse_gate(tmp_path, monkeypatch):
     monkeypatch.setenv("DERAD_ENABLE_BROWSE", "1")
     r = create_app(db_path=db).test_client().get("/browse")
     assert r.status_code == 200 and b"Mock-X study" in r.data
+
+
+def test_invite_map_resolves_party_server_side(tmp_path):
+    """With a pid->party map loaded, /api/session needs no party param, rejects
+    unknown pids (403), and 400s a party param that contradicts the map."""
+    db = _build_db(tmp_path)
+    _load_pool(db)
+    store = study_store.get_store()
+    store.load_party_map({"INVITED_D1": "D", "INVITED_R1": "R"})
+    c = create_app(db_path=db).test_client()
+    r = c.get("/api/session?pid=INVITED_D1&day=1")           # no party param
+    assert r.status_code == 200 and len(r.get_json()["codes"]) == 12
+    assert c.get("/api/session?pid=STRANGER&day=1").status_code == 403
+    assert c.get("/api/session?pid=INVITED_R1&party=Democrat&day=1").status_code == 400
+    assert c.get("/api/session?pid=INVITED_R1&party=R&day=1").status_code == 200

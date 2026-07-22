@@ -24,6 +24,7 @@ log = logging.getLogger(__name__)
 ASSIGN_TABLE = "studyassignments"
 EXPOSURE_TABLE = "studyexposures"
 PROFILE_TABLE = "studyprofiles"
+PARTY_TABLE = "studypartymap"
 _ASSIGN_PK = "assign"
 
 try:                                    # optional import guard (azure-data-tables is dev-optional)
@@ -84,6 +85,7 @@ class InMemoryStudyStore:
         self._assign: dict[str, Assignment] = {}
         self._exposures: dict[tuple, Exposure] = {}
         self._profiles: dict[str, StoredProfile] = {}
+        self._party_map: dict[str, str] = {}
         self._claim_orders: dict[str, list[str]] = {}
         self._lock = threading.Lock()
 
@@ -109,6 +111,14 @@ class InMemoryStudyStore:
     def exposures(self) -> list[Exposure]:
         with self._lock:
             return list(self._exposures.values())
+
+    def load_party_map(self, mapping: dict[str, str]) -> None:
+        with self._lock:
+            self._party_map = dict(mapping)
+
+    def get_party_map(self) -> dict[str, str]:
+        with self._lock:
+            return dict(self._party_map)
 
     def load_profiles(self, profiles: list[StoredProfile], claim_orders: dict[str, list[str]]) -> None:
         with self._lock:
@@ -152,6 +162,17 @@ class TablesStudyStore:
         self._assign = svc.create_table_if_not_exists(ASSIGN_TABLE)
         self._expo = svc.create_table_if_not_exists(EXPOSURE_TABLE)
         self._prof = svc.create_table_if_not_exists(PROFILE_TABLE)
+        self._party = svc.create_table_if_not_exists(PARTY_TABLE)
+
+    def load_party_map(self, mapping: dict[str, str]) -> None:
+        """Upsert the pid->party invite map (idempotent; small, one partition)."""
+        for pid, party in mapping.items():
+            self._party.upsert_entity({"PartitionKey": "party", "RowKey": pid,
+                                       "party": party})
+
+    def get_party_map(self) -> dict[str, str]:
+        return {e["RowKey"]: e["party"]
+                for e in self._party.query_entities("PartitionKey eq 'party'")}
 
     def get_assignment(self, pid: str) -> Optional[Assignment]:
         from azure.core.exceptions import ResourceNotFoundError

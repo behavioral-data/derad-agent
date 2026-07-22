@@ -126,6 +126,18 @@ def create_app(db_path=None):
             "Profiles pool file not found at %s — /api/session will find an "
             "empty pool (every claim returns 409)", profiles_path)
 
+    # Invite map: when the store holds a pid->party map, /api/session resolves
+    # party server-side and rejects PIDs that are not on the invite list. When
+    # the map is empty (dev/tests), the ?party= parameter is required as before.
+    try:
+        party_map = get_store().get_party_map()
+    except Exception:
+        party_map = {}
+    app.config["PARTY_MAP"] = party_map
+    if party_map:
+        app.logger.info("Invite map loaded: %d pids (server-side party resolution)",
+                        len(party_map))
+
     @app.after_request
     def _allow_qualtrics_iframe(resp):
         # Permit embedding inside the Qualtrics survey; frame-ancestors is the
@@ -160,7 +172,15 @@ def create_app(db_path=None):
         # filter value. A malformed pid must 400 without cost.
         if not _PID_RE.match(pid):
             return jsonify({"error": "pid must match ^[A-Za-z0-9_-]{1,64}$"}), 400
-        if party is None:
+        invite_map = app.config.get("PARTY_MAP") or {}
+        if invite_map:
+            mapped = invite_map.get(pid)
+            if mapped is None:
+                return jsonify({"error": "this Prolific ID is not on the invite list"}), 403
+            if party is not None and party != mapped:
+                return jsonify({"error": "party mismatch with the invite list"}), 400
+            party = mapped
+        elif party is None:
             return jsonify({"error": "party must be Democrat/Republican (or D/R)"}), 400
         day_i = int(day)
         # Validate the day range BEFORE claiming: the profile pool is finite, and
