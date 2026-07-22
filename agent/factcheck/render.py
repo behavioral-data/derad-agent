@@ -454,16 +454,20 @@ def render(
     on call_claude_json failure, raise on second failure.
 
     `length_key` selects a length profile (prompt guidance + enforced char
-    ceiling). Satirical renders run with a reasoning budget so the register's
-    multi-step comedic reasoning can actually execute before it commits."""
+    ceiling). All tones render with the same high reasoning budget — tone is
+    the study's manipulated variable, so generation parameters are held
+    invariant across registers."""
     if tone not in _TONE_REGISTERS:
         raise ValueError(f"Unknown tone {tone!r}")
     if view.action not in _ACTION_TEMPLATES:
         raise ValueError(f"Unknown action {view.action!r}")
 
     max_chars = min(_LENGTH_PROFILES.get(length_key, _LENGTH_PROFILES[_DEFAULT_LENGTH])[1], X_TWEET_LIMIT)
-    effort = "high" if tone == "satirical" else None
-    render_timeout = 90.0 if effort else 30.0
+    # Tone-invariant generation parameters (study requirement): every register
+    # renders with the same thinking budget and timeout, so no condition's
+    # stimuli get more production compute than another's.
+    effort = "high"
+    render_timeout = 90.0
     state = _state_for(view)
     pivoted = bool(view.pivoted_from and view.pivoted_from != view.action)
     system_prompt = _system_prompt_for(view.action, tone, state, pivoted, length_key)

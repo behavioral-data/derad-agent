@@ -66,3 +66,16 @@ generation; blinded LLM tone-invariance + register-identification QA on all 108Ã
 (method: docs/tone-invariance-check-2026-07-10.md) before fielding. Watch: register
 identifiability (satirical must remain blind-identifiable), fallback-to-neutral rate
 (was 0/15 after the R-5 fix), homework-joke recurrence.
+
+## Addendum (same day): tone-invariant generation parameters
+
+User audit request: all generation parameters apart from the register must be invariant
+across conditions. Audit found two asymmetries â€” reasoning effort (satirical high/earlier
+medium vs none for neutral/agreeable; predates this redesign, introduced in v0.7) and HTTP
+timeout (90s vs 30s). Fixed: ALL tones now render with reasoning_effort="high" and a 90s
+timeout. Verified invariant: model, temperature (1.0 both paths), visible max_tokens
+(8192, non-binding), length profile + enforced 520 cap, sources block, action template,
+base constraints, R-4 lint, retry counts. By-design asymmetries retained: register text
+(the manipulation) and the R-5 cross-tone gate + neutral-fallback (the machinery that
+ENFORCES fact invariance; neutral is its anchor). All 108x3 stimuli re-rendered from
+freezes under these settings.
