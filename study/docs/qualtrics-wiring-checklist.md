@@ -5,8 +5,8 @@ Step-by-step wiring for the three imported surveys in `study/qualtrics_survey/`
 `docs/interface_azure_deployment.md` §7–8. Everything here is Qualtrics-UI work;
 paste-ready snippets are marked with ▶.
 
-Replace `<APP_HOST>` everywhere with the deployed interface host
-(e.g. `derad-study-xxxx.azurewebsites.net`) once §4 of the deployment runbook has run.
+Deployed host: **`postpanel-study.azurewebsites.net`** — replace `<APP_HOST>` with it everywhere
+below. (Named participant-neutrally on purpose; participants can see this domain in the iframe.)
 
 ---
 

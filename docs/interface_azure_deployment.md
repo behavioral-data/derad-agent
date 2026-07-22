@@ -178,7 +178,8 @@ RG=rg-derad-agent
 ACR=azacrspzdzrbtv3v4o
 UAMI_ID=$(az identity show -g $RG -n azidspzdzrbtv3v4o --query id -o tsv)
 UAMI_CLIENT=$(az identity show -g $RG -n azidspzdzrbtv3v4o --query clientId -o tsv)
-APP=derad-study-interface     # ⚠️ must be globally unique across azurewebsites.net — pick/confirm
+APP=postpanel-study           # deployed 2026-07-22; participant-neutral name (participants see the domain).
+                              # NOTE: new-plan quota was 0 in westus — the app runs on the agent's existing B2 plan.
 
 # 1. Build + push the image server-side in ACR (no local Docker needed)
 az acr build --registry $ACR --image derad-study-interface:latest \
