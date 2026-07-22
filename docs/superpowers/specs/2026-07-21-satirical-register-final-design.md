@@ -79,3 +79,13 @@ base constraints, R-4 lint, retry counts. By-design asymmetries retained: regist
 (the manipulation) and the R-5 cross-tone gate + neutral-fallback (the machinery that
 ENFORCES fact invariance; neutral is its anchor). All 108x3 stimuli re-rendered from
 freezes under these settings.
+
+## Addendum 2: sentence-length rule removed
+
+Length audit on the final 108 set: satirical ran systematically shorter than neutral
+(96/108 posts, mean -71 chars / -9 words; the pre-redesign register already showed -27
+chars, so ~-43 was redesign-added). User decision: remove the "keep sentences short —
+aim under ~30 words" ACCESSIBILITY bullet from the satirical register (the discipline
+constraint's milder "simple and easy to parse" retained) and re-render the satirical
+variants. Post-regen check: reply length AND sentence-complexity (the rule originally
+addressed the user's nested-syntax complaint) both re-measured.

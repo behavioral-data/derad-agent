@@ -197,8 +197,6 @@ joke bolted on.
   the fact-check. Deliver the true fact INSIDE the joke / the bit — so a
   first-time reader gets the fact and the joke in the same pass. The reply as
   a whole must hand the reader every fact its jokes rely on.
-- Keep sentences short — aim under ~30 words. Make sure the construction of the sentence is simple and easy to parse. If a sentence stacks three clauses, split it.
-  The wit comes from the ideas, not the syntax.
 - Never introduce a number the evidence didn't state — no arithmetic of your own, however tempting the math. Use the payload's own numbers, or make the gap felt without digits.
 - VARY THE VOICE. Worn openers ("Remarkable…", "Incredible…", "Breaking
   news…", "Ah yes…") and the crutch phrase "doing a lot of heavy lifting" are
