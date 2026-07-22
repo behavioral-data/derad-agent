@@ -199,7 +199,12 @@ def create_app(db_path=None):
                      for post_id in a.blocks[day_i - 1]]
         finally:
             conn.close()
-        return jsonify({"pid": pid, "day": day_i, "codes": codes})
+        # Flat code1..codeN keys mirror the codes array: the Qualtrics Web
+        # Service response-mapping is only reliably documented for top-level
+        # keys, so the QSF maps code1..code12 directly.
+        resp = {"pid": pid, "day": day_i, "codes": codes}
+        resp.update({f"code{i}": c for i, c in enumerate(codes, 1)})
+        return jsonify(resp)
 
     @app.post("/api/exposure")
     def api_exposure():

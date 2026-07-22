@@ -59,6 +59,7 @@ def test_session_claims_and_returns_daily_codes(tmp_path):
     assert r.status_code == 200
     js = r.get_json()
     assert js["day"] == 1 and len(js["codes"]) == 12            # 12 posts/day now
+    assert [js[f"code{i}"] for i in range(1, 13)] == js["codes"]  # flat keys for Qualtrics
     assert "condition" not in js and "post_id" not in js
     day1 = set(js["codes"])
     assert set(c.get("/api/session?pid=PROLIFIC1&party=Democrat&day=1").get_json()["codes"]) == day1
