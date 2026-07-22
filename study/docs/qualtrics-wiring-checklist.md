@@ -12,10 +12,11 @@ below. (Named participant-neutrally on purpose; participants can see this domain
 
 ## 0. How the pieces fit
 
-- **Prolific → Qualtrics:** two party-filtered Prolific studies (Democrat / Republican).
-  Every survey URL carries `PROLIFIC_PID={{%PROLIFIC_PID%}}` plus a hardcoded
-  `party=D` or `party=R`. The Daily Survey is ONE survey reused for all 3 days —
-  the day arrives as a `day=1|2|3` URL parameter on each day's link.
+- **Prolific → Qualtrics:** ONE Prolific study, allowlist of 600 (both parties).
+  Party is resolved **server-side** from the invite map (studypartymap table) — no
+  `party=` parameter needed anywhere; PIDs not on the list get 403. Survey URLs carry
+  `PROLIFIC_PID={{%PROLIFIC_PID%}}`; the Daily Survey is ONE survey reused for all
+  3 days — the day arrives as a `day=1|2|3` URL parameter on each day's link.
 - **Qualtrics → interface:** a Survey Flow **Web Service** element calls
   `/api/session` (server-side, no CORS needed), which claims the participant's
   profile (first call) and returns that day's **12 opaque codes**. The codes feed
@@ -34,14 +35,13 @@ Q2 sits in Trash — leave it there.
 1. **Survey Flow → Add Embedded Data** (drag to the very TOP):
    - `PROLIFIC_PID` — Value: *set from URL parameter* (leave value blank; Qualtrics
      auto-fills from the URL param of the same name)
-   - `party` — blank (from URL)
-   - `day` — blank (from URL)
+   - `day` — blank (from URL). (No `party` field needed — the server resolves it.)
 2. **Survey Flow → Add a Web Service element** (directly below the Embedded Data,
    ABOVE the question block):
    - Method: `GET`
    - ▶ URL:
      ```
-     https://<APP_HOST>/api/session?pid=${e://Field/PROLIFIC_PID}&party=${e://Field/party}&day=${e://Field/day}&token=<DERAD_SESSION_TOKEN value>
+     https://postpanel-study.azurewebsites.net/api/session?pid=${e://Field/PROLIFIC_PID}&day=${e://Field/day}&token=<DERAD_SESSION_TOKEN value>
      ```
      Append `&token=` with the exact `DERAD_SESSION_TOKEN` you set on the App Service (deployment
      runbook §5). This Web Service call runs server-side, so the token never reaches the participant's
@@ -88,21 +88,21 @@ Q2 sits in Trash — leave it there.
 
 ## 4. Prolific setup (per deployment runbook §8)
 
-- Two studies (prescreen: US political affiliation = Democrat / = Republican),
-  228 places each; device screen: desktop only.
+- ONE study, custom allowlist = the 600 selected PIDs, 600 places; device screen:
+  desktop only. Party is server-side; no party-split studies needed.
 - Multi-part structure per study: Part 1 = Pre + Day 1 links (or Pre separately),
   Parts for Day 2 / Day 3 / Post, each pointing at the SAME Qualtrics surveys with
-  ▶ `?PROLIFIC_PID={{%PROLIFIC_PID%}}&party=D&day=2` (adjust party/day per study/part).
+  ▶ `?PROLIFIC_PID={{%PROLIFIC_PID%}}&day=2` (adjust day per part; no party param).
 - Completion codes: one per part, set in each part's end-of-survey redirect.
 
 ## 5. QA pass before opening (no Prolific needed)
 
 1. `https://<APP_HOST>/healthz` → `ok`.
 2. Preview the Daily Survey with a test URL:
-   `...&PROLIFIC_PID=TESTQA1&party=D&day=1` → 12 posts render in iframes; sliders work.
+   `...&PROLIFIC_PID=<an allowlisted test PID>&day=1` (unknown PIDs now get 403) → 12 posts render in iframes; sliders work.
 3. Re-run the same URL → same 12 codes (idempotent claim).
 4. `day=2` for the same PID → 12 different posts, no overlap with day 1.
-5. Missing `party` → the Web Service gets a 400; confirm the survey surfaces a
+5. A non-invited PID → the Web Service gets a 403; confirm the survey surfaces a
    graceful error (add a Branch on `code1` being empty → End of Survey with an
    "please contact the researchers" message).
 6. Check `studyassignments` / `studyexposures` tables for the TEST pid rows,
