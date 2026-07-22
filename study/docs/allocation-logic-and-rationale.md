@@ -165,3 +165,17 @@ Because the allocation is fixed and inspectable before recruitment, the team can
 | RNG seed | 20260716 |
 | Power target | RQ2 confirmatory: d = 0.30, 80%, ANCOVA |
 | Est. Prolific cost | ~$6.4k (recommended rate + attrition buffer) |
+
+---
+
+## Addendum (2026-07-22): fielded pool enlarged to 600 for attrition headroom
+
+The study fields a **600-profile pool** (150 templates × 4 conditions, seed **20260722**)
+instead of the original 456: 300 Democrat + 300 Republican starters, exactly **75 per
+party × condition cell**, every post seen exactly **50× per condition** (200× total).
+All §5 guarantees hold identically (verifier report committed). Rationale: start all
+recruits as one same-calendar cohort rather than attrition-replacement waves; at the
+expected ~76% three-day retention, ~456 completers ≈ the power-analysis N. Final cell
+sizes float with attrition; analysis uses mixed-effects models (crossed random effects
+for participant and post), which do not require balanced cells. Differential attrition
+by condition is monitored and reported (rates by arm + baseline-covariate dropout tests).

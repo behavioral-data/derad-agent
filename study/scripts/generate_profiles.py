@@ -18,7 +18,7 @@ _DEFAULT_DB = os.path.join(_HERE, "..", "data", "study.db")
 _DEFAULT_OUT = os.path.join(_HERE, "..", "data", "profiles")
 
 
-def run(db_path, out_dir):
+def run(db_path, out_dir, n_templates=None, seed=None):
     os.makedirs(out_dir, exist_ok=True)
     conn = dbmod.connect(db_path)
     try:
@@ -38,15 +38,18 @@ def run(db_path, out_dir):
                 code_cache[key] = code
             return code_cache[key]
 
-        profiles, claim_orders = generate_profiles(cells, code_lookup, seed=SEED)
-        report = verify_balance(profiles, cells)
+        kw = {}
+        if n_templates: kw["n_templates"] = n_templates
+        eff_seed = seed or SEED
+        profiles, claim_orders = generate_profiles(cells, code_lookup, seed=eff_seed, **kw)
+        report = verify_balance(profiles, cells, **kw)
     finally:
         conn.close()
 
     # profiles.json (canonical)
     with open(os.path.join(out_dir, "profiles.json"), "w") as f:
         json.dump({
-            "seed": SEED,
+            "seed": eff_seed,
             "claim_orders": claim_orders,
             "profiles": [vars(p) for p in profiles],
         }, f)
@@ -66,7 +69,7 @@ def run(db_path, out_dir):
                     i += 1
 
     # profiles_report.md (balance verification)
-    lines = [f"# Profiles balance report (seed {SEED})", "",
+    lines = [f"# Profiles balance report (seed {eff_seed})", "",
              f"Profiles: {len(profiles)}  |  conditions: {', '.join(CONDITIONS)}", ""]
     for k, v in report.items():
         lines.append(f"- {k}: {'OK' if v else 'FAIL'}")
@@ -79,8 +82,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default=_DEFAULT_DB)
     ap.add_argument("--out-dir", default=_DEFAULT_OUT)
+    ap.add_argument("--n-templates", type=int, default=None,
+                    help="Override template count (must satisfy the divisibility invariants; default from spec)")
+    ap.add_argument("--seed", type=int, default=None, help="Override the generation seed")
     args = ap.parse_args()
-    report = run(args.db, args.out_dir)
+    report = run(args.db, args.out_dir, n_templates=args.n_templates, seed=args.seed)
     print("balance:", "OK" if report["ok"] else "FAIL", "->", args.out_dir)
 
 

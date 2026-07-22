@@ -1,6 +1,6 @@
-# Profiles balance report (seed 20260716)
+# Profiles balance report (seed 20260722)
 
-Profiles: 456  |  conditions: neutral, agreeable, satirical, control
+Profiles: 600  |  conditions: neutral, agreeable, satirical, control
 
 - count: OK
 - n_templates: OK
