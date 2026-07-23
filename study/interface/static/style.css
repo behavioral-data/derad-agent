@@ -408,3 +408,8 @@ img.avatar { object-fit: cover; }
   .desktop-gate svg { width: 40px; height: 40px; fill: var(--text); }
   .desktop-gate p { font-size: 17px; color: var(--text-dim); max-width: 300px; }
 }
+
+/* Embed mode (?compact=1): hide the right column, center left rail + thread.
+   Used by the Qualtrics iframe so the layout is landscape at ~950px. */
+.compact .aside { display: none; }
+.compact .layout { max-width: 900px; }
