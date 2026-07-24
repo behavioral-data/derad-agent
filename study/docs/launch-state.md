@@ -7,7 +7,7 @@ Single source of truth for the Prolific launch. Update this file as steps comple
 - **Stimuli FINAL + committed**: 108 posts × 3 tones, v0.8 verdicts, final satirical register
   (spec `docs/superpowers/specs/2026-07-21-satirical-register-final-design.md`), tone-invariant
   generation params (effort=high/90s all tones). Blinded QA: 0 severity-2, register-ID
-  neutral 108/108, satirical 98/108, agreeable 75/108. Two flagged posts fixed via re-runs
+  neutral 108/108, satirical 98/108, agreeable 73/108. Two flagged posts fixed via re-runs
   (`2e6e383`). Decisions log: `study/docs/stimulus-decisions.md` (DMCA post KEPT).
 - **Interface LIVE**: `https://postpanel-study.azurewebsites.net` (App Service, rg-derad-agent,
   shared B2 plan; image `derad-study-interface:latest` in ACR `azacrspzdzrbtv3v4o`; rebuild via
