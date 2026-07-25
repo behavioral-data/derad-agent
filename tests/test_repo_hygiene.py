@@ -183,14 +183,28 @@ def test_no_large_tracked_files():
 # 4. .gitignore covers scratch / generated / oversized local data
 # ---------------------------------------------------------------------------
 
+# Concrete scratch/generated paths that must be ignored. We check representative
+# files under .claude/ rather than the bare directory: .claude/ legitimately
+# holds *tracked* project config (agents, hooks, settings.json), and git cannot
+# report a directory with tracked contents as ignored. The rule
+# (`.claude/*` with an allowlist) still auto-ignores every scratch file.
 MUST_BE_IGNORED = [
-    ".claude/",
+    ".claude/scratch-example.md",  # representative of session scratch under .claude/
+    ".claude/cleanup-example.md",
     ".playwright-mcp/",
     "paper/",
     "tsv_generation/cn_data_20260630/",
     "tsv_generation/cn_data_20260630_run.out",
     "example.out",  # representative of the *.out rule
     "final_final_output.csv",
+]
+
+# The committed project config under .claude/ must NOT be ignored (it ships with
+# the artifact and documents the dev tooling).
+MUST_STAY_TRACKED = [
+    ".claude/settings.json",
+    ".claude/agents/",
+    ".claude/hooks/",
 ]
 
 
@@ -201,6 +215,15 @@ def test_gitignore_covers_generated_and_scratch():
         if _git("check-ignore", "-q", p, check=False).returncode != 0
     ]
     assert not not_ignored, f".gitignore does not cover: {not_ignored}"
+
+    wrongly_ignored = [
+        p
+        for p in MUST_STAY_TRACKED
+        if _git("check-ignore", "-q", p, check=False).returncode == 0
+    ]
+    assert not wrongly_ignored, (
+        f"committed .claude/ project config is being ignored: {wrongly_ignored}"
+    )
 
 
 # ---------------------------------------------------------------------------
