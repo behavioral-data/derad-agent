@@ -59,6 +59,10 @@ mention
                 (agent/factcheck/render.py)
 ```
 
+### Two engines
+
+The staged pipeline above is the default (`DERAD_FACTCHECK_ENGINE=staged`) and the engine the live bot ran. The **main study** generated its stimuli with an alternative **evidence-first loop engine** (`agent/factcheck/loop.py`, selected with `--engine loop`). It replaces the fixed stages 2–5 with a single bounded agentic loop: the model runs its own web searches, deepens the one to three load-bearing threads that decide the verdict, checks the strongest case against its tentative conclusion, and finalizes — followed by an independent audit that can revise or downgrade the verdict. The loop infers the reply action from the post itself and applies the same source-quality tiers. Both engines share the freeze → render boundary (stages 6–7), so tone rendering is identical.
+
 ## Repository structure
 
 ```
@@ -71,24 +75,33 @@ agent/
 │   ├── dedup.py           — first-seen / once-only guard for mentions
 │   ├── survey.py, utils.py, metrics.py
 │   └── templates/         — about.html, info.html, dashboard.html
-├── factcheck/       The pipeline. One file per stage.
-│   ├── pipeline.py        — orchestrator
-│   ├── multimodal.py      — Stage 1.5
-│   ├── extract.py         — Stage 2+3
-│   ├── verify.py, search.py  — Stage 4
-│   ├── reconcile.py, sources.py, verdict.py  — Stage 4.5
-│   ├── audit.py           — Stage 5
-│   ├── freeze.py          — Stage 6
-│   ├── render.py          — Stage 7
-│   ├── schema.py, context.py, llm.py
+├── factcheck/       The fact-check pipeline (both engines).
+│   ├── pipeline.py, pipeline_loop.py  — staged / loop orchestrators
+│   ├── multimodal.py, video.py        — media extraction (Stage 1.5)
+│   ├── extract.py, verify.py, search.py, reconcile.py, audit.py  — staged stages 2–5
+│   ├── loop.py, loop_tools.py, draft.py, verifier.py, snapshot.py — evidence-first loop engine
+│   ├── sources.py, verdict.py         — source-quality tiers + outcome logic
+│   ├── freeze.py                      — Stage 6 (freeze verdict to disk)
+│   ├── render.py, render_lint.py      — Stage 7 (tone rendering + lints)
+│   ├── schema.py, context.py, llm.py, prompt_store.py, replay.py
 │   └── __main__.py        — single-claim CLI driver
 ├── cli/             Operational CLIs (register / list / export / poll / etc.)
 ├── llm/             LLM and X-client config, .env loader
 └── shared/          Small utilities (text, HTTP)
+study/               All mock-X study material (see study/README.md)
+├── data/            108-post stimulus set: posts / notes / replies / media / profiles
+├── interface/       Mock-X Flask interface participants rate posts in
+├── viewpoint/       Community Notes viewpoint-polarity scoring pipeline
+├── post_selection/  Candidate-post selection + participant-assignment algorithms
+├── qualtrics_survey/  Qualtrics survey definitions (.qsf)
+├── data_analysis/   Pilot survey analysis notebook + figures
+├── scripts/         batch_generate_replies.py (retrospective stimulus generation)
+└── docs/            Allocation logic, power analysis, stimulus decisions, specs
 infra/               Bicep templates (App Service, Storage, Key Vault, etc.)
 scripts/             setup-env.sh, smoke tests, probes, ops scripts
-tests/               pytest suite (~173 tests)
-docs/                Architecture notes, pipeline walkthrough, render inputs
+tests/               pytest suite (436 tests, incl. repo-hygiene gates)
+docs/                Architecture, database schema, design specs (superpowers/);
+                     dated working notes archived under docs/archive/
 ```
 
 ## Local development
@@ -155,9 +168,7 @@ Each registered participant is assigned to one of three conditions, balanced acr
 | `neutral` | Plain, measured fact-checker voice |
 | `satirical` | Deadpan; exposes the claim's tension through irony |
 
-The frozen verdict is invariant under tone — Stage 7 reads the same payload and only swaps surface register.
-
-The main study used an evidence-first agentic variant of this pipeline (`agent/factcheck/loop.py`), in which the model drives its own search, deepening, and adversarial-check loop before finalizing a verdict, rather than the fixed staged sequence above. Both engines share the freeze/render boundary, so tone rendering is identical.
+The frozen verdict is invariant under tone — Stage 7 reads the same payload and only swaps surface register. The controlled study adds a fourth arm: a Community Notes control, where the post carries its real crowd-written note instead of a bot reply (see [Reproducing the studies](#reproducing-the-studies)).
 
 ## Reproducing the studies
 
