@@ -420,7 +420,7 @@ class TestTablesEventsStoreSchema:
             queries=["q1"],
         )
         store.write_event(ev)
-        entity = events_client.create_entity.call_args[0][0]
+        entity = events_client.upsert_entity.call_args[0][0]
         assert entity["PartitionKey"] == "2026-05"
         assert entity["RowKey"].startswith("2026-05-18T12:00:00")
         assert entity["RowKey"].endswith("_abc")
@@ -458,7 +458,7 @@ class TestTablesEventsStoreSchema:
             parent_text=big, reply_text=big,
         )
         store.write_event(ev)
-        entity = events_client.create_entity.call_args[0][0]
+        entity = events_client.upsert_entity.call_args[0][0]
         assert len(entity["parent_text"]) <= 32_000
         assert len(entity["reply_text"]) <= 32_000
 
