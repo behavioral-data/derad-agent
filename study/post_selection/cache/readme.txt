@@ -1,1 +1,1 @@
-Directory to cache retrieved tweets from X API
+Local cache for post-selection API responses. Contents are git-ignored.

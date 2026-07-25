@@ -58,6 +58,5 @@ tsv_generation/
 .superpowers/
 .venv*/
 **/.venv*/
-study/paper/
 study/data_analysis/
 *.out
