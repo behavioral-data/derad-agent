@@ -99,14 +99,29 @@ rating_matrix_plan.md
 Screenshot*.png
 keys.md
 
-# Personal Claude Code settings (project-level config in .claude/ is committed)
-.claude/settings.local.json
-
-# Operational skills coupled to live infra (KV name, deploy targets) — kept local
-.claude/skills/
+# Claude Code: ignore everything under .claude/ (session scratch, analysis
+# notes, personal settings, infra-coupled skills) EXCEPT the committed
+# project config. New scratch files are ignored automatically; to add new
+# project config, extend the allowlist below or `git add -f`.
+.claude/*
+!.claude/agents/
+!.claude/hooks/
+!.claude/settings.json
 
 # Internal project tracking — not for public consumption
 todo.md
 
 # mock-x study interface — generated, read-only DB artifact
 study/data/study.db
+
+# Manuscript working copy — not part of the code artifact
+paper/
+
+# Playwright MCP browser scratch
+.playwright-mcp/
+
+# Large local data snapshots and their run logs (re-downloadable; see
+# tsv_generation/download_cn_snapshot.sh). Never commit the multi-GB snapshots.
+tsv_generation/cn_data_*/
+*.out
+final_final_output.csv
