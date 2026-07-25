@@ -157,6 +157,45 @@ Each registered participant is assigned to one of three conditions, balanced acr
 
 The frozen verdict is invariant under tone — Stage 7 reads the same payload and only swaps surface register.
 
+The main study used an evidence-first agentic variant of this pipeline (`agent/factcheck/loop.py`), in which the model drives its own search, deepening, and adversarial-check loop before finalizing a verdict, rather than the fixed staged sequence above. Both engines share the freeze/render boundary, so tone rendering is identical.
+
+## Reproducing the studies
+
+Study materials, code, and generated stimuli live under `study/`:
+
+- `study/data/` — the fielded stimulus set: 108 Community-Notes-flagged X posts (`posts.csv`), the crowd-written note shown in the control condition (`notes.csv`), the 324 generated bot replies across the three tones (`replies.csv`), the post media, and the pre-generated participant allocation (`profiles/`).
+- `study/interface/` — the mock-X interface participants rate posts in, plus its build script (`build_db.py`).
+- `study/post_selection/` and `study/viewpoint/` — how candidate posts were pulled from Community Notes and scored for viewpoint polarity.
+- `study/data_analysis/` — the pilot analysis notebook and its figures.
+- `study/docs/` — the allocation logic, power analysis, and stimulus decisions.
+
+To regenerate the 108-post stimulus set end to end:
+
+```bash
+# 1. Download the Community Notes snapshot (re-downloadable; see the script header)
+bash tsv_generation/download_cn_snapshot.sh
+
+# 2. Score notes for viewpoint polarity, then select the topic × polarity cells
+#    (study/viewpoint/, study/post_selection/)
+
+# 3. Generate the three tone replies for every post from frozen verdicts
+python -m study.scripts.batch_generate_replies --engine loop --study-mode
+```
+
+Run the full test suite, including the repository-hygiene checks that gate a public release, with:
+
+```bash
+python -m pytest -q
+```
+
+## Data availability
+
+This repository is designed to be reproducible without redistributing anything sensitive.
+
+- **Participant data is excluded.** No participant identifiers, recruitment allowlists, survey responses, or the pilot roster are committed. The pilot analysis notebook (`study/data_analysis/daily_survey.ipynb`) ships with its cell outputs cleared, and its raw inputs (`study/data_analysis/input/`) are git-ignored. Reproducing the pilot figures requires the raw survey export, which is held separately under the study's data-management plan.
+- **The Community Notes snapshots are not committed.** They are multi-gigabyte public releases, re-downloadable with `tsv_generation/download_cn_snapshot.sh` (the paper's stimuli use the 2026-06-30 snapshot).
+- **Stimulus media is included** (`study/data/media/`) so the mock-X interface renders exactly as participants saw it.
+
 ## Research and ethics
 
 This bot is operated by researchers at the University of Washington under an **IRB-exempt** determination (Study ID `STUDY00025610`). The bot's `/about` page (`agent/app/templates/about.html`) carries the public disclosure required for AI-bot identification, including the contact email for the UW Human Subjects Division (`hsdinfo@uw.edu`).
