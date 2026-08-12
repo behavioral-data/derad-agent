@@ -1,5 +1,6 @@
 # Participant data
 study/data_analysis/input
+study/data_analysis/pilot/input
 
 # Python cache files
 __pycache__/
